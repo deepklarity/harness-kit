@@ -1,0 +1,30 @@
+{
+  "task_count": 7,
+  "comment_count": 42,
+  "history_count": 64,
+  "status_distribution": {
+    "REVIEW": 7
+  },
+  "total_tokens": 547337,
+  "total_input_tokens": 354911,
+  "total_output_tokens": 11753,
+  "total_duration_ms": 297320.7,
+  "harnesses_used": [
+    "claude",
+    "claude-sonnet-4-5",
+    "codex",
+    "gemini",
+    "gemini-2.5-flash",
+    "glm",
+    "gpt-5.3-codex",
+    "minimax",
+    "minimax-coding-plan/MiniMax-M2.5",
+    "qwen",
+    "qwen3-coder",
+    "zai-coding-plan/glm-4.7"
+  ],
+  "has_dependencies": true,
+  "dependency_tasks": [
+    198
+  ]
+}
