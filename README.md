@@ -50,10 +50,10 @@ Start the backend, frontend and celery worker with:
 ./dev.sh
 ```
 
-Harness-Kit has a cli tool needed to execute agents (install globally using pipx).
+Harness-Kit has a cli tool needed to execute agents.
 ```
- pip install pipx 
- pipx install ./odin
+cd odin/
+pip install -e . 
 ```
 
 Opens at [localhost:5173](http://localhost:5173).
