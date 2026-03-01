@@ -1,0 +1,376 @@
+[
+  {
+    "id": 192,
+    "title": "Qwen table",
+    "description": "Create the directory `smoke_output/` if it doesn't exist, then create the file `smoke_output/qwen_table.html` containing a complete HTML snippet with:\n\n1. A heading `<h2>Qwen Agent Table</h2>`\n2. A single HTML `<table>` with 4 columns: Name, Role, Score, Notes\n3. 3 rows of fictional data (make up plausible names, roles, numeric scores, and short notes)\n4. Inline CSS (`<style>` tag) using a **blue color theme** \u2014 blue header background (#2563eb or similar), light blue alternating row backgrounds, white text on headers, clean borders\n5. The file should be a valid HTML fragment (not a full page \u2014 no `<html>` or `<body>` tags needed, just the `<style>`, `<h2>`, and `<table>` elements)\n\nWrite the file to: `smoke_output/qwen_table.html`",
+    "status": "REVIEW",
+    "priority": "MEDIUM",
+    "complexity": "low",
+    "model_name": "qwen3-coder",
+    "board_id": 1,
+    "spec_id": 38,
+    "depends_on": [],
+    "metadata": {
+      "reasoning": "Simple HTML generation task. Qwen is the cheapest available agent with 100% remaining quota and is first in routing priority.",
+      "taskit_id": 192,
+      "complexity": "low",
+      "last_usage": {
+        "input_tokens": 107510,
+        "total_tokens": 108835,
+        "output_tokens": 1325,
+        "cache_read_input_tokens": 105183
+      },
+      "started_at": 1771854171.349421,
+      "assumptions": [
+        "smoke_output/ directory will be created if it doesn't exist"
+      ],
+      "full_output": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated `smoke_output/qwen_table.html` with a styled HTML table featuring a blue color theme (#2563eb header), 4 columns (Name, Role, Score, Notes), and 3 rows of fictional team member data with alternating row backgrounds.\n-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated `smoke_output/qwen_table.html` with a styled HTML table featuring a blue color theme (#2563eb header), 4 columns (Name, Role, Score, Notes), and 3 rows of fictional team member data with alternating row backgrounds.",
+      "working_dir": "/Users/d/work/tmp/harness-kit/odin/temp_test_dir",
+      "tmux_session": "odin-192",
+      "quota_snapshot": {
+        "usage_pct": 0.0,
+        "remaining_pct": 100.0
+      },
+      "selected_model": "qwen3-coder",
+      "suggested_agent": "qwen",
+      "expected_outputs": [
+        "smoke_output/qwen_table.html"
+      ],
+      "last_duration_ms": 41224.6,
+      "required_capabilities": [
+        "coding"
+      ]
+    },
+    "created_by": "odin@harness.kit",
+    "assignee_id": 1,
+    "assignee_email": "qwen@odin.agent",
+    "assignee_name": "qwen",
+    "dev_eta_seconds": null,
+    "label_ids": [],
+    "label_names": [],
+    "created_at": "2026-02-23T13:42:48.984387+00:00",
+    "last_updated_at": "2026-02-23T13:43:33.290643+00:00"
+  },
+  {
+    "id": 193,
+    "title": "Gemini table",
+    "description": "Create the directory `smoke_output/` if it doesn't exist, then create the file `smoke_output/gemini_table.html` containing a complete HTML snippet with:\n\n1. A heading `<h2>Gemini Agent Table</h2>`\n2. A single HTML `<table>` with 4 columns: Name, Role, Score, Notes\n3. 3 rows of fictional data (make up plausible names, roles, numeric scores, and short notes)\n4. Inline CSS (`<style>` tag) using a **green color theme** \u2014 green header background (#16a34a or similar), light green alternating row backgrounds, white text on headers, clean borders\n5. The file should be a valid HTML fragment (not a full page \u2014 no `<html>` or `<body>` tags needed, just the `<style>`, `<h2>`, and `<table>` elements)\n\nWrite the file to: `smoke_output/gemini_table.html`",
+    "status": "REVIEW",
+    "priority": "MEDIUM",
+    "complexity": "low",
+    "model_name": "gemini-2.5-flash",
+    "board_id": 1,
+    "spec_id": 38,
+    "depends_on": [],
+    "metadata": {
+      "reasoning": "Simple HTML generation task. Gemini is a low-cost agent with 93.3% remaining quota, assigned per the spec.",
+      "taskit_id": 193,
+      "complexity": "low",
+      "last_usage": {
+        "input_tokens": 74425,
+        "total_tokens": 75277,
+        "output_tokens": 541
+      },
+      "started_at": 1771854171.349579,
+      "assumptions": [
+        "smoke_output/ directory will be created if it doesn't exist"
+      ],
+      "full_output": "-------\nODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated the file\n `smoke_output/gemini_table.html` containing an HTML table with a green color theme and fictional agent data.",
+      "working_dir": "/Users/d/work/tmp/harness-kit/odin/temp_test_dir",
+      "tmux_session": "odin-193",
+      "quota_snapshot": {
+        "usage_pct": 6.7,
+        "remaining_pct": 93.3
+      },
+      "selected_model": "gemini-2.5-flash",
+      "suggested_agent": "gemini",
+      "expected_outputs": [
+        "smoke_output/gemini_table.html"
+      ],
+      "last_duration_ms": 23987.8,
+      "required_capabilities": [
+        "coding"
+      ]
+    },
+    "created_by": "odin@harness.kit",
+    "assignee_id": 2,
+    "assignee_email": "gemini@odin.agent",
+    "assignee_name": "gemini",
+    "dev_eta_seconds": null,
+    "label_ids": [],
+    "label_names": [],
+    "created_at": "2026-02-23T13:42:49.209936+00:00",
+    "last_updated_at": "2026-02-23T13:43:16.044039+00:00"
+  },
+  {
+    "id": 194,
+    "title": "Claude table",
+    "description": "Create the directory `smoke_output/` if it doesn't exist, then create the file `smoke_output/claude_table.html` containing a complete HTML snippet with:\n\n1. A heading `<h2>Claude Agent Table</h2>`\n2. A single HTML `<table>` with 4 columns: Name, Role, Score, Notes\n3. 3 rows of fictional data (make up plausible names, roles, numeric scores, and short notes)\n4. Inline CSS (`<style>` tag) using a **purple color theme** \u2014 purple header background (#7c3aed or similar), light purple alternating row backgrounds, white text on headers, clean borders\n5. The file should be a valid HTML fragment (not a full page \u2014 no `<html>` or `<body>` tags needed, just the `<style>`, `<h2>`, and `<table>` elements)\n\nWrite the file to: `smoke_output/claude_table.html`",
+    "status": "REVIEW",
+    "priority": "MEDIUM",
+    "complexity": "low",
+    "model_name": "claude-sonnet-4-5",
+    "board_id": 1,
+    "spec_id": 38,
+    "depends_on": [],
+    "metadata": {
+      "reasoning": "Simple HTML generation task. Claude is assigned per the spec. Despite higher cost tier, the task is low complexity so a cheap model will be auto-selected.",
+      "taskit_id": 194,
+      "complexity": "low",
+      "last_usage": {
+        "input_tokens": 1782,
+        "total_tokens": 4381,
+        "output_tokens": 2599,
+        "cache_read_input_tokens": 265151,
+        "cache_creation_input_tokens": 16624
+      },
+      "started_at": 1771854201.420467,
+      "assumptions": [
+        "smoke_output/ directory will be created if it doesn't exist"
+      ],
+      "full_output": "I'll help you create the HTML table with a purple color theme. Let me start by posting a status update, then create the directory and file.\nNow I'll create the directory and the HTML file:\nLet me check the current directory and create the subdirectory correctly:\nGood! The `smoke_output/` directory already exists. Now I'll create the HTML file:\nPerfect! Now let me verify the file was created correctly:\nExcellent! Now I'll post the proof comment with the file path:\n`\u2605 Insight \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`\n**Purple color theme implementation**: The CSS uses a gradient header (`#7c3aed` to `#6d28d9`), alternating light purple row backgrounds (`#faf5ff` and `#f3e8ff`), and a hover state (`#e9d5ff`) to create visual hierarchy and interactivity. This follows a progressive disclosure pattern where the most important information (headers) gets the strongest color treatment.\n\n**HTML fragment structure**: The file is a valid HTML snippet (not a full page) that can be embedded in any HTML document. This modular approach is common in component-based web development and makes the file reusable across different contexts.\n\n**CSS box-shadow for depth**: The subtle shadow (`rgba(124, 58, 237, 0.15)`) creates visual separation from the background, improving readability without overwhelming the design.\n`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`\n\n-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated smoke_output/claude_table.html with purple-themed HTML table containing 3 fictional agent records with Name, Role, Score, and Notes columns using inline CSS styling.\n`\u2605 Insight \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`\n**Purple color theme implementation**: The CSS uses a gradient header (`#7c3aed` to `#6d28d9`), alternating light purple row backgrounds (`#faf5ff` and `#f3e8ff`), and a hover state (`#e9d5ff`) to create visual hierarchy and interactivity. This follows a progressive disclosure pattern where the most important information (headers) gets the strongest color treatment.\n\n**HTML fragment structure**: The file is a valid HTML snippet (not a full page) that can be embedded in any HTML document. This modular approach is common in component-based web development and makes the file reusable across different contexts.\n\n**CSS box-shadow for depth**: The subtle shadow (`rgba(124, 58, 237, 0.15)`) creates visual separation from the background, improving readability without overwhelming the design.\n`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`\n\n-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated smoke_output/claude_table.html with purple-themed HTML table containing 3 fictional agent records with Name, Role, Score, and Notes columns using inline CSS styling.",
+      "working_dir": "/Users/d/work/tmp/harness-kit/odin/temp_test_dir",
+      "tmux_session": "odin-194",
+      "quota_snapshot": {
+        "usage_pct": 12.0,
+        "remaining_pct": 88.0
+      },
+      "selected_model": "claude-sonnet-4-5",
+      "suggested_agent": "claude",
+      "expected_outputs": [
+        "smoke_output/claude_table.html"
+      ],
+      "last_duration_ms": 66608.7,
+      "required_capabilities": [
+        "coding"
+      ]
+    },
+    "created_by": "odin@harness.kit",
+    "assignee_id": 4,
+    "assignee_email": "claude@odin.agent",
+    "assignee_name": "claude",
+    "dev_eta_seconds": null,
+    "label_ids": [],
+    "label_names": [],
+    "created_at": "2026-02-23T13:42:49.371872+00:00",
+    "last_updated_at": "2026-02-23T13:44:28.773748+00:00"
+  },
+  {
+    "id": 195,
+    "title": "MiniMax table",
+    "description": "Create the directory `smoke_output/` if it doesn't exist, then create the file `smoke_output/minimax_table.html` containing a complete HTML snippet with:\n\n1. A heading `<h2>MiniMax Agent Table</h2>`\n2. A single HTML `<table>` with 4 columns: Name, Role, Score, Notes\n3. 3 rows of fictional data (make up plausible names, roles, numeric scores, and short notes)\n4. Inline CSS (`<style>` tag) using an **orange color theme** \u2014 orange header background (#ea580c or similar), light orange alternating row backgrounds, white text on headers, clean borders\n5. The file should be a valid HTML fragment (not a full page \u2014 no `<html>` or `<body>` tags needed, just the `<style>`, `<h2>`, and `<table>` elements)\n\nWrite the file to: `smoke_output/minimax_table.html`",
+    "status": "REVIEW",
+    "priority": "MEDIUM",
+    "complexity": "low",
+    "model_name": "minimax-coding-plan/MiniMax-M2.5",
+    "board_id": 1,
+    "spec_id": 38,
+    "depends_on": [],
+    "metadata": {
+      "reasoning": "Simple HTML generation task. MiniMax is a low-cost agent with 100% remaining quota, assigned per the spec.",
+      "taskit_id": 195,
+      "complexity": "low",
+      "last_usage": {
+        "input_tokens": 442,
+        "total_tokens": 74564,
+        "output_tokens": 890
+      },
+      "started_at": 1771854201.4206688,
+      "assumptions": [
+        "smoke_output/ directory will be created if it doesn't exist"
+      ],
+      "full_output": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated smoke_output directory and smoke_output/minimax_table.html containing an HTML fragment with an orange-themed table displaying 3 fictional MiniMax agent records with Name, Role, Score, and Notes columns.\n-------ODIN-STATUS-------",
+      "working_dir": "/Users/d/work/tmp/harness-kit/odin/temp_test_dir",
+      "tmux_session": "odin-195",
+      "quota_snapshot": {
+        "usage_pct": 0.0,
+        "remaining_pct": 100.0
+      },
+      "selected_model": "minimax-coding-plan/MiniMax-M2.5",
+      "suggested_agent": "minimax",
+      "expected_outputs": [
+        "smoke_output/minimax_table.html"
+      ],
+      "last_duration_ms": 28506.3,
+      "required_capabilities": [
+        "coding"
+      ]
+    },
+    "created_by": "odin@harness.kit",
+    "assignee_id": 3,
+    "assignee_email": "minimax@odin.agent",
+    "assignee_name": "minimax",
+    "dev_eta_seconds": null,
+    "label_ids": [],
+    "label_names": [],
+    "created_at": "2026-02-23T13:42:49.493591+00:00",
+    "last_updated_at": "2026-02-23T13:43:50.651474+00:00"
+  },
+  {
+    "id": 196,
+    "title": "Codex table",
+    "description": "Create the directory `smoke_output/` if it doesn't exist, then create the file `smoke_output/codex_table.html` containing a complete HTML snippet with:\n\n1. A heading `<h2>Codex Agent Table</h2>`\n2. A single HTML `<table>` with 4 columns: Name, Role, Score, Notes\n3. 3 rows of fictional data (make up plausible names, roles, numeric scores, and short notes)\n4. Inline CSS (`<style>` tag) using a **red color theme** \u2014 red header background (#dc2626 or similar), light red alternating row backgrounds, white text on headers, clean borders\n5. The file should be a valid HTML fragment (not a full page \u2014 no `<html>` or `<body>` tags needed, just the `<style>`, `<h2>`, and `<table>` elements)\n\nWrite the file to: `smoke_output/codex_table.html`",
+    "status": "REVIEW",
+    "priority": "MEDIUM",
+    "complexity": "low",
+    "model_name": "gpt-5.3-codex",
+    "board_id": 1,
+    "spec_id": 38,
+    "depends_on": [],
+    "metadata": {
+      "reasoning": "Simple HTML generation task. Codex is a medium-cost agent with 96% remaining quota, assigned per the spec.",
+      "taskit_id": 196,
+      "complexity": "low",
+      "last_usage": {
+        "input_tokens": 57971,
+        "total_tokens": 59119,
+        "output_tokens": 1148
+      },
+      "started_at": 1771854216.245368,
+      "assumptions": [
+        "smoke_output/ directory will be created if it doesn't exist"
+      ],
+      "full_output": "Creating `smoke_output/` and writing `smoke_output/codex_table.html` as an HTML fragment with the requested red-themed styled table. I\u2019ll then post a proof comment with the created file path.\nWriting the file now with inline CSS and the required table structure/content.\nPosting proof to TaskIt with the created file path, then I\u2019ll return the required ODIN status block.\n-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated `smoke_output/` and wrote `smoke_output/codex_table.html` as a valid HTML fragment containing the requested heading, red-themed styled 4-column table, and 3 fictional data rows. Posted proof to TaskIt with the created file path.",
+      "working_dir": "/Users/d/work/tmp/harness-kit/odin/temp_test_dir",
+      "tmux_session": "odin-196",
+      "quota_snapshot": {
+        "usage_pct": 4.0,
+        "remaining_pct": 96.0
+      },
+      "selected_model": "gpt-5.3-codex",
+      "suggested_agent": "codex",
+      "expected_outputs": [
+        "smoke_output/codex_table.html"
+      ],
+      "last_duration_ms": 33284.1,
+      "required_capabilities": [
+        "coding"
+      ]
+    },
+    "created_by": "odin@harness.kit",
+    "assignee_id": 7,
+    "assignee_email": "codex@odin.agent",
+    "assignee_name": "codex",
+    "dev_eta_seconds": null,
+    "label_ids": [],
+    "label_names": [],
+    "created_at": "2026-02-23T13:42:49.653896+00:00",
+    "last_updated_at": "2026-02-23T13:44:10.310658+00:00"
+  },
+  {
+    "id": 197,
+    "title": "GLM table",
+    "description": "Create the directory `smoke_output/` if it doesn't exist, then create the file `smoke_output/glm_table.html` containing a complete HTML snippet with:\n\n1. A heading `<h2>GLM Agent Table</h2>`\n2. A single HTML `<table>` with 4 columns: Name, Role, Score, Notes\n3. 3 rows of fictional data (make up plausible names, roles, numeric scores, and short notes)\n4. Inline CSS (`<style>` tag) using a **teal color theme** \u2014 teal header background (#0d9488 or similar), light teal alternating row backgrounds, white text on headers, clean borders\n5. The file should be a valid HTML fragment (not a full page \u2014 no `<html>` or `<body>` tags needed, just the `<style>`, `<h2>`, and `<table>` elements)\n\nWrite the file to: `smoke_output/glm_table.html`",
+    "status": "REVIEW",
+    "priority": "MEDIUM",
+    "complexity": "low",
+    "model_name": "zai-coding-plan/glm-4.7",
+    "board_id": 1,
+    "spec_id": 38,
+    "depends_on": [],
+    "metadata": {
+      "reasoning": "Simple HTML generation task. GLM is a low-cost agent with 99% remaining quota, assigned per the spec.",
+      "taskit_id": 197,
+      "complexity": "low",
+      "last_usage": {
+        "input_tokens": 676,
+        "total_tokens": 105199,
+        "output_tokens": 1301
+      },
+      "started_at": 1771854236.216498,
+      "assumptions": [
+        "smoke_output/ directory will be created if it doesn't exist"
+      ],
+      "full_output": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated smoke_output/glm_table.html with teal-themed HTML table (Name, Role, Score, Notes columns) and 3 rows of fictional agent data",
+      "working_dir": "/Users/d/work/tmp/harness-kit/odin/temp_test_dir",
+      "tmux_session": "odin-197",
+      "quota_snapshot": {
+        "usage_pct": 1.0,
+        "remaining_pct": 99.0
+      },
+      "selected_model": "zai-coding-plan/glm-4.7",
+      "suggested_agent": "glm",
+      "expected_outputs": [
+        "smoke_output/glm_table.html"
+      ],
+      "last_duration_ms": 53154.7,
+      "required_capabilities": [
+        "coding"
+      ]
+    },
+    "created_by": "odin@harness.kit",
+    "assignee_id": 8,
+    "assignee_email": "glm@odin.agent",
+    "assignee_name": "glm",
+    "dev_eta_seconds": null,
+    "label_ids": [],
+    "label_names": [],
+    "created_at": "2026-02-23T13:42:49.768821+00:00",
+    "last_updated_at": "2026-02-23T13:44:50.093229+00:00"
+  },
+  {
+    "id": 198,
+    "title": "Assemble report",
+    "description": "Read the following 6 HTML table files from the `smoke_output/` directory:\n\n- `smoke_output/qwen_table.html`\n- `smoke_output/gemini_table.html`\n- `smoke_output/claude_table.html`\n- `smoke_output/minimax_table.html`\n- `smoke_output/codex_table.html`\n- `smoke_output/glm_table.html`\n\nCombine them into a single complete HTML page at `smoke_output/report.html` with:\n\n1. A proper HTML5 document structure (`<!DOCTYPE html>`, `<html>`, `<head>`, `<body>`)\n2. Title: \"Full Harness Smoke Test Report\" (both in `<title>` and as an `<h1>` on the page)\n3. All 6 tables arranged vertically in the order listed above, each preceded by an `<h2>` heading identifying which agent generated it\n4. Include the inline CSS from each table file as-is (scope them if needed to avoid conflicts)\n5. Add a **Summary** section at the bottom with an `<h2>CSS Quality Ratings</h2>` heading\n6. In the summary, rate each table's CSS quality out of 10 based on: use of color theme, readability, border styling, hover effects, spacing/padding, and overall visual polish. Present ratings in a simple table with columns: Agent, Rating (/10), Comments\n7. Add basic page-level CSS for body font, max-width centering, and spacing between sections\n\nWrite the assembled file to: `smoke_output/report.html`",
+    "status": "REVIEW",
+    "priority": "MEDIUM",
+    "complexity": "medium",
+    "model_name": "gemini-2.5-flash",
+    "board_id": 1,
+    "spec_id": 38,
+    "depends_on": [
+      "192",
+      "193",
+      "194",
+      "195",
+      "196",
+      "197"
+    ],
+    "metadata": {
+      "reasoning": "Assembly task requiring reading 6 files and combining them with quality assessment. Gemini is low-cost with good remaining quota, assigned per the spec. Medium complexity due to file coordination and CSS evaluation.",
+      "taskit_id": 198,
+      "complexity": "medium",
+      "last_usage": {
+        "input_tokens": 112105,
+        "total_tokens": 119962,
+        "output_tokens": 3949
+      },
+      "started_at": 1771854291.78844,
+      "assumptions": [
+        "smoke_output/qwen_table.html exists from task_1",
+        "smoke_output/gemini_table.html exists from task_2",
+        "smoke_output/claude_table.html exists from task_3",
+        "smoke_output/minimax_table.html exists from task_4",
+        "smoke_output/codex_table.html exists from task_5",
+        "smoke_output/glm_table.html exists from task_6",
+        "Each file contains an HTML fragment with a <style> block, <h2> heading, and <table>"
+      ],
+      "full_output": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nSuccessfully combined six\n individual HTML table files into a single, comprehensive HTML report (`smoke_output/report.html`) with embedded styles and a CSS quality rating summary.",
+      "working_dir": "/Users/d/work/tmp/harness-kit/odin/temp_test_dir",
+      "tmux_session": "odin-198",
+      "quota_snapshot": {
+        "usage_pct": 6.7,
+        "remaining_pct": 93.3
+      },
+      "selected_model": "gemini-2.5-flash",
+      "suggested_agent": "gemini",
+      "expected_outputs": [
+        "smoke_output/report.html"
+      ],
+      "last_duration_ms": 50554.5,
+      "required_capabilities": [
+        "coding",
+        "writing"
+      ]
+    },
+    "created_by": "odin@harness.kit",
+    "assignee_id": 2,
+    "assignee_email": "gemini@odin.agent",
+    "assignee_name": "gemini",
+    "dev_eta_seconds": null,
+    "label_ids": [],
+    "label_names": [],
+    "created_at": "2026-02-23T13:42:49.878932+00:00",
+    "last_updated_at": "2026-02-23T13:45:43.035995+00:00"
+  }
+]

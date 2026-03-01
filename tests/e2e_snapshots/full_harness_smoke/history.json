@@ -1,0 +1,578 @@
+[
+  {
+    "id": 1178,
+    "task_id": 192,
+    "field_name": "created",
+    "old_value": "",
+    "new_value": "Task created",
+    "changed_at": "2026-02-23T13:42:48.986965+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1179,
+    "task_id": 192,
+    "field_name": "status",
+    "old_value": "BACKLOG",
+    "new_value": "TODO",
+    "changed_at": "2026-02-23T13:42:49.096340+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1180,
+    "task_id": 192,
+    "field_name": "assignee_id",
+    "old_value": "",
+    "new_value": "1",
+    "changed_at": "2026-02-23T13:42:49.096349+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1181,
+    "task_id": 192,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/qwen_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. Qwen is the cheapest available agent with 100% remaining quota and is first in routing priority.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"qwen3-coder\", \"suggested_agent\": \"qwen\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/qwen_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. Qwen is the cheapest available agent with 100% remaining quota and is first in routing priority.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"qwen3-coder\", \"suggested_agent\": \"qwen\", \"taskit_id\": 192}",
+    "changed_at": "2026-02-23T13:42:49.096355+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1182,
+    "task_id": 193,
+    "field_name": "created",
+    "old_value": "",
+    "new_value": "Task created",
+    "changed_at": "2026-02-23T13:42:49.211024+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1183,
+    "task_id": 193,
+    "field_name": "status",
+    "old_value": "BACKLOG",
+    "new_value": "TODO",
+    "changed_at": "2026-02-23T13:42:49.280513+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1184,
+    "task_id": 193,
+    "field_name": "assignee_id",
+    "old_value": "",
+    "new_value": "2",
+    "changed_at": "2026-02-23T13:42:49.280520+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1185,
+    "task_id": 193,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/gemini_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Simple HTML generation task. Gemini is a low-cost agent with 93.3% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gemini-2.5-flash\", \"suggested_agent\": \"gemini\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/gemini_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Simple HTML generation task. Gemini is a low-cost agent with 93.3% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gemini-2.5-flash\", \"suggested_agent\": \"gemini\", \"taskit_id\": 193}",
+    "changed_at": "2026-02-23T13:42:49.280524+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1186,
+    "task_id": 194,
+    "field_name": "created",
+    "old_value": "",
+    "new_value": "Task created",
+    "changed_at": "2026-02-23T13:42:49.372531+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1187,
+    "task_id": 194,
+    "field_name": "status",
+    "old_value": "BACKLOG",
+    "new_value": "TODO",
+    "changed_at": "2026-02-23T13:42:49.425017+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1188,
+    "task_id": 194,
+    "field_name": "assignee_id",
+    "old_value": "",
+    "new_value": "4",
+    "changed_at": "2026-02-23T13:42:49.425022+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1189,
+    "task_id": 194,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/claude_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 88.0, \"usage_pct\": 12.0}, \"reasoning\": \"Simple HTML generation task. Claude is assigned per the spec. Despite higher cost tier, the task is low complexity so a cheap model will be auto-selected.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"claude-sonnet-4-5\", \"suggested_agent\": \"claude\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/claude_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 88.0, \"usage_pct\": 12.0}, \"reasoning\": \"Simple HTML generation task. Claude is assigned per the spec. Despite higher cost tier, the task is low complexity so a cheap model will be auto-selected.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"claude-sonnet-4-5\", \"suggested_agent\": \"claude\", \"taskit_id\": 194}",
+    "changed_at": "2026-02-23T13:42:49.425025+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1190,
+    "task_id": 195,
+    "field_name": "created",
+    "old_value": "",
+    "new_value": "Task created",
+    "changed_at": "2026-02-23T13:42:49.494817+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1191,
+    "task_id": 195,
+    "field_name": "status",
+    "old_value": "BACKLOG",
+    "new_value": "TODO",
+    "changed_at": "2026-02-23T13:42:49.547844+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1192,
+    "task_id": 195,
+    "field_name": "assignee_id",
+    "old_value": "",
+    "new_value": "3",
+    "changed_at": "2026-02-23T13:42:49.547849+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1193,
+    "task_id": 195,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/minimax_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. MiniMax is a low-cost agent with 100% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"minimax-coding-plan/MiniMax-M2.5\", \"suggested_agent\": \"minimax\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/minimax_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. MiniMax is a low-cost agent with 100% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"minimax-coding-plan/MiniMax-M2.5\", \"suggested_agent\": \"minimax\", \"taskit_id\": 195}",
+    "changed_at": "2026-02-23T13:42:49.547853+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1194,
+    "task_id": 196,
+    "field_name": "created",
+    "old_value": "",
+    "new_value": "Task created",
+    "changed_at": "2026-02-23T13:42:49.655313+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1195,
+    "task_id": 196,
+    "field_name": "status",
+    "old_value": "BACKLOG",
+    "new_value": "TODO",
+    "changed_at": "2026-02-23T13:42:49.709118+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1196,
+    "task_id": 196,
+    "field_name": "assignee_id",
+    "old_value": "",
+    "new_value": "7",
+    "changed_at": "2026-02-23T13:42:49.709123+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1197,
+    "task_id": 196,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/codex_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 96.0, \"usage_pct\": 4.0}, \"reasoning\": \"Simple HTML generation task. Codex is a medium-cost agent with 96% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gpt-5.3-codex\", \"suggested_agent\": \"codex\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/codex_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 96.0, \"usage_pct\": 4.0}, \"reasoning\": \"Simple HTML generation task. Codex is a medium-cost agent with 96% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gpt-5.3-codex\", \"suggested_agent\": \"codex\", \"taskit_id\": 196}",
+    "changed_at": "2026-02-23T13:42:49.709126+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1198,
+    "task_id": 197,
+    "field_name": "created",
+    "old_value": "",
+    "new_value": "Task created",
+    "changed_at": "2026-02-23T13:42:49.769483+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1199,
+    "task_id": 197,
+    "field_name": "status",
+    "old_value": "BACKLOG",
+    "new_value": "TODO",
+    "changed_at": "2026-02-23T13:42:49.819139+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1200,
+    "task_id": 197,
+    "field_name": "assignee_id",
+    "old_value": "",
+    "new_value": "8",
+    "changed_at": "2026-02-23T13:42:49.819144+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1201,
+    "task_id": 197,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/glm_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 99.0, \"usage_pct\": 1.0}, \"reasoning\": \"Simple HTML generation task. GLM is a low-cost agent with 99% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"zai-coding-plan/glm-4.7\", \"suggested_agent\": \"glm\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/glm_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 99.0, \"usage_pct\": 1.0}, \"reasoning\": \"Simple HTML generation task. GLM is a low-cost agent with 99% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"zai-coding-plan/glm-4.7\", \"suggested_agent\": \"glm\", \"taskit_id\": 197}",
+    "changed_at": "2026-02-23T13:42:49.819147+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1202,
+    "task_id": 198,
+    "field_name": "created",
+    "old_value": "",
+    "new_value": "Task created",
+    "changed_at": "2026-02-23T13:42:49.879527+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1203,
+    "task_id": 198,
+    "field_name": "status",
+    "old_value": "BACKLOG",
+    "new_value": "TODO",
+    "changed_at": "2026-02-23T13:42:49.918125+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1204,
+    "task_id": 198,
+    "field_name": "assignee_id",
+    "old_value": "",
+    "new_value": "2",
+    "changed_at": "2026-02-23T13:42:49.918132+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1205,
+    "task_id": 198,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/qwen_table.html exists from task_1\", \"smoke_output/gemini_table.html exists from task_2\", \"smoke_output/claude_table.html exists from task_3\", \"smoke_output/minimax_table.html exists from task_4\", \"smoke_output/codex_table.html exists from task_5\", \"smoke_output/glm_table.html exists from task_6\", \"Each file contains an HTML fragment with a <style> block, <h2> heading, and <table>\"], \"complexity\": \"medium\", \"expected_outputs\": [\"smoke_output/report.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Assembly task requiring reading 6 files and combining them with quality assessment. Gemini is low-cost with good remaining quota, assigned per the spec. Medium complexity due to file coordination and CSS evaluation.\", \"required_capabilities\": [\"coding\", \"writing\"], \"selected_model\": \"gemini-2.5-flash\", \"suggested_agent\": \"gemini\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/qwen_table.html exists from task_1\", \"smoke_output/gemini_table.html exists from task_2\", \"smoke_output/claude_table.html exists from task_3\", \"smoke_output/minimax_table.html exists from task_4\", \"smoke_output/codex_table.html exists from task_5\", \"smoke_output/glm_table.html exists from task_6\", \"Each file contains an HTML fragment with a <style> block, <h2> heading, and <table>\"], \"complexity\": \"medium\", \"expected_outputs\": [\"smoke_output/report.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Assembly task requiring reading 6 files and combining them with quality assessment. Gemini is low-cost with good remaining quota, assigned per the spec. Medium complexity due to file coordination and CSS evaluation.\", \"required_capabilities\": [\"coding\", \"writing\"], \"selected_model\": \"gemini-2.5-flash\", \"suggested_agent\": \"gemini\", \"taskit_id\": 198}",
+    "changed_at": "2026-02-23T13:42:49.918136+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1206,
+    "task_id": 198,
+    "field_name": "depends_on",
+    "old_value": "[]",
+    "new_value": "[\"192\", \"193\", \"194\", \"195\", \"196\", \"197\"]",
+    "changed_at": "2026-02-23T13:42:50.020125+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1207,
+    "task_id": 192,
+    "field_name": "status",
+    "old_value": "TODO",
+    "new_value": "IN_PROGRESS",
+    "changed_at": "2026-02-23T13:42:50.113401+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1208,
+    "task_id": 193,
+    "field_name": "status",
+    "old_value": "TODO",
+    "new_value": "IN_PROGRESS",
+    "changed_at": "2026-02-23T13:42:50.162483+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1209,
+    "task_id": 194,
+    "field_name": "status",
+    "old_value": "TODO",
+    "new_value": "IN_PROGRESS",
+    "changed_at": "2026-02-23T13:42:50.213398+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1210,
+    "task_id": 195,
+    "field_name": "status",
+    "old_value": "TODO",
+    "new_value": "IN_PROGRESS",
+    "changed_at": "2026-02-23T13:42:50.270308+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1211,
+    "task_id": 192,
+    "field_name": "status",
+    "old_value": "IN_PROGRESS",
+    "new_value": "EXECUTING",
+    "changed_at": "2026-02-23T13:42:50.284850+00:00",
+    "changed_by": "odin+dag-executor@system"
+  },
+  {
+    "id": 1212,
+    "task_id": 193,
+    "field_name": "status",
+    "old_value": "IN_PROGRESS",
+    "new_value": "EXECUTING",
+    "changed_at": "2026-02-23T13:42:50.289432+00:00",
+    "changed_by": "odin+dag-executor@system"
+  },
+  {
+    "id": 1213,
+    "task_id": 196,
+    "field_name": "status",
+    "old_value": "TODO",
+    "new_value": "IN_PROGRESS",
+    "changed_at": "2026-02-23T13:42:50.327304+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1214,
+    "task_id": 197,
+    "field_name": "status",
+    "old_value": "TODO",
+    "new_value": "IN_PROGRESS",
+    "changed_at": "2026-02-23T13:42:50.384144+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1215,
+    "task_id": 198,
+    "field_name": "status",
+    "old_value": "TODO",
+    "new_value": "IN_PROGRESS",
+    "changed_at": "2026-02-23T13:42:50.418824+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1216,
+    "task_id": 192,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/qwen_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. Qwen is the cheapest available agent with 100% remaining quota and is first in routing priority.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"qwen3-coder\", \"suggested_agent\": \"qwen\", \"taskit_id\": 192, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/qwen_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. Qwen is the cheapest available agent with 100% remaining quota and is first in routing priority.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"qwen3-coder\", \"started_at\": 1771854171.349421, \"suggested_agent\": \"qwen\", \"taskit_id\": 192, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:42:51.391489+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1217,
+    "task_id": 193,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/gemini_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Simple HTML generation task. Gemini is a low-cost agent with 93.3% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gemini-2.5-flash\", \"suggested_agent\": \"gemini\", \"taskit_id\": 193, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/gemini_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Simple HTML generation task. Gemini is a low-cost agent with 93.3% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gemini-2.5-flash\", \"started_at\": 1771854171.349579, \"suggested_agent\": \"gemini\", \"taskit_id\": 193, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:42:51.391729+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1218,
+    "task_id": 193,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/gemini_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Simple HTML generation task. Gemini is a low-cost agent with 93.3% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gemini-2.5-flash\", \"started_at\": 1771854171.349579, \"suggested_agent\": \"gemini\", \"taskit_id\": 193, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/gemini_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Simple HTML generation task. Gemini is a low-cost agent with 93.3% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gemini-2.5-flash\", \"started_at\": 1771854171.349579, \"suggested_agent\": \"gemini\", \"taskit_id\": 193, \"tmux_session\": \"odin-193\", \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:42:52.068888+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1219,
+    "task_id": 192,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/qwen_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. Qwen is the cheapest available agent with 100% remaining quota and is first in routing priority.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"qwen3-coder\", \"started_at\": 1771854171.349421, \"suggested_agent\": \"qwen\", \"taskit_id\": 192, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/qwen_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. Qwen is the cheapest available agent with 100% remaining quota and is first in routing priority.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"qwen3-coder\", \"started_at\": 1771854171.349421, \"suggested_agent\": \"qwen\", \"taskit_id\": 192, \"tmux_session\": \"odin-192\", \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:42:52.069123+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1220,
+    "task_id": 193,
+    "field_name": "status",
+    "old_value": "EXECUTING",
+    "new_value": "REVIEW",
+    "changed_at": "2026-02-23T13:43:16.044867+00:00",
+    "changed_by": "gemini+gemini-2.5-flash@odin.agent"
+  },
+  {
+    "id": 1222,
+    "task_id": 194,
+    "field_name": "status",
+    "old_value": "IN_PROGRESS",
+    "new_value": "EXECUTING",
+    "changed_at": "2026-02-23T13:43:20.312691+00:00",
+    "changed_by": "odin+dag-executor@system"
+  },
+  {
+    "id": 1223,
+    "task_id": 195,
+    "field_name": "status",
+    "old_value": "IN_PROGRESS",
+    "new_value": "EXECUTING",
+    "changed_at": "2026-02-23T13:43:20.322358+00:00",
+    "changed_by": "odin+dag-executor@system"
+  },
+  {
+    "id": 1224,
+    "task_id": 194,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/claude_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 88.0, \"usage_pct\": 12.0}, \"reasoning\": \"Simple HTML generation task. Claude is assigned per the spec. Despite higher cost tier, the task is low complexity so a cheap model will be auto-selected.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"claude-sonnet-4-5\", \"suggested_agent\": \"claude\", \"taskit_id\": 194, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/claude_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 88.0, \"usage_pct\": 12.0}, \"reasoning\": \"Simple HTML generation task. Claude is assigned per the spec. Despite higher cost tier, the task is low complexity so a cheap model will be auto-selected.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"claude-sonnet-4-5\", \"started_at\": 1771854201.420467, \"suggested_agent\": \"claude\", \"taskit_id\": 194, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:43:21.467126+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1225,
+    "task_id": 195,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/minimax_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. MiniMax is a low-cost agent with 100% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"minimax-coding-plan/MiniMax-M2.5\", \"suggested_agent\": \"minimax\", \"taskit_id\": 195, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/minimax_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. MiniMax is a low-cost agent with 100% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"minimax-coding-plan/MiniMax-M2.5\", \"started_at\": 1771854201.4206688, \"suggested_agent\": \"minimax\", \"taskit_id\": 195, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:43:21.467425+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1226,
+    "task_id": 195,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/minimax_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. MiniMax is a low-cost agent with 100% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"minimax-coding-plan/MiniMax-M2.5\", \"started_at\": 1771854201.4206688, \"suggested_agent\": \"minimax\", \"taskit_id\": 195, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/minimax_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 100.0, \"usage_pct\": 0.0}, \"reasoning\": \"Simple HTML generation task. MiniMax is a low-cost agent with 100% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"minimax-coding-plan/MiniMax-M2.5\", \"started_at\": 1771854201.4206688, \"suggested_agent\": \"minimax\", \"taskit_id\": 195, \"tmux_session\": \"odin-195\", \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:43:22.145101+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1227,
+    "task_id": 194,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/claude_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 88.0, \"usage_pct\": 12.0}, \"reasoning\": \"Simple HTML generation task. Claude is assigned per the spec. Despite higher cost tier, the task is low complexity so a cheap model will be auto-selected.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"claude-sonnet-4-5\", \"started_at\": 1771854201.420467, \"suggested_agent\": \"claude\", \"taskit_id\": 194, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/claude_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 88.0, \"usage_pct\": 12.0}, \"reasoning\": \"Simple HTML generation task. Claude is assigned per the spec. Despite higher cost tier, the task is low complexity so a cheap model will be auto-selected.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"claude-sonnet-4-5\", \"started_at\": 1771854201.420467, \"suggested_agent\": \"claude\", \"taskit_id\": 194, \"tmux_session\": \"odin-194\", \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:43:22.145299+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1228,
+    "task_id": 192,
+    "field_name": "status",
+    "old_value": "EXECUTING",
+    "new_value": "REVIEW",
+    "changed_at": "2026-02-23T13:43:33.291785+00:00",
+    "changed_by": "qwen+qwen3-coder@odin.agent"
+  },
+  {
+    "id": 1229,
+    "task_id": 196,
+    "field_name": "status",
+    "old_value": "IN_PROGRESS",
+    "new_value": "EXECUTING",
+    "changed_at": "2026-02-23T13:43:35.294269+00:00",
+    "changed_by": "odin+dag-executor@system"
+  },
+  {
+    "id": 1230,
+    "task_id": 196,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/codex_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 96.0, \"usage_pct\": 4.0}, \"reasoning\": \"Simple HTML generation task. Codex is a medium-cost agent with 96% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gpt-5.3-codex\", \"suggested_agent\": \"codex\", \"taskit_id\": 196, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/codex_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 96.0, \"usage_pct\": 4.0}, \"reasoning\": \"Simple HTML generation task. Codex is a medium-cost agent with 96% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gpt-5.3-codex\", \"started_at\": 1771854216.245368, \"suggested_agent\": \"codex\", \"taskit_id\": 196, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:43:36.294749+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1231,
+    "task_id": 196,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/codex_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 96.0, \"usage_pct\": 4.0}, \"reasoning\": \"Simple HTML generation task. Codex is a medium-cost agent with 96% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gpt-5.3-codex\", \"started_at\": 1771854216.245368, \"suggested_agent\": \"codex\", \"taskit_id\": 196, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/codex_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 96.0, \"usage_pct\": 4.0}, \"reasoning\": \"Simple HTML generation task. Codex is a medium-cost agent with 96% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"gpt-5.3-codex\", \"started_at\": 1771854216.245368, \"suggested_agent\": \"codex\", \"taskit_id\": 196, \"tmux_session\": \"odin-196\", \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:43:37.030092+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1232,
+    "task_id": 195,
+    "field_name": "status",
+    "old_value": "EXECUTING",
+    "new_value": "REVIEW",
+    "changed_at": "2026-02-23T13:43:50.653179+00:00",
+    "changed_by": "minimax+minimax-coding-plan/MiniMax-M2.5@odin.agent"
+  },
+  {
+    "id": 1233,
+    "task_id": 197,
+    "field_name": "status",
+    "old_value": "IN_PROGRESS",
+    "new_value": "EXECUTING",
+    "changed_at": "2026-02-23T13:43:55.316472+00:00",
+    "changed_by": "odin+dag-executor@system"
+  },
+  {
+    "id": 1234,
+    "task_id": 197,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/glm_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 99.0, \"usage_pct\": 1.0}, \"reasoning\": \"Simple HTML generation task. GLM is a low-cost agent with 99% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"zai-coding-plan/glm-4.7\", \"suggested_agent\": \"glm\", \"taskit_id\": 197, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/glm_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 99.0, \"usage_pct\": 1.0}, \"reasoning\": \"Simple HTML generation task. GLM is a low-cost agent with 99% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"zai-coding-plan/glm-4.7\", \"started_at\": 1771854236.216498, \"suggested_agent\": \"glm\", \"taskit_id\": 197, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:43:56.269068+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1235,
+    "task_id": 197,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/glm_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 99.0, \"usage_pct\": 1.0}, \"reasoning\": \"Simple HTML generation task. GLM is a low-cost agent with 99% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"zai-coding-plan/glm-4.7\", \"started_at\": 1771854236.216498, \"suggested_agent\": \"glm\", \"taskit_id\": 197, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/ directory will be created if it doesn't exist\"], \"complexity\": \"low\", \"expected_outputs\": [\"smoke_output/glm_table.html\"], \"quota_snapshot\": {\"remaining_pct\": 99.0, \"usage_pct\": 1.0}, \"reasoning\": \"Simple HTML generation task. GLM is a low-cost agent with 99% remaining quota, assigned per the spec.\", \"required_capabilities\": [\"coding\"], \"selected_model\": \"zai-coding-plan/glm-4.7\", \"started_at\": 1771854236.216498, \"suggested_agent\": \"glm\", \"taskit_id\": 197, \"tmux_session\": \"odin-197\", \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:43:56.918108+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1236,
+    "task_id": 196,
+    "field_name": "status",
+    "old_value": "EXECUTING",
+    "new_value": "REVIEW",
+    "changed_at": "2026-02-23T13:44:10.311868+00:00",
+    "changed_by": "codex+gpt-5.3-codex@odin.agent"
+  },
+  {
+    "id": 1237,
+    "task_id": 194,
+    "field_name": "status",
+    "old_value": "EXECUTING",
+    "new_value": "REVIEW",
+    "changed_at": "2026-02-23T13:44:28.776551+00:00",
+    "changed_by": "claude+claude-sonnet-4-5@odin.agent"
+  },
+  {
+    "id": 1238,
+    "task_id": 197,
+    "field_name": "status",
+    "old_value": "EXECUTING",
+    "new_value": "REVIEW",
+    "changed_at": "2026-02-23T13:44:50.096590+00:00",
+    "changed_by": "glm+zai-coding-plan/glm-4.7@odin.agent"
+  },
+  {
+    "id": 1239,
+    "task_id": 198,
+    "field_name": "status",
+    "old_value": "IN_PROGRESS",
+    "new_value": "EXECUTING",
+    "changed_at": "2026-02-23T13:44:50.322453+00:00",
+    "changed_by": "odin+dag-executor@system"
+  },
+  {
+    "id": 1240,
+    "task_id": 198,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/qwen_table.html exists from task_1\", \"smoke_output/gemini_table.html exists from task_2\", \"smoke_output/claude_table.html exists from task_3\", \"smoke_output/minimax_table.html exists from task_4\", \"smoke_output/codex_table.html exists from task_5\", \"smoke_output/glm_table.html exists from task_6\", \"Each file contains an HTML fragment with a <style> block, <h2> heading, and <table>\"], \"complexity\": \"medium\", \"expected_outputs\": [\"smoke_output/report.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Assembly task requiring reading 6 files and combining them with quality assessment. Gemini is low-cost with good remaining quota, assigned per the spec. Medium complexity due to file coordination and CSS evaluation.\", \"required_capabilities\": [\"coding\", \"writing\"], \"selected_model\": \"gemini-2.5-flash\", \"suggested_agent\": \"gemini\", \"taskit_id\": 198, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/qwen_table.html exists from task_1\", \"smoke_output/gemini_table.html exists from task_2\", \"smoke_output/claude_table.html exists from task_3\", \"smoke_output/minimax_table.html exists from task_4\", \"smoke_output/codex_table.html exists from task_5\", \"smoke_output/glm_table.html exists from task_6\", \"Each file contains an HTML fragment with a <style> block, <h2> heading, and <table>\"], \"complexity\": \"medium\", \"expected_outputs\": [\"smoke_output/report.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Assembly task requiring reading 6 files and combining them with quality assessment. Gemini is low-cost with good remaining quota, assigned per the spec. Medium complexity due to file coordination and CSS evaluation.\", \"required_capabilities\": [\"coding\", \"writing\"], \"selected_model\": \"gemini-2.5-flash\", \"started_at\": 1771854291.78844, \"suggested_agent\": \"gemini\", \"taskit_id\": 198, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:44:51.817032+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1241,
+    "task_id": 198,
+    "field_name": "metadata",
+    "old_value": "{\"assumptions\": [\"smoke_output/qwen_table.html exists from task_1\", \"smoke_output/gemini_table.html exists from task_2\", \"smoke_output/claude_table.html exists from task_3\", \"smoke_output/minimax_table.html exists from task_4\", \"smoke_output/codex_table.html exists from task_5\", \"smoke_output/glm_table.html exists from task_6\", \"Each file contains an HTML fragment with a <style> block, <h2> heading, and <table>\"], \"complexity\": \"medium\", \"expected_outputs\": [\"smoke_output/report.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Assembly task requiring reading 6 files and combining them with quality assessment. Gemini is low-cost with good remaining quota, assigned per the spec. Medium complexity due to file coordination and CSS evaluation.\", \"required_capabilities\": [\"coding\", \"writing\"], \"selected_model\": \"gemini-2.5-flash\", \"started_at\": 1771854291.78844, \"suggested_agent\": \"gemini\", \"taskit_id\": 198, \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "new_value": "{\"assumptions\": [\"smoke_output/qwen_table.html exists from task_1\", \"smoke_output/gemini_table.html exists from task_2\", \"smoke_output/claude_table.html exists from task_3\", \"smoke_output/minimax_table.html exists from task_4\", \"smoke_output/codex_table.html exists from task_5\", \"smoke_output/glm_table.html exists from task_6\", \"Each file contains an HTML fragment with a <style> block, <h2> heading, and <table>\"], \"complexity\": \"medium\", \"expected_outputs\": [\"smoke_output/report.html\"], \"quota_snapshot\": {\"remaining_pct\": 93.3, \"usage_pct\": 6.7}, \"reasoning\": \"Assembly task requiring reading 6 files and combining them with quality assessment. Gemini is low-cost with good remaining quota, assigned per the spec. Medium complexity due to file coordination and CSS evaluation.\", \"required_capabilities\": [\"coding\", \"writing\"], \"selected_model\": \"gemini-2.5-flash\", \"started_at\": 1771854291.78844, \"suggested_agent\": \"gemini\", \"taskit_id\": 198, \"tmux_session\": \"odin-198\", \"working_dir\": \"/Users/d/work/tmp/harness-kit/odin/temp_test_dir\"}",
+    "changed_at": "2026-02-23T13:44:52.457053+00:00",
+    "changed_by": "odin@harness.kit"
+  },
+  {
+    "id": 1242,
+    "task_id": 198,
+    "field_name": "status",
+    "old_value": "EXECUTING",
+    "new_value": "REVIEW",
+    "changed_at": "2026-02-23T13:45:43.039992+00:00",
+    "changed_by": "gemini+gemini-2.5-flash@odin.agent"
+  }
+]

@@ -1,0 +1,52 @@
+# Harness Usage Status — Sample Configuration
+# Copy to: ~/.config/harness_usage_status/config.yaml
+#
+# Two types of providers:
+#   CLI-based: claude_code, codex, gemini, qwen — use installed CLI tools
+#   API-based: minimax, glm — use API keys for subscription quota endpoints
+#
+# API keys can be set via environment variables:
+#   MINIMAX_API_KEY, ZAI_API_KEY
+
+providers:
+  # --- CLI-based providers (subscription via CLI tools) ---
+
+  claude_code:
+    enabled: true
+    # cli_command: "claude"     # override CLI binary name
+    # cli_path: "/usr/local/bin/claude"  # or full path
+
+  codex:
+    enabled: true
+    # cli_command: "codex"
+    # cli_path: "/usr/local/bin/codex"
+
+  gemini:
+    enabled: true
+    # cli_command: "gemini"
+    # cli_path: "/usr/local/bin/gemini"
+    # project_id: ""  # Cloud AI Companion project ID (auto-detected via loadCodeAssist if omitted)
+    # NOTE: Uses OAuth creds from ~/.gemini/oauth_creds.json (or macOS Keychain).
+    #   Calls the same API as `gemini /stats` — returns per-model quota buckets.
+
+  qwen:
+    enabled: false
+    # cli_command: "qwen"
+    # cli_path: "/usr/local/bin/qwen"
+    # NOTE: /stats is session-scoped only; no account-level quota API
+
+  # --- API-based providers (subscription via API keys) ---
+
+  minimax:
+    enabled: false
+    # api_key: ...  # or set MINIMAX_API_KEY env var
+    # group_id: ""  # required — find at platform.minimax.com/user-center/basic-information
+    # region: "global"  # "global" or "cn"
+    # base_url: https://platform.minimax.io  # or https://platform.minimaxi.com for CN
+
+  glm:
+    enabled: false
+    # api_key: ...  # or set ZAI_API_KEY env var
+    # platform: "cn"  # "cn" or "global" (api.z.ai)
+    # base_url: https://bigmodel.cn  # override monitor host
+    # NOTE: Monitor endpoints use auth WITHOUT "Bearer" prefix (handled automatically)

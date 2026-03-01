@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odin"
+version = "0.1.0"
+description = "Multi-agent orchestration CLI"
+requires-python = ">=3.10"
+dependencies = [
+    "fire>=0.5",
+    "rich>=13.0",
+    "pydantic>=2.0",
+    "httpx>=0.25",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+mcp = ["fastmcp>=2.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "fastmcp>=2.0",
+]
+
+[project.scripts]
+odin = "odin.cli:main"
+taskit-mcp = "odin.mcps.taskit_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "llm: requires real LLM CLI agents on PATH",
+    "tmux_real: requires tmux installed and running",
+]
+addopts = "--ignore=tests/integration"

@@ -1,0 +1,359 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "slug": "code-review",
+      "name": "Code Review",
+      "description": "Review code for architecture, bugs, performance, and quality issues",
+      "icon": "code",
+      "sort_order": 1
+    },
+    {
+      "slug": "ui-ux-audit",
+      "name": "UI/UX Audit",
+      "description": "Validate user interfaces and experience across platforms",
+      "icon": "layout",
+      "sort_order": 2
+    },
+    {
+      "slug": "documentation",
+      "name": "Documentation",
+      "description": "Generate reports, reviews, and onboarding materials",
+      "icon": "file-text",
+      "sort_order": 3
+    },
+    {
+      "slug": "analysis",
+      "name": "Analysis",
+      "description": "Analyze tasks, diagnose errors, and investigate root causes",
+      "icon": "search",
+      "sort_order": 4
+    },
+    {
+      "slug": "quality-process",
+      "name": "Quality Process",
+      "description": "Audit prompts, compare outputs, and refine iteratively",
+      "icon": "shield-check",
+      "sort_order": 5
+    },
+    {
+      "slug": "development",
+      "name": "Development Workflow",
+      "description": "Structured processes for feature development, knowledge management, and code operations",
+      "icon": "git-branch",
+      "sort_order": 6
+    }
+  ],
+  "presets": [
+    {
+      "id": "architecture-review",
+      "title": "Architecture Review",
+      "description": "You are a senior software architect reviewing this codebase.\n\nYour task:\nWrite a clean, well-structured Markdown document that explains the true architecture, evaluates overall engineering quality, and delivers a brutally honest numeric rating of the system.\n\nCore principles:\n- Be precise, direct, and unsentimental. No praise unless clearly earned.\n- Every claim must come from observable code. Do not guess or invent.\n- If something cannot be determined, mark it **Unknown** and explain why.\n- Avoid generic \"best practices\", filler language, and long explanations.\n- Prefer short, information-dense sentences that are easy to scan.\n- Structure the document for human readability, not AI formatting habits.\n\nMarkdown quality requirements:\n- Use clear headings and logical flow so the document reads naturally.\n- Keep sections concise but informative.\n- Maintain simple, professional technical language.\n- The result should feel like a real architectural review written by an experienced engineer.\n\nThe document must clearly cover:\n- How the system is actually organized and how major parts interact.\n- Architectural boundaries, coupling, data flow, and control flow.\n- The most dangerous structural or design weaknesses.\n- Code quality across readability, modularity, cohesion, testability, error handling, observability, performance risks, and security hygiene.\n- A single **overall rating (0–10)** with a direct justification.\n- The smallest set of **high-impact improvements** that would raise the rating fastest.\n\nDiagrams:\n- Include clear, easy-to-understand ASCII architecture diagrams where useful.\n- Diagrams must simplify understanding, not decorate the document.\n- Prefer minimal, readable layouts over complex visuals.\n\nOutput rules:\n- Markdown only.\n- No emojis, no storytelling, no motivational tone.\n- No rigid prewritten template or forced section ordering.\n- Let the real architecture determine the structure of the document.\n\nGoal:\nProduce a technically accurate, brutally honest, and highly readable architecture review that lets engineers quickly understand:\n\n**what this system really is, how good it actually is, and what must change to make it meaningfully better.**",
+      "category": "code-review",
+      "icon": "building",
+      "suggested_priority": "HIGH",
+      "source": "prompt-library/domains/codebase/review/architecture_review.md",
+      "sort_order": 1
+    },
+    {
+      "id": "bug-report",
+      "title": "Bug Report",
+      "description": "You are a senior software engineer and security reviewer.\n\nYour task is to scan this codebase and report **real** bugs, failures, and security risks.\n\nScope: Works for any language, framework, or architecture.\n\nWhat counts as a \"bug\" (report only these):\n- Crashes or exceptions in real flows\n- Logic errors (wrong behavior, wrong data)\n- Race conditions / concurrency hazards\n- Security flaws (authz/authn, injection, secrets, SSRF, XSS, CSRF, etc.)\n- Data loss or corruption risks\n- Broken edge cases that cause incorrect or unsafe behavior\n- Reliability failures (infinite loops, retries without backoff, resource leaks)\n- Denial-of-service risks (unbounded work, memory blowups, regex DoS, etc.)\n\nIgnore style, formatting, naming, and \"best practices\" unless they cause a real failure.\n\nEvidence rules (strict):\n- Every finding must include **clear evidence from the code**.\n- If it's not provable from the provided code, label it **Possible Bug** and explain what makes it uncertain.\n- Do not invent file paths, functions, endpoints, or behaviors.\n\nSeverity scoring (1–10):\n- **9–10 (Critical)**: security breach, data loss, production crash\n- **7–8 (High)**: major feature/system breakage, serious vuln with real exploit path\n- **4–6 (Medium)**: reliability or correctness problem with real impact\n- **1–3 (Low)**: minor or rare edge case with limited impact\n\nOutput: Markdown report with Top 5 Bugs (ranked by severity) plus Low Priority Bugs list. Each bug includes Severity, Confidence, Location, Evidence, Problem, Impact, and Fix.",
+      "category": "code-review",
+      "icon": "bug",
+      "suggested_priority": "HIGH",
+      "source": "prompt-library/domains/codebase/review/bug_report.md",
+      "sort_order": 2
+    },
+    {
+      "id": "ai-slop-detection",
+      "title": "AI Slop Detection",
+      "description": "You are a senior software engineer performing a forensic audit of a codebase to detect potential AI-generated slop (low-signal, templated, inconsistent, hallucinated, or cargo-cult code that may have originated from AI tools).\n\nYour task is analysis only. You are not allowed to modify, refactor, redesign, or rewrite anything.\n\nObjective: Analyze the entire repository and produce a single well-structured Markdown report that identifies suspected AI slop patterns, provides evidence-based reasoning, assigns a likelihood score, remains fair and non-accusatory, and is clean, readable, and professionally formatted.\n\nScope of Analysis: Inspect all relevant areas including source code (frontend, backend, libraries, scripts), tests and test utilities, configuration and environment setup, documentation and comments, CI/CD or automation files, and UI state handling and rendering logic.\n\nPossible Indicators of AI Slop (signals, never proof):\n- Repetitive or template-like structures without clear necessity\n- Inconsistent naming, architecture, or error-handling styles\n- Generic, filler, or misleading comments and documentation\n- Referenced symbols, imports, or logic that appear mismatched or unused\n- Near-duplicate code blocks with shallow variation\n- Unnecessary abstraction layers or premature patterns\n- Missing validation, weak edge-case handling, or silent failures\n- Tests with little real verification or heavy snapshot reliance\n\nReport Structure: Executive Overview, Detailed Findings (ordered by engineering risk with likelihood scores), Cross-Repository Pattern Observations, and Stable or Intentional Areas.",
+      "category": "code-review",
+      "icon": "scan",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/codebase/review/ai_slop.md",
+      "sort_order": 3
+    },
+    {
+      "id": "backend-slop-review",
+      "title": "Backend Slop Review",
+      "description": "Act as a slop reviewer for the backend codebase.\n\nSave all outputs to slop_review/ directory. Do not modify any existing files outside of that directory.\n\nProcedure:\n1. First check for a `project_understanding.md` file to understand the project. If it doesn't exist, create one covering design patterns used and codebase structure/organization.\n\n2. For each area you review, ask yourself if that particular module / snippet / line is absolutely needed. If not needed, it's likely slop — too many comments, too much abstraction, or no clear purpose. Document findings in a single markdown file in slop_review/ with:\n   - Short descriptive title of the issue\n   - Likelihood that it represents AI slop (scaled range)\n   - Potential impact if real\n   - Relevant repository locations (file names, line numbers, function names)\n\nThe report should have a starting summary section where slops along with potential severity [high, medium, low] are listed in a table for quick reference.\n\nFocus on understanding if this is code a well-experienced engineer would write. Look for signs of:\n- Over-engineering or unnecessary complexity\n- Clearly better ways of doing same things\n- Under-engineered or over-engineered solutions for the problem\n- Code duplicated across places",
+      "category": "code-review",
+      "icon": "server",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/codebase/review/slop_review/backend_slop_review.md",
+      "sort_order": 4
+    },
+    {
+      "id": "frontend-slop-review",
+      "title": "Frontend Slop Review",
+      "description": "Act as a slop reviewer for the frontend codebase.\n\nSave all outputs to slop_review/ directory. Do not modify any existing files outside of that directory.\n\nProcedure:\n1. First check for a `project_understanding.md` file to understand the project. If it doesn't exist, create one covering UI framework, component patterns, state management approach, and codebase structure.\n\n2. For each component, hook, or utility you review, ask yourself if that particular module / snippet / line is absolutely needed. If not needed, it's likely slop — too many comments, unnecessary wrappers, over-abstracted state, or no clear purpose. Document findings in a single markdown file in slop_review/ with:\n   - Short descriptive title of the issue\n   - Likelihood that it represents AI slop (scaled range)\n   - Potential impact if real\n   - Relevant repository locations (file names, line numbers, component names)\n\nThe report should have a starting summary section where slops along with potential severity [high, medium, low] are listed in a table for quick reference.\n\nFocus on: unnecessary re-renders, prop drilling where context would suffice, dead components, over-abstracted hooks, duplicated UI logic, unused imports, and components that exist but serve no distinct purpose.",
+      "category": "code-review",
+      "icon": "monitor",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/codebase/review/slop_review/frontend_slop_review.md",
+      "sort_order": 5
+    },
+    {
+      "id": "duplicate-code-review",
+      "title": "Duplicate Code Review",
+      "description": "Analyze the codebase and identify duplicate logic, repeated behavior, or redundant implementations.\n\nThis is a read-only analytical review. Do NOT refactor, rewrite, or implement any code.\n\nWhat to detect:\n- Same logic implemented in multiple places\n- Repeated utility behavior that should be shared\n- Copy-pasted code with small variations\n- Duplication across layers (frontend, backend, services, etc.)\n- Different implementations solving the same problem\n\nDo NOT flag duplication if implementations differ materially in behavior, inputs/outputs, or responsibility.\n\nOutput: Generate a Markdown report organized by layer (Backend, Frontend, Shared) with each finding including:\n- Location (file path, function/module)\n- Duplication explanation (what is repeated and where)\n- Evidence (matching identifiers, control flow, or behavior)\n- Severity score (1-10)\n\nSeverity rubric:\n- 1–3: Minor duplication, low maintenance risk\n- 4–6: Moderate duplication, risk of drift or bugs\n- 7–10: High risk, cross-layer drift or correctness/performance/security impact\n\nEnd with summary: total duplicates found, highest-risk area, most repeated pattern, and one strategic non-implementation recommendation.",
+      "category": "code-review",
+      "icon": "copy",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/codebase/review/duplicate_review.md",
+      "sort_order": 6
+    },
+    {
+      "id": "performance-audit",
+      "title": "Performance Audit",
+      "description": "You are a senior systems engineer and performance specialist analyzing a real production codebase.\n\nProduce a clear, well-structured Markdown report that deeply analyzes the system's runtime performance, identifies real bottlenecks, assigns a harsh numeric rating, and explains the highest-impact improvements.\n\nCore principles:\n- Be precise, technical, and unsentimental. No praise unless clearly justified.\n- Base every conclusion on observable code, execution patterns, or architecture.\n- If something cannot be determined, mark it **Unknown** and explain what data is missing.\n\nDepth of analysis required:\n- CPU usage patterns, blocking calls, synchronous vs async behavior\n- Memory allocation, leaks, caching strategy, object lifetimes\n- I/O behavior (disk, network, database, subprocess, filesystem)\n- Concurrency model, threading, event loops, queues, backpressure\n- Data structures and algorithmic complexity in hot paths\n- Serialization, logging overhead, polling loops, tight loops\n- Startup time, scaling limits, and failure-mode performance\n\nThe report must deliver:\n- How the system actually executes at runtime\n- The most critical real-world bottlenecks and inefficiencies\n- A **harsh overall performance rating (0–10)** with direct justification\n- Ranked performance problems from most damaging to least\n- The smallest set of **high-impact optimizations** that would improve performance fastest\n- Trade-offs of proposed improvements (complexity, risk, maintainability)\n- Clear ASCII diagrams where they help explain runtime flow or bottlenecks",
+      "category": "code-review",
+      "icon": "gauge",
+      "suggested_priority": "HIGH",
+      "source": "prompt-library/domains/codebase/review/performance_audit.md",
+      "sort_order": 7
+    },
+    {
+      "id": "ui-gaps-analysis",
+      "title": "UI Gaps Analysis",
+      "description": "Analyze the frontend UI and highlight gaps (code critique).\n\nScope: Frontend UI only — components, state management, data flow, and rendering logic.\n\nInstructions:\n- Review the UI implementation and behavior\n- Identify gaps in UX, UI consistency, and interaction flow\n- Criticize the code where UI logic is unclear, duplicated, or tightly coupled\n- Point out missing states (loading, error, empty, edge cases)\n- Highlight accessibility, responsiveness, and performance concerns at the UI level\n\nConstraints:\n- DO NOT change any code\n- DO NOT refactor or redesign the UI\n- DO NOT propose new components or implementations\n- Only analyze and critique existing UI code\n\nOutput format for each finding:\n- Area: <component / page / flow>\n- Issue type: <ux / ui / state / performance / accessibility>\n- Location: <file / component name>\n- Explanation: <what the gap is and why it's a problem>",
+      "category": "code-review",
+      "icon": "eye",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/codebase/review/ui_gaps.md",
+      "sort_order": 8
+    },
+    {
+      "id": "web-app-ui-validation",
+      "title": "Web App UI Validation",
+      "description": "You are a senior web UX designer reviewing web app screenshots critically. Your job is to evaluate web UIs as finished products, not prototypes.\n\nAssume a first-time user on desktop unless stated otherwise. Evaluate only what is visible in the screenshot.\n\nFor each screenshot:\n- State the page's purpose in one sentence\n- Identify the primary user goal on this page\n- Score each criterion (0–10) with a one-line justification:\n  - Visual polish — does it look finished and intentional?\n  - Layout efficiency — is space used well with proper content density?\n  - Visual hierarchy — is the primary action immediately obvious?\n  - Typography and readability — are fonts sized, weighted, and spaced correctly?\n  - Color system — is there a cohesive palette with adequate contrast?\n  - Component consistency — do similar elements look and behave uniformly?\n- Add and score any other major usability issues visible\n- Design intent analysis: infer intent behind key UI choices, critique unjustified choices, praise only genuinely thoughtful ones\n- Calculate final score: (Visual polish × 2 + sum of other criteria) / (total criteria + 1)\n- One-line verdict, top 3 issues by severity, concrete fixes\n\nRules: Be harsh but precise. Score visual polish 0–3 if the UI looks unfinished or generic.",
+      "category": "ui-ux-audit",
+      "icon": "monitor",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/web_app/ui/review/validation.md",
+      "sort_order": 1
+    },
+    {
+      "id": "mobile-app-ui-validation",
+      "title": "Mobile App UI Validation",
+      "description": "You are a senior mobile UX designer reviewing app screenshots critically. Your job is to evaluate mobile UIs as finished products, not prototypes.\n\nAssume a first-time user on a mid-range device unless stated otherwise. Evaluate only what is visible in the screenshot.\n\nFor each screenshot:\n- State the screen's purpose in one sentence\n- Identify the primary action a user should take\n- Score each criterion (0–10) with a one-line justification:\n  - Visual polish — does it look finished and intentional?\n  - Layout efficiency — is screen space used well, no excessive empty areas?\n  - Visual hierarchy — is the primary action immediately obvious?\n  - Typography and readability — are fonts sized, weighted, and spaced correctly?\n  - Color system — is there a cohesive palette with adequate contrast?\n  - Touch targets — do interactive elements appear ≥44pt?\n- Add and score any other major usability issues visible\n- Design intent analysis: infer intent behind key UI choices, critique unjustified choices, praise only genuinely thoughtful ones\n- Calculate final score: (Visual polish × 2 + sum of other criteria) / (total criteria + 1)\n- One-line verdict, top 3 issues by severity, concrete fixes\n\nRules: Be harsh but precise. Score visual polish 0–3 if the UI looks unfinished or generic.",
+      "category": "ui-ux-audit",
+      "icon": "smartphone",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/mobile_app/ui/review/validation.md",
+      "sort_order": 2
+    },
+    {
+      "id": "website-ux-audit",
+      "title": "Website UX Audit",
+      "description": "You are a senior UI/UX engineer reviewing a website codebase UI.\n\nCreate a clear, minimal, well-designed Markdown UI/UX audit.\n\nYou must:\n- Analyze UI structure, states, flows, accessibility, and consistency\n- Identify only useful, high-impact UX gaps\n- Give simple improvement directions\n- Keep wording short, clear, and scannable\n\nYou must NOT: rewrite code, propose detailed implementations, write long explanations, or include low-severity issues.\n\nRequired output format:\n\n# UI/UX Audit\n\n## Summary\n**UX Score:** X/10\n**Biggest Risk:** one short sentence\n\n## Critical Issues (max 5, severity ≥ 6 only)\nEach with: Severity (X/10), Where, User Impact, Fix Direction\n\n## Missing States\nLoading, Error, Empty, Disabled — only if truly missing\n\n## Consistency Problems (max 4 bullets, ≤ 8 words each)\n\n## Working Well (max 3 bullets, factual only)\n\nOptimize for 30-second executive reading. If no serious issues exist, write: \"No critical UX issues found.\"",
+      "category": "ui-ux-audit",
+      "icon": "globe",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/codebase/review/website/ui_ux_audit.md",
+      "sort_order": 3
+    },
+    {
+      "id": "chart-validation",
+      "title": "Chart Validation",
+      "description": "You are a senior data analyst reviewing a chart for a busy human reader.\n\nProvide clear understanding, complete analytical diagnosis, and practical guidance to reach a high-quality (10/10) visualization.\n\nUse this exact format:\n\n**OVERALL SCORE: <0–10>** — One evidence-based score judging analytical truthfulness, clarity/readability, and usefulness for decision-making. (<7 = meaningful problems, 7-8 = good but missing insight, ≥9 = strong)\n\n**INTENT** — What the chart is trying to show (1-2 sentences)\n\n**REALITY** — What the chart actually shows. If insight is weak/misleading, explain why.\n\n**KEY ISSUES** — All meaningful problems:\n- Issue name, why it matters, severity (Low/Medium/High)\n- Check across: chart type suitability, axis choice/scaling, metric validity, labeling, visual density, statistical honesty, missing context, insight strength\n\n**PATH TO 10/10:**\n1. Required fixes (to reach ≥7)\n2. Refinements (to reach 9-10)\n\nRules: Be clear, structured, human-readable. Cover every important analytical angle. Focus on understanding, diagnosis, and improvement — not aesthetics. Readable in under 30 seconds.",
+      "category": "ui-ux-audit",
+      "icon": "bar-chart",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/charts/review/validation.md",
+      "sort_order": 4
+    },
+    {
+      "id": "markdown-to-html-report",
+      "title": "Markdown to HTML Report",
+      "description": "Convert Markdown content into a beautiful, modern, self-contained HTML5 document.\n\nOutput rules:\n- Output ONLY a complete HTML5 document with inline CSS only\n- No JavaScript, no external assets, no remote fonts\n- Preserve all content exactly (placeholders, code blocks, URLs)\n\nDocument chrome (allowed additions):\n- Header with inferred title and metadata chips\n- Findings Summary: ONE compact table above the body listing detected issues\n- Table of Contents: ONE TOC linking to headings via anchor IDs\n\nIssue extraction: Detect structured issue blocks and build a compact summary table sorted by severity.\n\nArea color coding: Assign each unique area a consistent theme color used across issue cards, badges, TOC markers, and summary indicators.\n\nVisual design (Shadcn-inspired): CSS variables theme, severity badges color-scaled when numeric, clean typography with system font stack, strong heading hierarchy, responsive layout (two-column desktop with sticky TOC, single-column mobile).\n\nNo duplication: If a field is promoted to a badge, it must not appear again as separate text in the same card.\n\nReturn ONLY the final HTML document with no extra text.",
+      "category": "documentation",
+      "icon": "file-code",
+      "suggested_priority": "LOW",
+      "source": "prompt-library/domains/documents/convert/Markdown_to_HTML.md",
+      "sort_order": 1
+    },
+    {
+      "id": "visual-explainer",
+      "title": "Visual Explainer",
+      "description": "Transform complex technical content into a beautiful, self-contained HTML page with real typography, styled diagrams, and interactive visuals.\n\nYou are a visual communication specialist. Your job is to take dense technical content (terminal output, architecture descriptions, data tables, workflows, comparisons) and produce a single self-contained HTML file that is genuinely pleasant to read.\n\nDesign process:\n1. **Think** — Choose a design direction before writing any code. Pick from: Blueprint (technical, grid-based), Editorial (magazine-like, generous whitespace), or Paper/Ink (minimal, print-inspired). Commit to one aesthetic and stay consistent.\n\n2. **Structure** — Match rendering to content type:\n   - Architecture and system relationships → CSS Grid cards or Mermaid diagrams\n   - Flowcharts, sequences, state machines → Mermaid (always)\n   - Data tables (4+ rows or 3+ columns) → HTML `<table>` with sticky headers and zebra striping\n   - Dashboards and metrics → CSS Grid layout with Chart.js\n   - Comparisons → Side-by-side panels with clear visual differentiation\n\n3. **Style** — Typography and color:\n   - Use distinctive font pairings loaded from Google Fonts (e.g., DM Sans + Fira Code, Instrument Serif + JetBrains Mono, Space Grotesk + IBM Plex Mono). Never use Inter alone.\n   - Build color palettes with intention — muted, cohesive, with one accent color. No neon, no gradient text on headings, no cyan-magenta-pink combinations.\n   - Surfaces differentiate via subtle lightness shifts, not heavy borders.\n   - Dark and light theme support via CSS variables and a theme toggle.\n   - Animation only when purposeful (e.g., diagram zoom/pan). No continuous animations, no glowing box-shadows.\n\n4. **Deliver** — Output a single self-contained HTML5 file:\n   - Inline CSS only (no external stylesheets)\n   - External CDN allowed only for: Google Fonts, Mermaid.js, Chart.js\n   - No other JavaScript frameworks or dependencies\n   - Responsive layout (readable on mobile and desktop)\n   - Mermaid diagrams must include zoom and pan controls\n\nForbidden anti-patterns:\n- Emoji section headers\n- Uniform card grids with no visual hierarchy\n- Neon dashboard aesthetic\n- Generic Tailwind default colors\n- Decorative elements that don't aid comprehension\n\nQuality bar: The output should look like it was designed by a human with taste, not generated by an AI. Someone should want to share the HTML file because it looks good, not just because the content is useful.\n\nThe task description or comments should contain the technical content to visualize. If the content type is ambiguous, ask which rendering approach to use.",
+      "category": "documentation",
+      "icon": "palette",
+      "suggested_priority": "MEDIUM",
+      "source": "github.com/nicobailon/visual-explainer",
+      "sort_order": 2
+    },
+    {
+      "id": "artifact-review",
+      "title": "Artifact Review",
+      "description": "You are an expert reviewer analyzing any given artifact (prompt, code, design, document, workflow, or system).\n\nYour task is evaluation and guidance only. Do not rewrite the artifact unless explicitly asked.\n\nEvaluation Framework:\n- **Meta Context**: Identify underlying intent, artifact type, expected interaction\n- **Objective**: What it's trying to achieve, whether objective is clear/measurable/actionable\n- **Alignment**: Check objective vs instructions, constraints vs output, scope vs content, intent vs behavior\n- **Data to Observe**: Structure, logical consistency, clarity, redundancy, executability, risk\n\nOutput:\n1. **Quick Judgment**: Overall quality (0-10), Clarity (0-10), Alignment (0-10), Execution risk (0-10), one-sentence summary\n2. **Key Criticism**: Each issue with title, severity (0-10), confidence (0-10), evidence, and impact — ordered by severity\n3. **Improvement Suggestions**: For each major issue — suggested change, expected benefit, usefulness rating (0-10)\n4. **Stable/Good Elements**: What's clear, well-aligned, and effective (factual, no praise language)\n\nMethod rules: Be precise not verbose, base criticism on evidence, prefer high-impact insights, maintain neutral professional tone.",
+      "category": "documentation",
+      "icon": "clipboard-check",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/artifacts/review/artifact_review.md",
+      "sort_order": 3
+    },
+    {
+      "id": "day1-onboarding-overview",
+      "title": "Day 1 Onboarding Overview",
+      "description": "Explore the repo and create a day-1 onboarding document.\n\nGoal: In under 150 words, help a new dev understand what this project is and why it exists.\n\nInclude:\n- What the project does (2-3 sentences max)\n- Core capabilities (bullet list, 1 line each, no more than 5-6 items)\n\nExplicitly exclude:\n- Codebase structure / folder breakdowns\n- Tech stack, implementation details\n- Auth, env, config, standard patterns\n- Anything that belongs in a README or technical doc\n\nThink of it as: The first slide of a demo, not documentation.",
+      "category": "documentation",
+      "icon": "rocket",
+      "suggested_priority": "LOW",
+      "source": "prompt-library/domains/documents/generate/onboarding/day1_overview.md",
+      "sort_order": 4
+    },
+    {
+      "id": "analyze-task",
+      "title": "Analyze Task",
+      "description": "Analyze the codebase in the context of the requirements described in this task.\n\n- Be concise.\n- Explain your understanding clearly.\n- NO CODING.\n\nRead the task description and any comments for the requirements. Then explore the relevant code paths, identify what would need to change, and summarize the approach. Output: what you understood, what files/modules are involved, what the risks are, and what the implementation order should be.",
+      "category": "analysis",
+      "icon": "microscope",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/primitives/reasoning/analyze_task.md",
+      "sort_order": 1
+    },
+    {
+      "id": "diagnose-error",
+      "title": "Diagnose Error",
+      "description": "Analyze the given error and explain:\n- What the error means\n- Why it occurred\n- How to resolve it\n\nConstraints:\n- No assumptions\n- No unnecessary complexity\n- Use simple, clear language\n- Coding only if strictly required\n\nProvide the error message or traceback in the task description or as a comment for analysis.",
+      "category": "analysis",
+      "icon": "alert-triangle",
+      "suggested_priority": "HIGH",
+      "source": "prompt-library/primitives/reasoning/diagnose_error.md",
+      "sort_order": 2
+    },
+    {
+      "id": "plan-implementation",
+      "title": "Plan Implementation",
+      "description": "Based on the task, describe what changes you would make to implement it in the existing codebase.\n\nRequirements:\n- First ask clarifying questions if anything is ambiguous.\n- Do NOT make assumptions. If something is unknown, explicitly mark it as unknown and ask.\n- Then provide a detailed execution plan.\n- NO CODING, JUST PLAN.\n\nThe plan should cover which files to change, what to change in each, and the order of operations.",
+      "category": "analysis",
+      "icon": "map",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/primitives/reasoning/plan_implementation.md",
+      "sort_order": 3
+    },
+    {
+      "id": "root-cause-analysis",
+      "title": "Root Cause Analysis",
+      "description": "Perform a structured Root Cause Analysis on the reported issue.\n\nProcedure:\n1. **Reproduce** — Confirm the issue. What is the exact input that triggers it? What is the observed behavior vs expected behavior?\n\n2. **Locate** — Narrow down where the problem manifests. Check logs, error messages, API responses, and UI behavior. Use diagnostic scripts before reading source code.\n\n3. **Trace the data flow** — Follow data from source to symptom. The bug is at the point where actual diverges from expected. Don't guess — trace to it.\n\n4. **Ask \"why\" repeatedly** — For each proximate cause, ask why it happened. Continue until you reach the root cause (not the symptom).\n\n5. **Verify the root cause** — Confirm that the identified root cause fully explains all observed symptoms. If it doesn't, the analysis is incomplete.\n\n6. **Document findings** — Write up: symptoms observed, investigation steps taken, root cause identified, evidence supporting the conclusion, and recommended fix.\n\nConstraints:\n- Change one thing at a time during investigation\n- State hypotheses visibly before testing them\n- If stuck after 2 attempts, zoom out and reconsider the hypothesis",
+      "category": "analysis",
+      "icon": "target",
+      "suggested_priority": "HIGH",
+      "source": "skill/dk-rca (synthesized)",
+      "sort_order": 4
+    },
+    {
+      "id": "codebase-hygiene-audit",
+      "title": "Codebase Hygiene Audit",
+      "description": "Systematically scan the codebase for hygiene issues across seven categories.\n\nProcedure:\n1. **Map project structure** — Understand directory layout, build systems, language boundaries, and intentional patterns.\n\n2. **Scan seven categories:**\n   - Misplaced files (wrong directory, orphaned assets)\n   - Dead/orphaned code (unused functions, unreachable branches, stale imports)\n   - Temp/scratch files (debug artifacts, TODO files, scratch scripts)\n   - Security/config slop (committed secrets, overly permissive configs, .env files)\n   - Structural slop (inconsistent naming, mixed conventions, circular dependencies)\n   - Dependency slop (unused deps, version conflicts, duplicate packages)\n   - Git/project slop (large binaries, merge artifacts, stale branches)\n\n3. **Verify findings** — Check for false positives (dynamic imports, reflection, framework magic, test fixtures).\n\n4. **Grade each finding** — Assign priority: P0 (critical security), P1 (high), P2 (medium), P3 (low), P4 (cosmetic).\n\n5. **Report** — Create summary by priority with total findings per priority, top 5 most impactful fixes, and detail for P0-P2 findings with evidence and suggested fixes.",
+      "category": "analysis",
+      "icon": "sparkles",
+      "suggested_priority": "MEDIUM",
+      "source": "skill/dk-slop-audit",
+      "sort_order": 5
+    },
+    {
+      "id": "prompt-quality-audit",
+      "title": "Prompt Quality Audit",
+      "description": "You are a senior prompt engineer performing a post-composition audit of a prompt to detect contradictions, ambiguity, repetition, conflicting constraints, and low-signal instructions.\n\nYour task is analysis only. Do not rewrite or improve the prompt.\n\nOutput a structured Markdown report:\n\n1. **Overall Assessment**: Quality score (0-10), Logical consistency (0-10), Clarity (0-10), Noise level (0-10, higher = more noise), summary of primary risks.\n\n2. **Detected Issues** (severity ≥ 4 only): Each with type (contradiction/ambiguity/repetition/noise/conflict), severity (0-10), confidence (0-10), location, evidence, why it matters, suggested improvement, and improvement usefulness (0-10). Ordered by severity descending.\n\n3. **Hidden Risk Patterns**: Repeated structural conflicts, over-constraint vs under-specification, instruction layering problems, debugging difficulty indicators.\n\n4. **Clean/Stable Areas**: Prompt regions that are consistent, clear, and non-contradictory.\n\nScores must reflect execution risk, not preference. Prefer uncertainty over false certainty.",
+      "category": "quality-process",
+      "icon": "file-search",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/meta/review/prompt_quality_audit.md",
+      "sort_order": 1
+    },
+    {
+      "id": "prompt-comparison-audit",
+      "title": "Prompt Comparison Audit",
+      "description": "You are a senior prompt engineer performing a comparative audit between two prompts.\n\nAnalyze both prompts and produce a structured Markdown report:\n\n1. **Executive Summary**: Similarity score (0-10), Behavioral equivalence (0-10), Regression risk (0-10), Scope drift (0-10), biggest difference summary.\n\n2. **High-Impact Differences** (ranked by severity): Each with title, type (omission/addition/constraint-change/ambiguity/scope-shift/guarantee-loss), severity (0-10), confidence (0-10), location in both prompts, what changed, why it matters, regression likelihood (0-10), and how the regression could surface in real use.\n\n3. **Subtle or Silent Regressions**: Missing UI signals, dropped constraints, reduced clarity, weakened guarantees, hidden ambiguity.\n\n4. **Net Behavioral Shift**: Whether Prompt B is stricter/looser/broader/narrower, direction of capability change, overall execution risk.\n\n5. **Stable/Equivalent Areas**: Functionally unchanged parts.\n\nProvide both prompts as input (in task description or comments). Focus on execution impact, not wording style.",
+      "category": "quality-process",
+      "icon": "git-compare",
+      "suggested_priority": "MEDIUM",
+      "source": "prompt-library/domains/meta/review/prompt_comparison_audit.md",
+      "sort_order": 2
+    },
+    {
+      "id": "iterative-output-refinement",
+      "title": "Iterative Output Refinement",
+      "description": "Take a specified artifact (prompt, document, config, template, or any text output) and iteratively improve it through a structured observe-hypothesize-change-evaluate cycle.\n\nThe task description should specify: (1) the artifact to improve — either inline content, a file path, or a reference to another task's output, and (2) the quality target or improvement direction.\n\nProcedure:\n1. **Establish baseline** — Read the artifact. Understand its purpose, audience, and current quality level.\n\n2. **Observe** — Critique the current state: identify strengths, weaknesses, what's missing, what's excess, and the root quality issue.\n\n3. **Hypothesize** — Form a specific hypothesis about what single change will improve the artifact and why.\n\n4. **Change** — Apply the change. Document what was modified and the reasoning.\n\n5. **Evaluate** — Compare before vs after: which is better, what evidence supports this, what trade-offs were made?\n\n6. **Verdict** — Is it better, worse, or mixed? Record the hypothesis, result, and learnings.\n\n7. **Repeat or close** — Continue if quality target isn't met. Stop when: quality target reached, diminishing returns, or further changes would be subjective rather than substantive.\n\n8. **Deliver** — Write the final improved artifact and a brief summary of iterations: what was changed, what worked, what was tried and rejected.\n\nCore discipline: Each iteration changes one thing. Every change has a stated hypothesis. The final output should be clearly better than the input with documented reasoning for every material change.",
+      "category": "quality-process",
+      "icon": "repeat",
+      "suggested_priority": "MEDIUM",
+      "source": "skill/dk-close-the-loop",
+      "sort_order": 3
+    },
+    {
+      "id": "loop-audit",
+      "title": "Loop Audit",
+      "description": "Audit whether an AI agent can autonomously solve problems in the target area — from discovering a symptom to verifying a fix — without human intervention.\n\nProcedure:\n1. **Scope the audit** — Read the target area's documentation (CLAUDE.md, AGENTS.md, referenced docs). Build a map of possible problems, existing tools, and available docs.\n\n2. **Walk the agent journey** — For each of six stages, rate readiness (GREEN/YELLOW/RED):\n   - **Discover**: Can the agent detect something is wrong? (error messages, logs, health checks)\n   - **Diagnose**: Can it find the root cause? (diagnostic scripts, problem explanations, data flow traceability)\n   - **Hypothesize**: Can it form a theory? (WHY docs, edge cases, solution docs, architectural context)\n   - **Fix**: Can it make the change? (modification commands, guard rails, bounded change surface)\n   - **Verify**: Can it confirm the fix works? (test commands, live verification, success criteria)\n   - **Document**: Can it record what happened? (documentation workflow, templates, compounding mechanism)\n\n3. **Identify critical gaps** — For each YELLOW/RED stage, find what's missing, undiscoverable, or requires uncodified human judgment.\n\n4. **Report** — Readiness summary table, gaps ranked by impact (each with stage, what exists, what's missing, suggested fix, effort), notable strengths (2-3 sentences), and top 3-5 recommendations.",
+      "category": "quality-process",
+      "icon": "check-circle",
+      "suggested_priority": "MEDIUM",
+      "source": "skill/dk-loop-audit",
+      "sort_order": 4
+    },
+    {
+      "id": "changelog-generation",
+      "title": "Changelog Generation",
+      "description": "Generate a changelog entry from recent git changes.\n\nProcedure:\n1. **Gather raw git data** — Identify the current branch, commits diverging from the base branch, file-level diffs, and any unstaged/untracked changes. If on the main branch with no diverging commits, diff against the previous commit.\n\n2. **Read actual diffs by subsystem** — File names alone are not enough. Read the actual diffs grouped by area of the codebase (backend, frontend, types/models, docs/config, tests). For new untracked files, read them to understand what they add.\n\n3. **Generate the changelog entry** in this format:\n\n```markdown\n## YYYY-MM-DD — [Short Human-Friendly Title]\n**`<short-hash>`** — [plain-English summary of the theme]\n\n### Added\n- [what's new, described in terms of capability]\n\n### Changed\n- [what works differently now — user/developer impact]\n\n### Deleted\n- [what's gone]\n\n---\n```\n\n**Rules:**\n- **Completeness over brevity.** Every meaningful change should appear. Someone reading the changelog should understand everything that shipped without looking at the diff.\n- Only include sections (Added/Changed/Deleted) that have entries — omit empty ones.\n- **Write for humans, not machines.** Describe *what changed and why it matters*, not which files were touched.\n- **Scale detail to changeset size:** Small (1-5 files): 2-4 bullets. Medium (5-20 files): 5-10 bullets. Large (20+ files): 10-20 bullets.\n- **Don't collapse distinct changes into one bullet.** Frontend, backend, and infrastructure changes each get their own bullets.\n- Include file paths only when the file IS the feature (e.g. a new config module, a new migration).\n- Match the tone and format of existing CHANGELOG.md entries if one exists.\n\n4. **Prepend to CHANGELOG.md** — Insert the new entry after the title line.\n\n5. **Optionally commit and PR** — Stage CHANGELOG.md, commit with message \"docs: update CHANGELOG.md\", and optionally open a PR.",
+      "category": "development",
+      "icon": "file-diff",
+      "suggested_priority": "LOW",
+      "source": "skill/dk-changelog",
+      "sort_order": 1
+    },
+    {
+      "id": "knowledge-capture",
+      "title": "Knowledge Capture",
+      "description": "Explore a specified area of the codebase, workflow, or architectural pattern and document the learnings as a clean, reusable markdown document.\n\nThe task description should specify WHAT to explore — a module, a workflow, a design pattern, an integration, a past decision, or any area worth understanding deeply.\n\nProcedure:\n1. **Explore the target area** — Read the relevant code, trace the data flow, understand the design decisions and trade-offs. Look for:\n   - Non-obvious patterns or conventions\n   - Gotchas and edge cases\n   - Architectural decisions and their rationale\n   - Integration points and contracts\n   - Performance characteristics or constraints\n\n2. **Extract the learning** — From your exploration, identify:\n   - TITLE: Specific and descriptive (e.g., \"How the DAG executor handles dependency resolution\")\n   - CATEGORY: One of: design-patterns, gotchas, debugging, architecture, performance, integration, workflow, tooling\n   - WHAT IT DOES: 2-3 sentences. The mechanism, pattern, or behavior.\n   - WHY IT MATTERS: 1-2 sentences. Why someone would care.\n   - THE INSIGHT: The core learning — a principle, pattern, gotcha, or constraint. Be specific.\n   - CODE EXAMPLES: Key code paths with file paths and line references.\n   - APPLICABILITY: When this knowledge is relevant and how to apply it.\n   - TAGS: 3-7 lowercase hyphenated keywords for searchability.\n\n3. **Check for existing docs** — Search the docs directory for similar topics. Decide whether to create new, update existing, or cross-reference.\n\n4. **Write the document** using this structure:\n\n```markdown\n---\ntitle: \"<specific title>\"\ndate: <YYYY-MM-DD>\ncategory: <category>\ntags: [tag1, tag2, tag3]\nseverity: <low|medium|high|critical|design>\nstatus: <documented|observed>\n---\n\n# <Title>\n\n## Overview\n[What this area does and why it exists. 2-4 sentences.]\n\n## How It Works\n[The mechanism, data flow, or pattern. Code references with file paths.]\n\n## Key Insights\n[Non-obvious learnings. State each as a bold sentence, then explain.]\n\n## Gotchas & Edge Cases\n[What could go wrong, what's surprising, what's easy to miss.]\n\n## Applicability\n[When this knowledge is relevant. Concrete scenarios, not vague advice.]\n```\n\nAdapt the template to the subject: architectural docs emphasize How It Works + Key Insights; gotcha docs emphasize Gotchas + Applicability; workflow docs emphasize Overview + How It Works.\n\n**Quality bar:** If someone reads only this doc 3 months from now, can they understand the area, apply the knowledge, and know when it's relevant — without reading any source code?",
+      "category": "development",
+      "icon": "book-open",
+      "suggested_priority": "LOW",
+      "source": "skill/dk-compound",
+      "sort_order": 2
+    },
+    {
+      "id": "mock-first-development",
+      "title": "Mock-First Feature Development",
+      "description": "Build features by validating the user experience first with mocks, then progressively replacing mocks with real code layer by layer.\n\nThe traditional approach — build the plumbing, wire the API, then hope the UI works — inverts the feedback loop. This inverts the flow: validate the experience first, then deepen.\n\nProcedure:\n\n**Phase 0: EXPLORE & MAP**\n1. Map all user-facing interfaces this feature affects (UI pages, CLI output, API responses that drive UI). Skip internal plumbing.\n2. Catalogue all states per interface: happy path, empty, loading, error, edge cases, partial, transition.\n3. Write the interface map as the feature's north star.\n\n**Phase 1: MOCK AT THE SURFACE**\nBuild the feature using only mock data. The user can see, click, and evaluate the full feature without any backend changes.\n- **Realistic, not shallow** — mock data should include edge cases, long names, missing fields, various status combinations.\n- **Complex enough to surface problems** — lists with 50 items, not 3. Forms with validation errors.\n- **Isolated at a clean boundary** — mock where data enters the interface (API call layer, state management, data provider).\n\n**Phase 2: ACCEPTANCE GATE**\nPresent the mocked feature to the user. They evaluate:\n1. Does the happy path feel right?\n2. Are edge cases handled?\n3. What's missing?\n4. What's wrong?\n\n**Only proceed after acceptance.** Iterating on mocks is cheap. Unwinding real implementation is expensive.\n\n**Phase 3: DEEPEN — Layer by Layer**\nEach layer identifies a complexity boundary, writes failing tests first (TDD), replaces mocks with real code, and verifies the interface still works.\n\nTypical layers:\n- Surface → mock data only (UX, layout, interaction)\n- Layer 1 → real state management (transitions, caching)\n- Layer 2 → real API calls (network errors, auth, pagination)\n- Layer 3 → real business logic (validation, domain invariants)\n- Layer 4 → real persistence (migrations, queries, transactions)\n\nNot every feature has all layers. Identify where the complexity changes character.\n\n**Phase 4: SHIP**\nRun full test suite, do final live verification, write a summary of architecture decisions and what the mocks caught early.\n\n**When NOT to use:** Single-file bug fixes, purely backend changes with no interface impact, changes where the interface is already clear and validated.",
+      "category": "development",
+      "icon": "layers",
+      "suggested_priority": "MEDIUM",
+      "source": "skill/dk-local-mock-first-approach",
+      "sort_order": 3
+    },
+    {
+      "id": "workflow-breadcrumb-analysis",
+      "title": "Workflow Breadcrumb Analysis",
+      "description": "Trace a specified workflow end-to-end through the codebase and produce a compact debugging reference. The output is for devs and agents who need to find where things break — not for onboarding docs or architecture overviews.\n\nThe task description or comments should specify which flow to trace (e.g., \"task creation from board view\", \"spec execution pipeline\", \"authentication flow\").\n\nProcedure:\n\n**Step 1: Scope the flow**\nDefine boundaries before touching code:\n- FLOW: short name (kebab-case)\n- TRIGGER: what kicks it off (button click, API call, CLI command)\n- LAYERS: which layers it touches (frontend, API, worker, CLI, DB)\n- END STATE: what the user/system sees when it completes\n\nIf the flow is large (5+ files per layer, multiple independent branches), break it into sub-flows.\n\n**Step 2: Trace the flow**\nWork through each layer in execution order. For each hop, record:\n1. Source file and function\n2. What it does (one line)\n3. What data it passes (payload shape, IDs, status values)\n4. Where it goes next\n\nTracing tips:\n- Frontend → Backend: Match API URLs in service files to Django URL conf and views\n- Backend → Worker: Search for `.delay()` or `.apply_async()` calls\n- Signal/hook chains: Check Django signals, DRF `perform_create`/`perform_update` overrides, model `save()` side effects\n\n**Step 3: Create three deliverable files**\n\n1. **FLOW.md** — High-level flow (readable in 30 seconds)\n   - Linear notation: `Component :: function() → what it sends → NextComponent :: function()`\n   - Show branches with labels for different code paths\n\n2. **DETAILS.md** — Detailed trace (file/function level)\n   - For each hop: file, function, called by, calls, key logic, data in/out\n   - Focus on conditionals, data transformations, side effects, error paths\n   - Skip boilerplate — only details that matter for debugging\n\n3. **DEBUG.md** — Debugging guide\n   - Log locations table (layer → log file → what's in it)\n   - Symptom → search pattern table for common failure modes\n   - Quick diagnostic commands specific to this flow\n   - Env vars that affect behavior\n   - Common breakpoint locations with rationale\n\n**Completeness checklist:**\n- Every layer the flow touches has entries in FLOW.md\n- DETAILS.md covers every hop with file/function specifics\n- DEBUG.md has log locations for every layer involved\n- DEBUG.md has at least 3 realistic failure-mode search patterns\n- No fluff — every line earns its place\n\n**Style:** Dev-to-dev notes. No intro paragraphs, no emoji, no decorative formatting. Use code formatting for file paths, function names, commands. One line per concept. Tables over prose for structured data.",
+      "category": "documentation",
+      "icon": "route",
+      "suggested_priority": "MEDIUM",
+      "source": "skill/dk-breadcrumb-creator (synthesized)",
+      "sort_order": 5
+    },
+    {
+      "id": "agent-native-architecture-audit",
+      "title": "Agent-Native Architecture Audit",
+      "description": "Audit the codebase against agent-native architecture principles and produce a scored report identifying gaps and strengths in how well the system supports AI agent operation.\n\nEvaluate each of the following 8 principles:\n\n1. **Action Parity** — Whatever the user can do via UI, the agent can do via API/CLI. Enumerate user-facing actions (CRUD, state transitions, configuration) and check each has an equivalent programmatic path. Score: X actions with parity / Y total actions.\n\n2. **Tools as Primitives** — Tools provide capability (read, write, search), not behavior (\"do the task\"). Check that tool interfaces are granular, composable, and don't embed business logic. Score: X primitive tools / Y total tools.\n\n3. **Context Injection** — The agent receives dynamic context about current app state (active board, user role, recent changes) in its system prompt or tool responses, not just static instructions. Check what context is available at agent invocation time. Score: X context signals available / Y useful context signals.\n\n4. **Shared Workspace** — Agent and user work in the same data space (same DB, same file system, same task board). Changes by one are immediately visible to the other. Check for shadow state, agent-only stores, or sync gaps. Score: X shared stores / Y total data stores.\n\n5. **CRUD Completeness** — Every entity (tasks, boards, users, specs, comments, labels) has full Create, Read, Update, Delete via API. Check each entity for missing operations. Score: X complete entities / Y total entities.\n\n6. **UI Integration** — Agent actions are immediately reflected in the UI without manual refresh. Check for WebSocket/polling, optimistic updates, and whether agent-created data renders correctly. Score: X integrated actions / Y agent-capable actions.\n\n7. **Capability Discovery** — Users can discover what the agent can do (help commands, available actions, documentation). Check for self-describing APIs, help text, capability listings. Score: X discoverable capabilities / Y total capabilities.\n\n8. **Prompt-Native Features** — Features are defined as prompts specifying outcomes rather than hardcoded logic. Check for prompt templates, configurable behaviors, declarative task definitions. Score: X prompt-native features / Y total features.\n\nOutput format:\n\n**Summary table** — All 8 principles with score (X/Y), percentage, and status (Excellent 80%+, Partial 50-79%, Needs Work <50%).\n\n**Overall agent-native score** — Weighted average across all principles.\n\n**Top 10 recommendations** — Ranked by impact, each with: priority, specific action, which principle it serves, estimated effort.\n\n**What's working well** — Top 5 strengths with evidence.\n\n**Detailed findings per principle** — For each: what was checked, specific gaps found, specific strengths, evidence from code.",
+      "category": "analysis",
+      "icon": "cpu",
+      "suggested_priority": "MEDIUM",
+      "source": "skill/dk-agent-native-audit (synthesized)",
+      "sort_order": 6
+    },
+    {
+      "id": "merge-conflict-resolution",
+      "title": "Merge Conflict Resolution",
+      "description": "Systematically resolve merge conflicts with verification before finalizing.\n\nProcedure:\n\n**Step 0: DIAGNOSE**\n1. Snapshot the state — `git status` and note HEAD sha as a safety checkpoint.\n2. Identify the conflict source (merge, rebase, cherry-pick, stash pop) — this determines the abort command and which side is \"ours\" vs \"theirs\".\n3. Protect unstashed work — warn about uncommitted changes beyond conflicted files.\n\n**Step 1: BUILD CONTEXT**\n1. Identify the two sides:\n   - Merge: ours = current branch, theirs = branch being merged\n   - Rebase: ours = target branch, theirs = commits being replayed\n   - Stash pop: ours = current tree, theirs = stashed changes (user's work — preserve this)\n2. Find all conflicts — search for `<<<<<<<` across the repo.\n3. Triage — group into: trivial (lock files, whitespace), straightforward (different regions), requires judgment (same logic changed).\n\n**Step 2: RESOLVE EACH CONFLICT**\nFor each conflicted file:\n1. Read the full conflict region with surrounding context.\n2. Decide: keep ours, keep theirs, or combine both.\n3. Edit to remove ALL conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).\n4. Stage the resolved file.\n5. Sanity check: imports consistent? No dangling references?\n\nFor stash pop conflicts: default to preserving the user's intent — their stashed changes are the important side.\n\n**Step 3: VERIFY**\n1. Confirm no conflict markers remain (`git diff --check` + grep for stray markers).\n2. Determine affected projects from changed files.\n3. Run checks for affected projects only:\n   - Type checks / build first (catches missing imports, type errors)\n   - Lint second (catches style issues from resolution)\n   - Fast unit tests last (skip integration/e2e — those belong in CI)\n4. If a check fails due to the merge, fix before finalizing. If it's pre-existing, note it.\n5. Complete the merge operation only after all checks pass.\n\n**When unsure:** Stop and ask. Show both sides, your understanding of intent, and proposed resolution. A wrong merge is worse than a slow merge.",
+      "category": "development",
+      "icon": "git-merge",
+      "suggested_priority": "HIGH",
+      "source": "skill/dk-merge-resolve",
+      "sort_order": 4
+    }
+  ]
+}

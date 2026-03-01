@@ -1,0 +1,46 @@
+# Odin configuration — machine-local settings only
+# Copy to ~/.odin/config.yaml (global) or .odin/config.yaml (project-local)
+#
+# Agent metadata (capabilities, cost_tier, models, default/premium_model)
+# is managed centrally via seedmodels and the TaskIt API.
+# This file only needs machine-local overrides: cli_command, api_key, etc.
+
+base_agent: claude          # Which agent does task decomposition
+
+agents:
+  claude:
+    cli_command: claude
+  codex:
+    cli_command: codex
+  gemini:
+    cli_command: gemini
+  qwen:
+    cli_command: qwen
+  minimax:
+    cli_command: kilo
+    api_key: ${MINIMAX_API_KEY}
+  glm:
+    cli_command: opencode
+    api_key: ${ZAI_API_KEY}
+
+task_storage: .odin/tasks   # Project-local task storage
+log_dir: .odin/logs         # Project-local log directory
+execution_timeout_seconds: 1800  # 0 or negative = no timeout
+
+# Board backend: "taskit" (recommended) or "local" (disk-based JSON files)
+board_backend: taskit
+
+# MCP servers to enable. Each entry is a server name.
+# Available: "taskit" (task board communication), "mobile" (mobile device automation),
+#            "chrome-devtools" (browser automation, debugging, performance tracing)
+mcps:
+  - taskit
+  - mobile            # Mobile device automation (requires @mobilenext/mobile-mcp)
+  - chrome-devtools   # Browser automation & debugging (requires chrome-devtools-mcp)
+
+taskit:
+  base_url: http://localhost:8000
+  board_id: 1
+
+chrome_devtools:
+  headless: true

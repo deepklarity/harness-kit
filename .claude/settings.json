@@ -1,0 +1,42 @@
+{
+  "autoMemoryEnabled": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"$CLAUDE_FILE_PATHS\" in *.env|*.env.*|*firebase-sa.json|*credentials.json|*serviceAccount*.json) echo 'BLOCKED: Refusing to edit secrets/credentials file. Use .env.example instead.' >&2; exit 2;; esac",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"$CLAUDE_FILE_PATHS\" in *package-lock.json|*poetry.lock|*Pipfile.lock) echo 'BLOCKED: Do not edit lock files directly. Use npm install / pip install instead.' >&2; exit 2;; esac",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_FILE_PATHS\" | grep -q 'taskit-frontend/src/.*\\.[tj]sx\\?$'; then cd taskit/taskit-frontend && npx eslint --fix \"$CLAUDE_FILE_PATHS\" 2>/dev/null; exit 0; fi",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  }
+}
