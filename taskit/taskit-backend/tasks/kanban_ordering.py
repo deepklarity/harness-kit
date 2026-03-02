@@ -45,10 +45,17 @@ def _column_tasks(board_id: int, column_status: str, exclude_task_id: int | None
 
 
 def _persist_dense_positions(tasks: Iterable[Task]) -> None:
+    to_update = []
     for idx, task in enumerate(tasks):
         if task.kanban_position != idx:
-            Task.objects.filter(pk=task.id).update(kanban_position=idx)
             task.kanban_position = idx
+            to_update.append(task)
+
+    # ⚡ Bolt optimization: Use bulk_update to eliminate N+1 query problem.
+    # Replaces O(N) individual updates with a single batched query,
+    # significantly reducing database load when reordering large columns.
+    if to_update:
+        Task.objects.bulk_update(to_update, ["kanban_position"], batch_size=500)
 
 
 def move_task(task: Task, target_status: str, target_index: int | None = None) -> int:
