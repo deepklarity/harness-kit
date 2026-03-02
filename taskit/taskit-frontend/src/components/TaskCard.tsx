@@ -130,7 +130,7 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                 if (!isEditingTitle) onClick(task);
             }}
         >
-            <CardContent className={compact ? "relative !px-2.5 !py-1.5" : "relative p-2 space-y-1"} title={compact ? task.name : undefined}>
+            <CardContent className={compact ? "relative !px-2.5 !py-1.5" : "relative p-1.5 space-y-0.5"} title={compact ? task.name : undefined}>
                 {compact ? (
                     /* ── Compact layout ── */
                     <div className="space-y-0.5">
@@ -300,32 +300,34 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                             </div>
                         )}
 
-                        {/* Row 3: Spec context (if any) */}
-                        {task.specName && (
-                            <div className="flex items-center gap-1 text-muted-foreground text-xs">
-                                <FileText className="size-3 shrink-0" />
-                                <span className="truncate">{task.specName}</span>
+                        {/* Row 3: Spec context and Model chip */}
+                        {(task.specName || model) && (
+                            <div className="flex items-center gap-2 text-muted-foreground text-[11px] truncate">
+                                {task.specName && (
+                                    <div className="flex items-center gap-1 min-w-0">
+                                        <FileText className="size-3 shrink-0" />
+                                        <span className="truncate">{task.specName}</span>
+                                    </div>
+                                )}
+                                {model && (
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <Package className="size-3 shrink-0" />
+                                        <span className="truncate font-mono">{model}</span>
+                                    </div>
+                                )}
                             </div>
                         )}
 
-                        {/* Row 4: Model chip (if available from metadata) */}
-                        {model && (
-                            <div className="flex items-center gap-1 text-muted-foreground text-xs">
-                                <Package className="size-3 shrink-0" />
-                                <span className="truncate font-mono">{model}</span>
-                            </div>
-                        )}
-
-                        {/* Row 5: Footer — status, assignee, time */}
+                        {/* Row 4: Footer — status, assignee, time */}
                         <div className="flex items-center justify-between pt-1 border-t border-border">
                             {/* Left: Status badge */}
                             <div className="flex items-center gap-1.5">
                                 {!hideStatus && (
                                     <Badge
                                         variant="outline"
-                                        className={`text-[11px] h-5 px-1.5 font-medium gap-1 border-0 rounded-sm ${statusStyle}`}
+                                        className={`text-[10px] h-4 px-1 font-medium gap-1 border-0 rounded-sm ${statusStyle}`}
                                     >
-                                        <StatusIcon className="size-3" />
+                                        <StatusIcon className="size-2.5" />
                                         {task.currentStatus}
                                     </Badge>
                                 )}

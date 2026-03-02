@@ -247,12 +247,12 @@ function DroppableColumn({
     const hiddenTaskCount = tasks.length - displayTasks.length;
 
     return (
-        <div className="flex-shrink-0 w-[280px] self-start">
+        <div className="flex-shrink-0 w-[260px] self-start">
             <Card
                 className={`border-border flex flex-col overflow-hidden transition-all ${isOver ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
                 style={{ maxHeight: `${maxColumnHeight}px` }}
             >
-                <CardHeader className="p-3 pb-2 shrink-0 border-b border-border/70">
+                <CardHeader className="p-2 pb-1.5 shrink-0 border-b border-border/40">
                     <CardTitle className="flex items-center justify-between text-sm">
                         <div className="flex items-center gap-2">
                             <div className="size-2 rounded-full" style={{ background: statusColor }} />

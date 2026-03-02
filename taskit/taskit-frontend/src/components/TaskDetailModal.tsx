@@ -415,7 +415,7 @@ export function TaskDetailModal({
         <Dialog open onOpenChange={onClose}>
             <DialogContent className="sm:max-w-[90vw] w-[90vw] h-[90vh] flex flex-col p-0 overflow-hidden gap-0">
                 {/* FIXED HEADER */}
-                <DialogHeader className="shrink-0 px-6 pt-6 pb-2">
+                <DialogHeader className="shrink-0 px-4 pt-4 pb-2">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
                         <span className="font-semibold font-mono">{task.boardName}</span>
                         {task.specName && (
@@ -452,7 +452,7 @@ export function TaskDetailModal({
                 <div className="flex-1 min-h-0 flex">
 
                     {/* LEFT COLUMN: Metadata — compact layout */}
-                    <div className="w-[320px] shrink-0 border-r border-border/50 flex flex-col">
+                    <div className="w-[280px] shrink-0 border-r border-border/50 flex flex-col">
                         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-0">
                             {/* Status + Priority — side by side */}
                             <div className="flex gap-3 pb-2.5 border-b border-border/30">
@@ -896,7 +896,7 @@ export function TaskDetailModal({
 
                     {/* RIGHT COLUMN: Description & Timeline */}
                     <div className="flex-1 min-w-0 overflow-y-auto">
-                        <div className="px-6 py-4">
+                        <div className="px-4 py-3">
                         {/* Description */}
                         <div className="mb-8">
                             <div className="flex items-center justify-between mb-3">
@@ -1402,8 +1402,8 @@ function CommentItem({ comment, onReply, replyComment }: {
 /** Compact metadata row — label on left, value on right */
 function CompactRow({ label, icon, children, noBorder }: { label: string; icon?: React.ReactNode; children: React.ReactNode; noBorder?: boolean }) {
     return (
-        <div className={`flex items-start gap-2 py-1.5 ${noBorder ? '' : 'border-b border-border/30'}`}>
-            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-semibold shrink-0 w-[72px] pt-0.5 flex items-center gap-1">
+        <div className={`flex items-start gap-2 py-1 ${noBorder ? '' : 'border-b border-border/30'}`}>
+            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-semibold shrink-0 w-[64px] pt-0.5 flex items-center gap-1">
                 {icon}
                 {label}
             </span>
