@@ -25,6 +25,10 @@ from .models import (
 )
 from .utils.logger import logger
 from .permissions import IsAdmin
+from .forced_provider import (
+    get_forced_provider_selection,
+    is_model_allowed_for_forced_provider,
+)
 from .serializers import (
     AddLabelsSerializer,
     AssignTaskSerializer,
@@ -75,6 +79,31 @@ EXECUTING_LOCKED_MUTATION_FIELDS = {
 }
 
 
+def _reflection_reviewer_defaults():
+    selection = get_forced_provider_selection()
+    if selection.enabled:
+        return selection.provider, selection.model
+    return "claude", "claude-sonnet-4-5-20250929"
+
+
+def _agent_provider_name(user):
+    if not user or not user.email.endswith("@odin.agent"):
+        return None
+    return user.email.split("@")[0]
+
+
+def _validate_forced_task_target(assignee=None, model_name=None):
+    """Validate task assignment target.
+
+    In forced-provider mode, the forced provider controls the planning brain
+    and reflections, but tasks are routed to any available agent via normal
+    cheapest-capable routing. No agent restriction is enforced here.
+    """
+    # No-op: routing is handled by odin's _route_task() which distributes
+    # tasks across all available agents regardless of forced provider.
+    return
+
+
 def _clear_stop_guards(metadata):
     metadata.pop("ignore_execution_results", None)
     metadata.pop("stopped_run_token", None)
@@ -98,10 +127,11 @@ def _trigger_auto_reflection(task):
         )
         return
 
+    reviewer_agent, reviewer_model = _reflection_reviewer_defaults()
     report = ReflectionReport.objects.create(
         task=task,
-        reviewer_agent="claude",
-        reviewer_model="claude-sonnet-4-5-20250929",
+        reviewer_agent=reviewer_agent,
+        reviewer_model=reviewer_model,
         requested_by="system@taskit",
         context_selections=[
             "description", "comments", "execution_result",
@@ -201,6 +231,16 @@ def _find_alternative_agent(task):
             model_name = available[0]
 
     return agent, model_name
+
+
+def _forced_provider_response():
+    selection = get_forced_provider_selection()
+    return {
+        "enabled": selection.enabled,
+        "provider": selection.provider,
+        "model": selection.model,
+        "source": selection.source,
+    }
 
 
 def _maybe_reassign_on_quota_failure(task, report):
@@ -1212,6 +1252,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 model_name = metadata.get("selected_model") or metadata.get("model")
         if not model_name and assignee:
             model_name = _default_model_for_user(assignee)
+        _validate_forced_task_target(assignee=assignee, model_name=model_name)
 
         task = Task.objects.create(
             board=board,
@@ -1324,6 +1365,8 @@ class TaskViewSet(viewsets.ModelViewSet):
             task.kanban_position = move_task(task, target_status=target_status, target_index=target_index)
             task.status = current_status
 
+        _validate_forced_task_target(assignee=task.assignee, model_name=task.model_name)
+
         # Keep metadata["selected_model"] in sync with model_name so odin
         # picks up UI-driven model changes at execution time.
         if "model_name" in d and d["model_name"]:
@@ -1419,6 +1462,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         ser.is_valid(raise_exception=True)
 
         assignee = get_object_or_404(User, pk=ser.validated_data["assignee_id"])
+        _validate_forced_task_target(assignee=assignee, model_name=task.model_name)
         old_assignee = str(task.assignee_id) if task.assignee_id else ""
 
         if old_assignee != str(assignee.id):
@@ -1833,11 +1877,14 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         ser = ReflectionRequestSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
+        forced = get_forced_provider_selection()
+        reviewer_agent = forced.provider if forced.enabled else ser.validated_data["reviewer_agent"]
+        reviewer_model = forced.model if forced.enabled else ser.validated_data["reviewer_model"]
 
         report = ReflectionReport.objects.create(
             task=task,
-            reviewer_agent=ser.validated_data["reviewer_agent"],
-            reviewer_model=ser.validated_data["reviewer_model"],
+            reviewer_agent=reviewer_agent,
+            reviewer_model=reviewer_model,
             custom_prompt=ser.validated_data["custom_prompt"],
             context_selections=ser.validated_data["context_selections"],
             requested_by=(
@@ -2451,6 +2498,12 @@ def runtime_odin_status(request):
         },
         status=http_status,
     )
+
+
+@api_view(["GET"])
+def runtime_forced_provider(request):
+    """Expose the current forced provider configuration for read-only UI use."""
+    return Response(_forced_provider_response())
 
 
 def _list_child_directories(path_value, limit, include_hidden=False):

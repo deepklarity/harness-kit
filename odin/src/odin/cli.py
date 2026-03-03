@@ -397,7 +397,13 @@ class OdinCLI:
         )
         if base_agent:
             cfg.base_agent = base_agent
-            console.print(f"[dim]Using base agent override: {base_agent}[/dim]")
+            if cfg.forced_base_provider:
+                console.print(
+                    f"[dim]Ignoring --base-agent {base_agent}: forced provider mode is active "
+                    f"({cfg.forced_base_provider}).[/dim]"
+                )
+            else:
+                console.print(f"[dim]Using base agent override: {base_agent}[/dim]")
         orch = Orchestrator(cfg)
 
         if quiet:
@@ -416,7 +422,8 @@ class OdinCLI:
                     sys.stdout.write(text)
                     sys.stdout.flush()
 
-            console.print(f"[bold]Planning with {cfg.base_agent}...[/bold]\n")
+            planning_agent = cfg.forced_base_provider or cfg.base_agent
+            console.print(f"[bold]Planning with {planning_agent}...[/bold]\n")
             spec_id, tasks = asyncio.run(
                 orch.plan(spec, spec_file=spec_file, mode="auto", stream_callback=_stream_chunk, quick=quick)
             )
@@ -711,6 +718,10 @@ class OdinCLI:
             raise SystemExit(1)
 
         cfg = self._get_config()
+        if cfg.forced_base_provider:
+            agent = cfg.forced_base_provider
+            if cfg.forced_base_model:
+                model = cfg.forced_base_model
         self._cli_log.info(
             "reflect: task_id=%s, report_id=%s, model=%s, agent=%s",
             task_id, report_id, model, agent,

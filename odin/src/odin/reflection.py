@@ -178,11 +178,16 @@ def parse_reflection_report(raw_output: str) -> dict:
     if not raw_output or not raw_output.strip():
         return result
 
-    # Split into sections by ### headers
-    sections = re.split(r"^###\s+", raw_output, flags=re.MULTILINE)
+    # Normalize any markdown heading level (# through ######) to ### so the
+    # parser works regardless of which heading depth the model chose.
+    normalized = re.sub(r"^#{1,6}\s+", "### ", raw_output, flags=re.MULTILINE)
 
-    # If the first chunk (before any ### header) contains checklist-style content
-    # (MET/UNMET bullets), treat it as quality_assessment — some agents skip the header
+    # Split into sections by ### headers
+    sections = re.split(r"^###\s+", normalized, flags=re.MULTILINE)
+
+    # Strip preamble: text before the first ### header is typically
+    # conversational noise from non-Claude models ("I'll analyze this...").
+    # Only keep it if it contains checklist-style MET/UNMET content.
     preamble = sections[0].strip() if sections else ""
     if preamble and not result["quality_assessment"] and re.search(
         r"\b(MET|UNMET)\b", preamble
@@ -212,6 +217,8 @@ def parse_reflection_report(raw_output: str) -> dict:
                 # Strip markdown formatting (bold, italic, backticks) and leading bullets
                 cleaned = re.sub(r"[*_`#]+", "", first_line).strip()
                 cleaned = re.sub(r"^[-•]\s*", "", cleaned).strip()
+                # Strip leading "verdict:" prefix that some models add
+                cleaned = re.sub(r"^verdict\s*:\s*", "", cleaned, flags=re.IGNORECASE)
                 verdict_match = re.match(r"^(PASS|NEEDS_WORK|FAIL)\b", cleaned)
                 if verdict_match:
                     result["verdict"] = verdict_match.group(1)
@@ -226,6 +233,22 @@ def parse_reflection_report(raw_output: str) -> dict:
                     # No recognized verdict — put the whole content in summary
                     result["verdict"] = "NEEDS_WORK"
                     result["verdict_summary"] = content.strip()
+
+    # Last-resort fallback: if no verdict was extracted from structured sections,
+    # scan the entire raw output for a verdict keyword. This handles cases where
+    # non-Claude models bury the verdict in unstructured text.
+    if not result["verdict"]:
+        fallback_match = re.search(
+            r"\b(PASS|NEEDS_WORK|FAIL)\b", raw_output
+        )
+        if fallback_match:
+            result["verdict"] = fallback_match.group(1)
+            result["verdict_summary"] = "Verdict extracted from unstructured output."
+        else:
+            # Absolute fallback: never leave verdict empty — empty verdict
+            # causes tasks to get stuck in REVIEW indefinitely.
+            result["verdict"] = "NEEDS_WORK"
+            result["verdict_summary"] = "No structured verdict found in reviewer output."
 
     return result
 

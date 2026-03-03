@@ -15,6 +15,7 @@ import type {
     ReflectionRequest,
     OdinStatusResponse,
     ProcessMonitorResponse,
+    ForcedProviderStatus,
 } from '../../types';
 
 export interface AuthState {
@@ -80,6 +81,7 @@ export interface IntegrationService {
     stopExecution(taskId: string, targetStatus: string): Promise<void>;
     stopRuntimeTask(taskId: string, targetStatus?: string): Promise<void>;
     fetchOdinStatus(params?: { spec?: string; agent?: string; status?: string }): Promise<OdinStatusResponse>;
+    fetchForcedProviderStatus(): Promise<ForcedProviderStatus>;
     fetchProcessMonitor(params?: { boardId?: string; specId?: string; runningOnly?: boolean }): Promise<ProcessMonitorResponse>;
 
     getAvailableStatuses(): string[];

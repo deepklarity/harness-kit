@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReflectionRequest } from '../types';
+import { useService } from '../contexts/ServiceContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,13 +34,34 @@ const CONTEXT_OPTIONS = [
 ];
 
 export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: ReflectionModalProps) {
+    const service = useService();
     const [agent, setAgent] = useState('claude');
     const [model, setModel] = useState(DEFAULT_MODELS.claude);
+    const [forcedProviderLabel, setForcedProviderLabel] = useState('');
+    const [isForcedProvider, setIsForcedProvider] = useState(false);
     const [customPrompt, setCustomPrompt] = useState('');
     const [contextSelections, setContextSelections] = useState<string[]>(
         CONTEXT_OPTIONS.map(o => o.key)
     );
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        let active = true;
+        service.fetchForcedProviderStatus()
+            .then(status => {
+                if (!active || !status.enabled || !status.provider || !status.model) return;
+                setIsForcedProvider(true);
+                setForcedProviderLabel(`${status.provider}/${status.model}`);
+                setAgent(status.provider);
+                setModel(status.model);
+            })
+            .catch(() => {
+                if (!active) return;
+                setIsForcedProvider(false);
+                setForcedProviderLabel('');
+            });
+        return () => { active = false; };
+    }, [service, taskId]);
 
     const handleAgentChange = (newAgent: string) => {
         setAgent(newAgent);
@@ -104,7 +126,7 @@ export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: Refl
                             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
                                 Agent
                             </label>
-                            <Select value={agent} onValueChange={handleAgentChange}>
+                            <Select value={agent} onValueChange={handleAgentChange} disabled={isForcedProvider}>
                                 <SelectTrigger className="h-9">
                                     <SelectValue />
                                 </SelectTrigger>
@@ -124,9 +146,15 @@ export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: Refl
                                 onChange={e => setModel(e.target.value)}
                                 placeholder="e.g. claude-opus-4-6"
                                 className="h-9 font-mono text-sm"
+                                disabled={isForcedProvider}
                             />
                         </div>
                     </div>
+                    {isForcedProvider && (
+                        <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                            Forced provider mode is active: <span className="font-mono text-foreground">{forcedProviderLabel}</span>
+                        </div>
+                    )}
 
                     {/* Custom prompt */}
                     <div>

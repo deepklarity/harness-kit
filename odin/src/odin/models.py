@@ -106,6 +106,8 @@ class OdinConfig(BaseModel):
     """Top-level Odin configuration."""
 
     base_agent: str = "claude"
+    forced_base_provider: Optional[str] = None
+    forced_base_model: Optional[str] = None
     agents: Dict[str, AgentConfig] = Field(default_factory=dict)
     model_routing: List[ModelRoute] = Field(default_factory=list)
     banned_models: List[str] = Field(default_factory=list)

@@ -33,6 +33,7 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
     const navigate = useNavigate();
     const [boardToClear, setBoardToClear] = useState<Board | null>(null);
     const [clearing, setClearing] = useState(false);
+    const [forcedProvider, setForcedProvider] = useState<{ provider: string | null; model: string | null } | null>(null);
 
     // Manage members modal
     const [managingBoard, setManagingBoard] = useState<Board | null>(null);
@@ -61,6 +62,20 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
     useEffect(() => {
         boards.filter(b => b.odinInitialized).forEach(loadBoardAgents);
     }, [boards, loadBoardAgents]);
+
+    useEffect(() => {
+        let active = true;
+        service.fetchForcedProviderStatus()
+            .then(status => {
+                if (!active) return;
+                setForcedProvider(status.enabled ? { provider: status.provider, model: status.model } : null);
+            })
+            .catch(() => {
+                if (!active) return;
+                setForcedProvider(null);
+            });
+        return () => { active = false; };
+    }, [service]);
 
     const handleClear = async () => {
         if (!boardToClear) return;
@@ -129,6 +144,15 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
 
     return (
         <div className="space-y-8">
+            {forcedProvider?.provider && (
+                <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                    <div className="text-xs font-medium text-muted-foreground">Forced AI Provider</div>
+                    <div className="mt-1 text-sm">
+                        <span className="font-mono">{forcedProvider.provider}</span>
+                        {forcedProvider.model && <span className="text-muted-foreground"> / <span className="font-mono">{forcedProvider.model}</span></span>}
+                    </div>
+                </div>
+            )}
             {/* Boards Section */}
             <div>
                 <div className="flex items-center justify-between mb-3">

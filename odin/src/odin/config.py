@@ -7,8 +7,14 @@ from typing import Optional
 import yaml
 from dotenv import load_dotenv
 
+from odin.forced_provider import resolve_forced_provider
 from odin.models import (
-    AgentConfig, ChromeDevToolsConfig, CostTier, ModelRoute, OdinConfig, TaskItConfig,
+    AgentConfig,
+    ChromeDevToolsConfig,
+    CostTier,
+    ModelRoute,
+    OdinConfig,
+    TaskItConfig,
 )
 
 # Config search order:
@@ -134,6 +140,17 @@ def _apply_taskit_auth_env(cfg: TaskItConfig) -> TaskItConfig:
     return cfg
 
 
+def _apply_forced_provider_env(cfg: OdinConfig) -> OdinConfig:
+    """Overlay forced provider env onto config and validate it."""
+    forced = resolve_forced_provider(cfg)
+    if not forced.enabled:
+        return cfg
+    return cfg.model_copy(update={
+        "forced_base_provider": forced.provider,
+        "forced_base_model": forced.model,
+    })
+
+
 def _load_from_yaml(path: Path, source: str) -> OdinConfig:
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
@@ -218,7 +235,7 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
     if raw_cd and isinstance(raw_cd, dict):
         chrome_devtools_cfg = ChromeDevToolsConfig(**raw_cd)
 
-    return OdinConfig(
+    cfg = OdinConfig(
         base_agent=raw.get("base_agent", "claude"),
         agents=agents,
         model_routing=model_routing,
@@ -233,6 +250,7 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
         mcps=raw.get("mcps", ["taskit", "mobile", "chrome-devtools"]),
         execution_timeout_seconds=raw.get("execution_timeout_seconds", 1800),
     )
+    return _apply_forced_provider_env(cfg)
 
 
 def _default_config(source: str) -> OdinConfig:
@@ -325,7 +343,7 @@ def _default_config(source: str) -> OdinConfig:
     # Yolo mode: auto-enable API agents when keys are present
     _apply_yolo_mode(agents)
 
-    return OdinConfig(
+    cfg = OdinConfig(
         agents=agents,
         model_routing=_default_model_routing(),
         config_source=source,
@@ -333,3 +351,4 @@ def _default_config(source: str) -> OdinConfig:
         taskit=_apply_taskit_auth_env(TaskItConfig()),
         execution_timeout_seconds=1800,
     )
+    return _apply_forced_provider_env(cfg)

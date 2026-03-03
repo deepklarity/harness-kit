@@ -303,6 +303,13 @@ export interface OdinStatusResponse {
     fetched_at: string;
 }
 
+export interface ForcedProviderStatus {
+    enabled: boolean;
+    provider: string | null;
+    model: string | null;
+    source: string;
+}
+
 // ─── Reflection Types ──────────────────────────────────────
 
 export interface ReflectionReport {
