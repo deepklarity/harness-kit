@@ -302,6 +302,36 @@ ODIN_CLI_PATH=/home/you/venv/bin/odin
 ODIN_WORKING_DIR=/home/you/Harness-Kit/main/taskit
 ```
 
+### Forced provider mode (optional)
+
+Use this when you want TaskIt and Odin-backed planning/review flows to run under a fixed base provider.
+
+| Variable | What to set | Why |
+|---|---|---|
+| `FORCED_BASE_PROVIDER` | `gemini` or `qwen` | Force supported planning/review flows onto a single provider |
+| `FORCED_BASE_MODEL` | provider model name | Optionally pin a specific model for that provider |
+
+Example:
+
+```dotenv
+FORCED_BASE_PROVIDER=gemini
+```
+
+Pinned model example:
+
+```dotenv
+FORCED_BASE_PROVIDER=qwen
+FORCED_BASE_MODEL=qwen3-coder
+```
+
+Notes:
+
+- `FORCED_BASE_MODEL` is optional.
+- If `FORCED_BASE_MODEL` is not set, the provider default model is used.
+- `FORCED_BASE_MODEL` must belong to the provider selected in `FORCED_BASE_PROVIDER`.
+- Forced provider mode currently supports only `gemini` and `qwen`.
+- The corresponding CLI must be installed and available on `PATH`.
+
 ### Celery (optional, for `celery_dag`)
 
 | Variable | What to set | Why |
