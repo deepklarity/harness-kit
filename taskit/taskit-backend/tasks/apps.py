@@ -6,5 +6,8 @@ class TasksConfig(AppConfig):
     name = "tasks"
 
     def ready(self):
+        from tasks.forced_provider import validate_forced_provider_config
+
+        validate_forced_provider_config()
         import tasks.signals  # noqa: F401
         import tasks.dag_executor  # noqa: F401 — register Celery tasks

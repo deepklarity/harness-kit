@@ -130,6 +130,10 @@ AUTH_COOKIE_SAMESITE = os.environ.get("AUTH_COOKIE_SAMESITE", "Lax")
 AUTH_COOKIE_DOMAIN = os.environ.get("AUTH_COOKIE_DOMAIN") or None
 AUTH_COOKIE_PATH = os.environ.get("AUTH_COOKIE_PATH", "/auth/")
 
+# Forced provider mode
+FORCED_BASE_PROVIDER = (os.environ.get("FORCED_BASE_PROVIDER") or "").strip().lower() or None
+FORCED_BASE_MODEL = (os.environ.get("FORCED_BASE_MODEL") or "").strip() or None
+
 # Odin execution strategy
 # Set to "local" to trigger `odin exec` when a task moves to IN_PROGRESS
 # Set to "celery_dag" for DAG-aware execution via Celery Beat polling

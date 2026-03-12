@@ -163,6 +163,42 @@ class Orchestrator:
         # Availability cache to avoid redundant is_available() calls during planning
         self._availability_cache: Dict[str, bool] = {}
 
+    def _forced_provider(self) -> Tuple[Optional[str], Optional[str]]:
+        return self.config.forced_base_provider, self.config.forced_base_model
+
+    def _forced_enabled(self) -> bool:
+        provider, _ = self._forced_provider()
+        return bool(provider)
+
+    def _planning_agent_model(self) -> Tuple[str, Optional[str]]:
+        provider, model = self._forced_provider()
+        if provider:
+            return provider, model
+        base_name = self.config.base_agent
+        base_cfg = self.config.agents.get(base_name)
+        if not base_cfg:
+            raise RuntimeError(f"Base agent '{base_name}' not found in config")
+        return base_name, base_cfg.premium_model or base_cfg.default_model
+
+    def _enforce_forced_execution_target(
+        self,
+        agent_name: str,
+        model: Optional[str],
+    ) -> Tuple[str, Optional[str]]:
+        """Validate that the assigned agent's CLI is available on this machine."""
+        import shutil
+
+        cfg = self.config.agents.get(agent_name)
+        if not cfg:
+            raise RuntimeError(f"Agent '{agent_name}' not found in config")
+        cli = cfg.cli_command or agent_name
+        if not shutil.which(cli):
+            raise RuntimeError(
+                f"Agent '{agent_name}' CLI '{cli}' not found on PATH. "
+                f"Cannot execute task assigned to unavailable agent."
+            )
+        return agent_name, model
+
     @staticmethod
     def _load_pricing_table() -> Optional[Dict]:
         """Attempt to load model pricing from agent_models.json.
@@ -377,13 +413,12 @@ class Orchestrator:
 
         # Backend available — POST to /specs/:id/planning_result/
         try:
-            base_cfg = self.config.agents.get(self.config.base_agent)
-            model = (base_cfg.premium_model or base_cfg.default_model or "") if base_cfg else ""
+            agent_name, model = self._planning_agent_model()
             backend.record_planning_result(
                 spec_id=spec_id,
                 raw_output=result.output or "",
                 duration_ms=result.duration_ms or 0,
-                agent=result.agent or self.config.base_agent,
+                agent=result.agent or agent_name,
                 model=model,
                 effective_input=effective_input[:5000],
                 success=result.success,
@@ -627,14 +662,12 @@ Write your final plan as a JSON array to: `{plan_path}`"""
 
         Returns the path to the transcript log (for trace capture), or None.
         """
-        base_name = self.config.base_agent
+        base_name, model = self._planning_agent_model()
         base_cfg = self.config.agents.get(base_name)
         if not base_cfg:
-            raise RuntimeError(f"Base agent '{base_name}' not found in config")
+            raise RuntimeError(f"Planning agent '{base_name}' not found in config")
 
         harness = get_harness(base_name, base_cfg)
-        # Planning is high-judgment — always use premium model
-        model = base_cfg.premium_model or base_cfg.default_model
         context = {"working_dir": working_dir}
         if model:
             context["model"] = model
@@ -1215,12 +1248,17 @@ Write your final plan as a JSON array to: `{plan_path}`"""
 
         prompt = header + activity_section + instructions
 
-        # Use the task's assigned agent, or fall back to base agent
-        agent_name = task.assigned_agent or self.config.base_agent
-        agent_cfg = self.config.agents.get(agent_name)
-        if not agent_cfg:
-            agent_name = self.config.base_agent
+        forced_provider, forced_model = self._forced_provider()
+        if forced_provider:
+            agent_name = forced_provider
             agent_cfg = self.config.agents.get(agent_name)
+        else:
+            # Use the task's assigned agent, or fall back to base agent
+            agent_name = task.assigned_agent or self.config.base_agent
+            agent_cfg = self.config.agents.get(agent_name)
+            if not agent_cfg:
+                agent_name = self.config.base_agent
+                agent_cfg = self.config.agents.get(agent_name)
         if not agent_cfg:
             self._clear_summarize_flag(full_id)
             raise RuntimeError(f"No agent config found for '{agent_name}'")
@@ -1238,7 +1276,9 @@ Write your final plan as a JSON array to: `{plan_path}`"""
 
         # Pick model from task metadata
         model = None
-        if task.metadata:
+        if forced_model:
+            model = forced_model
+        elif task.metadata:
             model = task.metadata.get("selected_model")
         if model:
             context["model"] = model
@@ -1632,10 +1672,10 @@ Write your final plan as a JSON array to: `{plan_path}`"""
 
         Returns the TaskResult from the harness for trace capture.
         """
-        base_name = self.config.base_agent
+        base_name, model = self._planning_agent_model()
         base_cfg = self.config.agents.get(base_name)
         if not base_cfg:
-            raise RuntimeError(f"Base agent '{base_name}' not found in config")
+            raise RuntimeError(f"Planning agent '{base_name}' not found in config")
 
         harness = get_harness(base_name, base_cfg)
 
@@ -1643,8 +1683,6 @@ Write your final plan as a JSON array to: `{plan_path}`"""
             action="decompose_started", agent=base_name, input_prompt=prompt[:500]
         )
 
-        # Planning is high-judgment — always use premium model
-        model = base_cfg.premium_model or base_cfg.default_model
         log_dir = Path(self.config.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         output_file = str(log_dir / f"plan_{spec_id}.out")
@@ -1686,41 +1724,95 @@ Write your final plan as a JSON array to: `{plan_path}`"""
             action="decompose_completed",
             agent=base_name,
         )
+        result.agent = base_name
         return result
 
     def _parse_json_array(self, text: str) -> List[Dict[str, Any]]:
         """Extract a JSON array from agent output (may contain markdown fences)."""
-        # Try direct parse first
-        text = text.strip()
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-        # Try extracting from markdown code block
-        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-        if match:
+        def _try_parse(candidate: str) -> Optional[List[Dict[str, Any]]]:
             try:
-                parsed = json.loads(match.group(1))
+                parsed = json.loads(candidate)
                 if isinstance(parsed, list):
                     return parsed
             except json.JSONDecodeError:
                 pass
+            repaired = self._repair_json_strings(candidate)
+            if repaired != candidate:
+                try:
+                    parsed = json.loads(repaired)
+                    if isinstance(parsed, list):
+                        return parsed
+                except json.JSONDecodeError:
+                    pass
+            return None
+
+        # Try direct parse first
+        text = text.strip()
+        parsed = _try_parse(text)
+        if parsed is not None:
+            return parsed
+
+        # Try extracting from markdown code block
+        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+        if match:
+            parsed = _try_parse(match.group(1))
+            if parsed is not None:
+                return parsed
 
         # Try finding array brackets
         start = text.find("[")
         end = text.rfind("]")
         if start != -1 and end != -1 and end > start:
-            try:
-                parsed = json.loads(text[start : end + 1])
-                if isinstance(parsed, list):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
+            parsed = _try_parse(text[start : end + 1])
+            if parsed is not None:
+                return parsed
 
         raise RuntimeError(f"Could not parse sub-tasks JSON from output: {text[:300]}")
+
+    @staticmethod
+    def _repair_json_strings(text: str) -> str:
+        """Escape raw newlines inside quoted JSON strings.
+
+        Some agent/tool flows produce JSON-like output with literal newline
+        characters inside quoted strings. Strict ``json.loads`` rejects that
+        even though the structure is otherwise valid. This normalizes those
+        strings without touching newlines outside of quotes.
+        """
+        out: List[str] = []
+        in_string = False
+        escaped = False
+
+        for ch in text:
+            if in_string:
+                if escaped:
+                    out.append(ch)
+                    escaped = False
+                    continue
+                if ch == "\\":
+                    out.append(ch)
+                    escaped = True
+                    continue
+                if ch == '"':
+                    out.append(ch)
+                    in_string = False
+                    continue
+                if ch == "\n":
+                    out.append("\\n")
+                    continue
+                if ch == "\r":
+                    out.append("\\r")
+                    continue
+                if ch == "\t":
+                    out.append("\\t")
+                    continue
+                out.append(ch)
+                continue
+
+            out.append(ch)
+            if ch == '"':
+                in_string = True
+
+        return "".join(out)
 
     async def _is_available_cached(self, name: str, cfg) -> bool:
         """Check agent availability with caching."""
@@ -2419,9 +2511,14 @@ SUCCESS or FAILED
         """
         async with sem:
             task_run_token = os.getenv("ODIN_TASK_RUN_TOKEN", "").strip()
+            task_obj = self.task_mgr.get_task(task_id)
+            selected_model = None
+            if task_obj and task_obj.metadata:
+                selected_model = task_obj.metadata.get("selected_model")
+            agent_name, model = self._enforce_forced_execution_target(agent_name, selected_model)
+
             # Transition to EXECUTING unless already there (Celery path) or mock
             if not mock:
-                task_obj = self.task_mgr.get_task(task_id)
                 if not task_obj or task_obj.status != TaskStatus.EXECUTING:
                     self.task_mgr.update_status(task_id, TaskStatus.EXECUTING)
 
@@ -2430,12 +2527,6 @@ SUCCESS or FAILED
                 if task_obj:
                     task_obj.metadata["started_at"] = time.time()
                     self.task_mgr.update_task(task_obj)
-
-            # Read task metadata for model selection (works in both mock and normal)
-            task_obj = self.task_mgr.get_task(task_id) if not mock else None
-            model = None
-            if task_obj and task_obj.metadata:
-                model = task_obj.metadata.get("selected_model")
 
             self._log.info(
                 "[task:%s] Execution started: agent=%s, model=%s, mock=%s",

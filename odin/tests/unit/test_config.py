@@ -153,6 +153,30 @@ agents:
         assert cfg.agents["minimax"].api_key is None
 
 
+class TestForcedProviderEnv:
+    def test_forced_provider_uses_default_model(self):
+        with patch.dict(os.environ, {"FORCED_BASE_PROVIDER": "gemini", "FORCED_BASE_MODEL": ""}, clear=False), \
+             patch("odin.forced_provider.shutil.which", return_value="/usr/bin/gemini"):
+            cfg = _default_config("test")
+        assert cfg.forced_base_provider == "gemini"
+        assert cfg.forced_base_model == "gemini-3-flash-preview"
+
+    def test_forced_provider_uses_pinned_model(self):
+        with patch.dict(
+            os.environ,
+            {"FORCED_BASE_PROVIDER": "qwen", "FORCED_BASE_MODEL": "qwen3-coder"},
+            clear=False,
+        ), patch("odin.forced_provider.shutil.which", return_value="/usr/bin/qwen"):
+            cfg = _default_config("test")
+        assert cfg.forced_base_provider == "qwen"
+        assert cfg.forced_base_model == "qwen3-coder"
+
+    def test_invalid_forced_provider_raises(self):
+        with patch.dict(os.environ, {"FORCED_BASE_PROVIDER": "claude", "FORCED_BASE_MODEL": ""}, clear=False):
+            with pytest.raises(RuntimeError, match="FORCED_BASE_PROVIDER"):
+                _default_config("test")
+
+
 # ── Model parsing helpers ─────────────────────────────────────────────
 
 

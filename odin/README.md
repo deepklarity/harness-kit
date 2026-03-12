@@ -141,6 +141,33 @@ agents:
 
 See [config/config.sample.yaml](config/config.sample.yaml) for the full template.
 
+## Forced Provider Mode (Optional)
+
+If you want Odin to always use Gemini or Qwen as the planning base provider, set the following in your project's `.env`:
+
+```dotenv
+FORCED_BASE_PROVIDER=gemini
+```
+
+Supported values for `FORCED_BASE_PROVIDER`:
+
+- `gemini`
+- `qwen`
+
+You can also pin a specific model. This is optional. If omitted, Odin uses that provider's default model.
+
+```dotenv
+FORCED_BASE_PROVIDER=qwen
+FORCED_BASE_MODEL=qwen3-coder
+```
+
+Notes:
+
+- `FORCED_BASE_MODEL` must belong to the selected provider.
+- Forced provider mode currently supports only `gemini` and `qwen`.
+- The selected provider CLI must be available on `PATH`.
+- When forced provider mode is active, Odin ignores the usual base-agent selection for planning flows.
+
 ## CLI Commands Reference
 
 ```bash

@@ -22,6 +22,7 @@ import type {
     ReflectionReport,
     ReflectionRequest,
     ProcessMonitorResponse,
+    ForcedProviderStatus,
 } from '../../types';
 
 export interface ParsedActor {
@@ -782,6 +783,10 @@ export class HarnessTimeService implements IntegrationService {
         if (params?.agent) qs.set('agent', params.agent);
         if (params?.status) qs.set('status', params.status);
         return this.get<OdinStatusResponse>(`/api/runtime/odin-status/${qs.toString() ? `?${qs}` : ''}`);
+    }
+
+    async fetchForcedProviderStatus(): Promise<ForcedProviderStatus> {
+        return this.get<ForcedProviderStatus>('/api/runtime/forced-provider/');
     }
 
     async fetchProcessMonitor(params?: { boardId?: string; specId?: string; runningOnly?: boolean }): Promise<ProcessMonitorResponse> {
