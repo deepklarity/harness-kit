@@ -1329,7 +1329,10 @@ function CommentItem({ comment, onReply, replyComment }: {
             {summary && (
                 isSummary ? (
                     <div className="mt-1 rounded-md border border-amber-400/20 bg-card/60 p-3 overflow-x-auto">
-                        <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed text-foreground/80">{summary}</pre>
+                        <MarkdownRenderer
+                            text={summary}
+                            className="text-sm text-foreground/80"
+                        />
                     </div>
                 ) : (
                     <>
@@ -1342,9 +1345,10 @@ function CommentItem({ comment, onReply, replyComment }: {
                             </div>
                         )}
                         {failureDetails.displaySummary && (
-                            <div className="text-sm whitespace-pre-wrap leading-relaxed text-foreground/80">
-                                {failureDetails.displaySummary}
-                            </div>
+                            <MarkdownRenderer
+                                text={failureDetails.displaySummary}
+                                className="text-sm text-foreground/80"
+                            />
                         )}
                     </>
                 )
@@ -1441,7 +1445,12 @@ function CommentItem({ comment, onReply, replyComment }: {
                         <span className="font-medium">{replyComment.authorLabel || parseActor(replyComment.authorEmail).display}</span>
                         <span className="text-muted-foreground font-mono">{formatDate(replyComment.createdAt)}</span>
                     </div>
-                    <div className="text-sm text-foreground/80 pl-4">{replyComment.content}</div>
+                    <div className="pl-4">
+                        <MarkdownRenderer
+                            text={replyComment.content}
+                            className="text-sm text-foreground/80"
+                        />
+                    </div>
                 </div>
             )}
         </div>
