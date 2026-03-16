@@ -69,7 +69,15 @@ interface HarnessUser {
     created_at: string;
     color?: string;
     role?: 'HUMAN' | 'AGENT' | 'ADMIN';
-    available_models?: Array<{name: string; description: string; is_default: boolean; input_price_per_1m_tokens?: number | null; output_price_per_1m_tokens?: number | null; cache_read_price_per_1m_tokens?: number | null}>;
+    available_models?: Array<{
+        name: string;
+        description: string;
+        is_default: boolean;
+        supports_image_input?: boolean | null;
+        input_price_per_1m_tokens?: number | null;
+        output_price_per_1m_tokens?: number | null;
+        cache_read_price_per_1m_tokens?: number | null;
+    }>;
     cost_tier?: string;
     capabilities?: string[];
 }
@@ -109,6 +117,7 @@ interface HarnessTask {
     history?: HarnessTaskHistory[];
     comments?: HarnessTaskComment[];
     comment_count?: number;
+    reference_images?: Array<Record<string, unknown>>;
 }
 
 interface HarnessTaskComment {
@@ -514,6 +523,15 @@ export class HarnessTimeService implements IntegrationService {
             estimatedCostUsd: raw.estimated_cost_usd ?? undefined,
             reflectionCostUsd: raw.reflection_cost_usd ?? undefined,
             usage: raw.usage ?? undefined,
+            referenceImages: (raw.reference_images || []).map((a: Record<string, unknown>) => ({
+                id: a.id as number,
+                url: a.url as string,
+                originalFilename: a.original_filename as string,
+                contentType: a.content_type as string,
+                fileSize: a.file_size as number,
+                uploadedBy: a.uploaded_by as string,
+                createdAt: a.created_at as string,
+            })),
         };
     }
 
@@ -728,6 +746,23 @@ export class HarnessTimeService implements IntegrationService {
 
         return this.post<HarnessTask>('/api/tasks/', body);
     }
+    async uploadScreenshots(taskId: string, files: File[], authorEmail?: string): Promise<unknown> {
+        const formData = new FormData();
+        for (const file of files) formData.append('files', file);
+        if (authorEmail) formData.append('author_email', authorEmail);
+        const auth = await this.authHeaders();
+        const res = await fetch(`${this.baseUrl}/api/tasks/${Number(taskId)}/screenshots/`, {
+            method: 'POST',
+            headers: { ...auth },
+            body: formData,
+        });
+        if (!res.ok) {
+            let body: unknown;
+            try { body = await res.json(); } catch { /* ignore */ }
+            throw new ApiError(res.status, res.statusText, body);
+        }
+        return res.json();
+    }
 
     async updateTask(taskId: string, updates: {
         title?: string; description?: string; priority?: string; devEta?: number; status?: string;
@@ -893,7 +928,13 @@ export class HarnessTimeService implements IntegrationService {
         return this.post<HarnessUser>('/api/users/', { name, email, color });
     }
 
-    async updateUser(id: string, name?: string, email?: string, color?: string, availableModels?: Array<{name: string; description: string; is_default: boolean}>): Promise<HarnessUser> {
+    async updateUser(
+        id: string,
+        name?: string,
+        email?: string,
+        color?: string,
+        availableModels?: Array<{ name: string; description: string; is_default: boolean; supports_image_input?: boolean }>,
+    ): Promise<HarnessUser> {
         const body: Record<string, unknown> = { name, email, color };
         if (availableModels !== undefined) {
             body.available_models = availableModels;

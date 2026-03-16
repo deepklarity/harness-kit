@@ -439,6 +439,14 @@ class TaskItBackend(BoardBackend):
         )
         return task
 
+    def get_task_raw(self, task_id: str) -> dict:
+        """GET /tasks/{id}/ — raw API response as dict (includes reference_images)."""
+        resp = self._client.get(f"/tasks/{task_id}/")
+        if resp.status_code == 404:
+            return {}
+        _raise_for_status(resp)
+        return resp.json()
+
     def load_task(self, task_id: str) -> Optional[Task]:
         resp = self._client.get(f"/tasks/{task_id}/")
         if resp.status_code == 404:

@@ -36,6 +36,7 @@ class TaskSerializer(serializers.ModelSerializer):
     reflection_cost_usd = serializers.SerializerMethodField()
     usage = serializers.SerializerMethodField()
     time_in_statuses = serializers.SerializerMethodField()
+    reference_images = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -46,6 +47,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "spec_id", "depends_on",
             "complexity", "metadata", "model_name",
             "estimated_cost_usd", "reflection_cost_usd", "usage", "time_in_statuses",
+            "reference_images",
         ]
         read_only_fields = ["id", "created_at", "last_updated_at", "kanban_position"]
 
@@ -74,6 +76,12 @@ class TaskSerializer(serializers.ModelSerializer):
                 total += cost
                 has_any = True
         return round(total, 6) if has_any else None
+
+    def get_reference_images(self, obj):
+        orphan_attachments = obj.attachments.filter(comment__isnull=True)
+        return CommentAttachmentSerializer(
+            orphan_attachments, many=True, context=self.context
+        ).data
 
     def get_time_in_statuses(self, obj):
         """Compute ms spent in each status from mutation history."""

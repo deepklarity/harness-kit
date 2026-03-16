@@ -171,6 +171,7 @@ if ODIN_EXECUTION_STRATEGY == "celery_dag":
         "schedule": int(os.environ.get("DAG_EXECUTOR_POLL_INTERVAL", "5")),
     }
 DAG_EXECUTOR_MAX_CONCURRENCY = int(os.environ.get("DAG_EXECUTOR_MAX_CONCURRENCY", "3"))
+ODIN_SPEC_PLAN_TIMEOUT_SECONDS = int(os.environ.get("ODIN_SPEC_PLAN_TIMEOUT_SECONDS", "1800"))
 
 # Logging — route Django request logs through the taskit detail logger
 _LOG_DIR = BASE_DIR / "logs"

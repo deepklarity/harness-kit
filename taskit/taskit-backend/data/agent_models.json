@@ -12,6 +12,7 @@
           "name": "claude-sonnet-4-5",
           "description": "default, fast + capable",
           "is_default": true,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 3.00,
           "output_price_per_1m_tokens": 15.00,
           "cache_read_price_per_1m_tokens": 0.30
@@ -20,6 +21,7 @@
           "name": "claude-opus-4",
           "description": "previous opus, 3x cost",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 15.00,
           "output_price_per_1m_tokens": 75.00,
           "cache_read_price_per_1m_tokens": 1.50
@@ -28,6 +30,7 @@
           "name": "claude-opus-4-6",
           "description": "latest opus, highest quality",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 5.00,
           "output_price_per_1m_tokens": 25.00,
           "cache_read_price_per_1m_tokens": 1.50
@@ -36,6 +39,7 @@
           "name": "claude-haiku-4-5",
           "description": "fast, cheapest, good for simple tasks",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 1.00,
           "output_price_per_1m_tokens": 5.00,
           "cache_read_price_per_1m_tokens": 0.10
@@ -54,6 +58,7 @@
           "name": "gpt-5.3-codex",
           "description": "default, optimized for code",
           "is_default": true,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 1.75,
           "output_price_per_1m_tokens": 14.00,
           "cache_read_price_per_1m_tokens": 0.50
@@ -62,6 +67,7 @@
           "name": "o3",
           "description": "strong reasoning",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 2.00,
           "output_price_per_1m_tokens": 8.00,
           "cache_read_price_per_1m_tokens": 2.50
@@ -70,6 +76,7 @@
           "name": "o4-mini",
           "description": "fast, cheaper",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 1.10,
           "output_price_per_1m_tokens": 4.40,
           "cache_read_price_per_1m_tokens": 0.28
@@ -88,6 +95,7 @@
           "name": "gemini-2.5-pro",
           "description": "strongest, highest quota usage",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 1.25,
           "output_price_per_1m_tokens": 10.00,
           "cache_read_price_per_1m_tokens": 0.31
@@ -96,6 +104,7 @@
           "name": "gemini-2.5-flash",
           "description": "balanced speed/quality",
           "is_default": true,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 0.30,
           "output_price_per_1m_tokens": 2.50,
           "cache_read_price_per_1m_tokens": 0.04
@@ -104,6 +113,7 @@
           "name": "gemini-2.0-flash",
           "description": "fastest, lowest quota usage",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 0.10,
           "output_price_per_1m_tokens": 0.40,
           "cache_read_price_per_1m_tokens": 0.03
@@ -112,6 +122,7 @@
           "name": "gemini-3-pro-preview",
           "description": "next-gen preview, strong reasoning",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 2.00,
           "output_price_per_1m_tokens": 12.00,
           "cache_read_price_per_1m_tokens": 0.31
@@ -120,6 +131,7 @@
           "name": "gemini-3-flash-preview",
           "description": "next-gen preview, fast",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 0.50,
           "output_price_per_1m_tokens": 3.00,
           "cache_read_price_per_1m_tokens": 0.04
@@ -138,6 +150,7 @@
           "name": "qwen3-coder",
           "description": "default, code-optimized",
           "is_default": true,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.22,
           "output_price_per_1m_tokens": 1.80,
           "cache_read_price_per_1m_tokens": 0.25
@@ -156,6 +169,7 @@
           "name": "minimax-coding-plan/MiniMax-M2",
           "description": "balanced, general purpose",
           "is_default": true,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.30,
           "output_price_per_1m_tokens": 1.20,
           "cache_read_price_per_1m_tokens": 0.06
@@ -164,6 +178,7 @@
           "name": "minimax-coding-plan/MiniMax-M2.1",
           "description": "improved reasoning",
           "is_default": false,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.30,
           "output_price_per_1m_tokens": 1.20,
           "cache_read_price_per_1m_tokens": 0.07
@@ -172,6 +187,7 @@
           "name": "minimax-coding-plan/MiniMax-M2.5",
           "description": "latest, strongest",
           "is_default": false,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.30,
           "output_price_per_1m_tokens": 1.20,
           "cache_read_price_per_1m_tokens": 0.08
@@ -190,6 +206,7 @@
           "name": "zai-coding-plan/glm-5",
           "description": "opus-level, 3x token usage over glm-4.7",
           "is_default": false,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 1.00,
           "output_price_per_1m_tokens": 3.20,
           "cache_read_price_per_1m_tokens": 0.25
@@ -198,6 +215,7 @@
           "name": "zai-coding-plan/glm-4.7",
           "description": "default, balanced cost/quality",
           "is_default": true,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.60,
           "output_price_per_1m_tokens": 2.20,
           "cache_read_price_per_1m_tokens": 0.15
@@ -206,6 +224,7 @@
           "name": "zai-coding-plan/glm-4.7-flash",
           "description": "fast, low cost",
           "is_default": false,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.40,
           "output_price_per_1m_tokens": 0.00,
           "cache_read_price_per_1m_tokens": 0.00
@@ -214,6 +233,7 @@
           "name": "zai-coding-plan/glm-4.6",
           "description": "previous gen, stable",
           "is_default": false,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.55,
           "output_price_per_1m_tokens": 2.20,
           "cache_read_price_per_1m_tokens": 0.15
@@ -222,6 +242,7 @@
           "name": "zai-coding-plan/glm-4.6v",
           "description": "vision-capable",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 0.55,
           "output_price_per_1m_tokens": 2.19,
           "cache_read_price_per_1m_tokens": 0.08
@@ -230,6 +251,7 @@
           "name": "zai-coding-plan/glm-4.5-air",
           "description": "lightweight, cheapest",
           "is_default": false,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.20,
           "output_price_per_1m_tokens": 1.10,
           "cache_read_price_per_1m_tokens": 0.05
@@ -238,6 +260,7 @@
           "name": "zai-coding-plan/glm-4.5-flash",
           "description": "fast, budget option",
           "is_default": false,
+          "supports_image_input": false,
           "input_price_per_1m_tokens": 0.00,
           "output_price_per_1m_tokens": 0.00,
           "cache_read_price_per_1m_tokens": 0.00
@@ -246,6 +269,7 @@
           "name": "zai-coding-plan/glm-4.5v",
           "description": "vision, previous gen",
           "is_default": false,
+          "supports_image_input": true,
           "input_price_per_1m_tokens": 0.55,
           "output_price_per_1m_tokens": 2.19,
           "cache_read_price_per_1m_tokens": 0.15

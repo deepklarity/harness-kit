@@ -347,8 +347,8 @@ function App() {
     const handleCreateTask = async (
         boardId: string, title: string, description: string, priority: string,
         assigneeId: number, modelName: string | undefined, devEta?: number, labelIds?: number[], workingDir?: string
-    ) => {
-        await service.createTask(
+    ): Promise<string> => {
+        const result = await service.createTask(
             boardId,
             title,
             description,
@@ -361,8 +361,9 @@ function App() {
                 labelIds,
                 workingDir,
             },
-        );
+        ) as { id: number };
         setRefreshKey(k => k + 1);
+        return String(result.id);
     };
     const handleUpdateAssignees = async (taskId: string, memberIds: string[]) => {
         try {

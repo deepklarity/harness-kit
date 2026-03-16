@@ -104,6 +104,7 @@ export function TaskDetailModal({
     const [labelSearch, setLabelSearch] = useState('');
     const [newLabelName, setNewLabelName] = useState('');
     const [newLabelColor, setNewLabelColor] = useState(LABEL_COLORS[0]);
+    const [refImageLightbox, setRefImageLightbox] = useState<{ url: string; filename: string } | null>(null);
 
     // Reflection state
     const [showReflectionModal, setShowReflectionModal] = useState(false);
@@ -956,6 +957,35 @@ export function TaskDetailModal({
                             )}
                         </div>
 
+                        {/* Reference Images */}
+                        {task.referenceImages && task.referenceImages.length > 0 && (
+                            <div className="mb-8 mt-6">
+                                <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3">
+                                    Reference Images
+                                </h3>
+                                <div className="flex flex-wrap gap-3">
+                                    {task.referenceImages.map(img => (
+                                        <button
+                                            key={img.id}
+                                            type="button"
+                                            className="block text-left cursor-zoom-in"
+                                            onClick={() => setRefImageLightbox({ url: img.url, filename: img.originalFilename })}
+                                        >
+                                            <img
+                                                src={img.url}
+                                                alt={img.originalFilename}
+                                                loading="lazy"
+                                                className="rounded border border-border/40 max-w-[300px] max-h-[200px] object-contain hover:border-cyan-500/50 transition-colors"
+                                            />
+                                            <span className="text-[10px] text-muted-foreground/60 font-mono block mt-0.5 truncate max-w-[300px]">
+                                                {img.originalFilename}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         <Separator className="mb-8" />
 
                         {/* Comments Section */}
@@ -1128,6 +1158,25 @@ export function TaskDetailModal({
                     </div>
                 </div>
             </DialogContent>
+
+            {/* Reference Image Lightbox */}
+            {refImageLightbox && (
+                <Dialog open={true} onOpenChange={() => setRefImageLightbox(null)}>
+                    <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 bg-black/95 border-border/20 overflow-hidden flex items-center justify-center">
+                        <DialogHeader className="sr-only">
+                            <DialogTitle>{refImageLightbox.filename}</DialogTitle>
+                        </DialogHeader>
+                        <img
+                            src={refImageLightbox.url}
+                            alt={refImageLightbox.filename}
+                            className="max-w-full max-h-[85vh] object-contain"
+                        />
+                        <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-xs text-white/60 font-mono bg-black/60 px-3 py-1 rounded-full">
+                            {refImageLightbox.filename}
+                        </span>
+                    </DialogContent>
+                </Dialog>
+            )}
 
             {/* Reflection Modal */}
             {showReflectionModal && (

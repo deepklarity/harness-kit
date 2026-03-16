@@ -89,6 +89,10 @@ export interface IntegrationService {
     fetchSpecs?(): Promise<Spec[]>;
     fetchSpecDetail?(id: string): Promise<Spec>;
 
+
+    uploadScreenshots(taskId: string, files: File[], authorEmail?: string): Promise<unknown>;
+
+
     // Comments
     addComment(taskId: string, content: string, authorEmail?: string, commentType?: string): Promise<void>;
     replyToQuestion(taskId: string, questionCommentId: string, content: string, authorEmail?: string): Promise<void>;

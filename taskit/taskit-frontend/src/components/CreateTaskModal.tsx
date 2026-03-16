@@ -11,8 +11,9 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ChevronDown, Plus, X, Bot, User } from 'lucide-react';
+import { ChevronDown, Plus, X, Bot, User, AlertTriangle } from 'lucide-react';
 import { PresetPicker } from './PresetPicker';
+import { ImageDropZone } from './ImageDropZone';
 
 export interface ApiUser {
     id: number;
@@ -37,7 +38,7 @@ interface CreateTaskModalProps {
         devEta?: number,
         labelIds?: number[],
         workingDir?: string
-    ) => Promise<void>;
+    ) => Promise<string | void>;
     availableLabels?: LabelType[];
 }
 
@@ -53,6 +54,8 @@ export function CreateTaskModal({ boards, defaultBoardId, users: initialUsers, o
     const [devEta, setDevEta] = useState<string>('');
     const [loading, setLoading] = useState(false);
     const [showExtra, setShowExtra] = useState(false);
+    const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+    const [uploadingScreenshots, setUploadingScreenshots] = useState(false);
 
     const [users, setUsers] = useState<ApiUser[]>(initialUsers);
 
@@ -171,6 +174,14 @@ export function CreateTaskModal({ boards, defaultBoardId, users: initialUsers, o
         [selectedAssignee],
     );
 
+    // Compute selected model capability for image input
+    const selectedModel = useMemo(
+        () => availableModels.find(m => m.name === selectedModelName),
+        [availableModels, selectedModelName]
+    );
+    const selectedModelSupportsImageInput = Boolean(selectedModel?.supports_image_input);
+    const hasImageModelMismatch = stagedFiles.length > 0 && !selectedModelSupportsImageInput;
+
     useEffect(() => {
         if (availableModels.length === 0) {
             setSelectedModelName('');
@@ -210,10 +221,21 @@ export function CreateTaskModal({ boards, defaultBoardId, users: initialUsers, o
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!title.trim() || !description.trim() || !boardId || !selectedUserId) return;
+
+        // Block submission if images are attached but model lacks image support
+        if (hasImageModelMismatch) {
+            toast({
+                title: 'Model does not support images',
+                description: 'Choose a model with image input support or remove the attached images.',
+                variant: 'destructive',
+            });
+            return;
+        }
         setLoading(true);
+        let taskId: string | undefined;
         try {
             const etaNum = devEta ? parseFloat(devEta) : undefined;
-            await onCreate(
+            const result = await onCreate(
                 boardId,
                 title,
                 description,
@@ -224,16 +246,34 @@ export function CreateTaskModal({ boards, defaultBoardId, users: initialUsers, o
                 selectedLabelIds.length > 0 ? selectedLabelIds : undefined,
                 undefined, // workingDir — inherited from board
             );
-            onClose();
+            taskId = result || undefined;
         } catch {
             toast({
                 title: "Error",
                 description: "Failed to create task",
                 variant: "destructive"
             });
-        } finally {
             setLoading(false);
+            return;
         }
+        setLoading(false);
+
+        if (stagedFiles.length > 0 && taskId) {
+            setUploadingScreenshots(true);
+            try {
+                await service.uploadScreenshots(taskId, stagedFiles);
+            } catch {
+                toast({
+                    title: "Warning",
+                    description: "Task created, but reference images failed to upload.",
+                    variant: "destructive",
+                });
+            } finally {
+                setUploadingScreenshots(false);
+            }
+        }
+
+        onClose();
     };
 
     return (
@@ -243,198 +283,218 @@ export function CreateTaskModal({ boards, defaultBoardId, users: initialUsers, o
                     <DialogTitle>Create New Task</DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-2">
-                        <Label>Target Board</Label>
-                        <Select value={boardId} onValueChange={setBoardId}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                {boards.map(b => (
-                                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
+                        <div className="flex flex-col gap-2">
+                            <Label>Target Board</Label>
+                            <Select value={boardId} onValueChange={setBoardId}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {boards.map(b => (
+                                        <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
 
-                    {presets.length > 0 && (
-                        <PresetPicker
-                            presets={presets}
-                            categories={presetCategories}
-                            selectedPreset={selectedPreset}
-                            onSelect={handlePresetSelect}
-                            onClear={handlePresetClear}
-                        />
-                    )}
+                        {presets.length > 0 && (
+                            <PresetPicker
+                                presets={presets}
+                                categories={presetCategories}
+                                selectedPreset={selectedPreset}
+                                onSelect={handlePresetSelect}
+                                onClear={handlePresetClear}
+                            />
+                        )}
 
-                    <div className="flex flex-col gap-2">
-                        <Label>Title</Label>
-                        <Input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Brief task title" />
-                    </div>
+                        <div className="flex flex-col gap-2">
+                            <Label>Title</Label>
+                            <Input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Brief task title" />
+                        </div>
 
-                    <div className="flex flex-col gap-2">
-                        <Label>Task Description</Label>
-                        <Textarea required value={description} onChange={e => setDescription(e.target.value)} placeholder="What needs to be done?" className="min-h-[80px] max-h-[200px]" />
-                    </div>
+                        <div className="flex flex-col gap-2">
+                            <Label>Task Description</Label>
+                            <Textarea required value={description} onChange={e => setDescription(e.target.value)} placeholder="What needs to be done?" className="min-h-[80px] max-h-[200px]" />
+                        </div>
 
-                    <div className="flex flex-col gap-2">
-                        <Label>Assignee</Label>
-                        {showNewUser ? (
-                            <div className="flex flex-col gap-2">
-                                <Input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Name" />
-                                <Input type="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="Email" />
-                                <div className="flex gap-2">
-                                    <Button type="button" size="sm" className="flex-1"
-                                        disabled={creatingUser || !newUserName.trim() || !newUserEmail.trim()}
-                                        onClick={handleCreateUser}>
-                                        {creatingUser ? 'Creating...' : 'Add User'}
-                                    </Button>
-                                    <Button type="button" size="sm" variant="outline" onClick={() => setShowNewUser(false)}>Cancel</Button>
+                        <div className="flex flex-col gap-2">
+                            <Label>Reference Images <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                            <ImageDropZone files={stagedFiles} onFilesChange={setStagedFiles} />
+                            {hasImageModelMismatch && (
+                                <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+                                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                                    <span>
+                                        The selected model does not support image input. Choose an image-capable model or remove the attached images.
+                                    </span>
                                 </div>
-                            </div>
-                        ) : (
-                            <div className="flex gap-2">
-                                <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                                    <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        {boardUsers.map(u => {
-                                            const agent = isAgentUser(u);
-                                            const disabled = disabledAgentEmails.has(u.email);
-                                            return (
-                                                <SelectItem
-                                                    key={u.id}
-                                                    value={String(u.id)}
-                                                    disabled={disabled}
-                                                    className={disabled ? 'opacity-40' : ''}
-                                                >
-                                                    <span className="flex items-center gap-2">
-                                                        {agent ? (
-                                                            <Bot className="size-3.5 text-blue-500 shrink-0" />
-                                                        ) : (
-                                                            <User className="size-3.5 text-muted-foreground shrink-0" />
-                                                        )}
-                                                        <span className={disabled ? 'line-through' : ''}>
-                                                            {u.name}
-                                                        </span>
-                                                        {disabled && (
-                                                            <span className="text-[10px] text-muted-foreground">disabled</span>
-                                                        )}
-                                                    </span>
-                                                </SelectItem>
-                                            );
-                                        })}
-                                    </SelectContent>
-                                </Select>
-                                <Button type="button" variant="outline" size="icon" onClick={() => setShowNewUser(true)} title="Create new user">
-                                    <Plus className="size-4" />
-                                </Button>
-                            </div>
-                        )}
-                    </div>
+                            )}
+                        </div>
 
-                    {/* Collapsible extra settings */}
-                    <button
-                        type="button"
-                        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
-                        onClick={() => setShowExtra(!showExtra)}
-                    >
-                        <ChevronDown className={`size-3.5 transition-transform ${showExtra ? 'rotate-0' : '-rotate-90'}`} />
-                        Extra settings
-                        {(priority !== 'MEDIUM' || selectedLabelIds.length > 0 || devEta) && (
-                            <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded">customized</span>
-                        )}
-                    </button>
-
-                    {showExtra && (
-                        <div className="flex flex-col gap-4 pl-2 border-l-2 border-muted">
-                            <div className="flex flex-col gap-2">
-                                <Label>Model</Label>
-                                {availableModels.length > 0 ? (
-                                    <Select value={selectedModelName} onValueChange={setSelectedModelName}>
-                                        <SelectTrigger><SelectValue placeholder="Select model..." /></SelectTrigger>
+                        <div className="flex flex-col gap-2">
+                            <Label>Assignee</Label>
+                            {showNewUser ? (
+                                <div className="flex flex-col gap-2">
+                                    <Input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Name" />
+                                    <Input type="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="Email" />
+                                    <div className="flex gap-2">
+                                        <Button type="button" size="sm" className="flex-1"
+                                            disabled={creatingUser || !newUserName.trim() || !newUserEmail.trim()}
+                                            onClick={handleCreateUser}>
+                                            {creatingUser ? 'Creating...' : 'Add User'}
+                                        </Button>
+                                        <Button type="button" size="sm" variant="outline" onClick={() => setShowNewUser(false)}>Cancel</Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex gap-2">
+                                    <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                                        <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
                                         <SelectContent>
-                                            {availableModels.map(model => (
-                                                <SelectItem key={model.name} value={model.name}>
-                                                    <span className="font-mono">{model.name}</span>
-                                                </SelectItem>
-                                            ))}
+                                            {boardUsers.map(u => {
+                                                const agent = isAgentUser(u);
+                                                const disabled = disabledAgentEmails.has(u.email);
+                                                return (
+                                                    <SelectItem
+                                                        key={u.id}
+                                                        value={String(u.id)}
+                                                        disabled={disabled}
+                                                        className={disabled ? 'opacity-40' : ''}
+                                                    >
+                                                        <span className="flex items-center gap-2">
+                                                            {agent ? (
+                                                                <Bot className="size-3.5 text-blue-500 shrink-0" />
+                                                            ) : (
+                                                                <User className="size-3.5 text-muted-foreground shrink-0" />
+                                                            )}
+                                                            <span className={disabled ? 'line-through' : ''}>
+                                                                {u.name}
+                                                            </span>
+                                                            {disabled && (
+                                                                <span className="text-[10px] text-muted-foreground">disabled</span>
+                                                            )}
+                                                        </span>
+                                                    </SelectItem>
+                                                );
+                                            })}
                                         </SelectContent>
                                     </Select>
-                                ) : (
-                                    <p className="text-xs text-muted-foreground">
-                                        No models configured for this assignee — can be set later.
-                                    </p>
-                                )}
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                                <Label>Dev ETA (Hours)</Label>
-                                <Input type="number" min="0" step="0.5" value={devEta} onChange={e => setDevEta(e.target.value)} placeholder="e.g. 5" />
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                                <Label>Priority</Label>
-                                <div className="flex gap-2">
-                                    {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(p => (
-                                        <Button key={p} type="button" variant={priority === p ? 'default' : 'outline'} size="sm" className="flex-1"
-                                            onClick={() => setPriority(p)}>
-                                            {p}
-                                        </Button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                                <Label>Labels</Label>
-                                <div className="flex flex-wrap gap-1.5 min-h-[32px] items-center">
-                                    {selectedLabelIds.map(id => {
-                                        const label = allLabels.find(l => l.id === id);
-                                        if (!label) return null;
-                                        return (
-                                            <Badge key={id} className="gap-1 pr-1 text-xs text-white border-0" style={{ backgroundColor: label.color }}>
-                                                {label.name}
-                                                <button type="button" onClick={() => toggleLabel(id)} className="hover:opacity-70">
-                                                    <X className="size-3" />
-                                                </button>
-                                            </Badge>
-                                        );
-                                    })}
-                                    <Button type="button" variant="outline" size="sm" className="h-6 text-xs px-2" onClick={() => setShowLabelPicker(!showLabelPicker)}>
-                                        <Plus className="size-3 mr-1" /> {showLabelPicker ? 'Close' : 'Add Labels'}
+                                    <Button type="button" variant="outline" size="icon" onClick={() => setShowNewUser(true)} title="Create new user">
+                                        <Plus className="size-4" />
                                     </Button>
                                 </div>
-                                {showLabelPicker && (
-                                    <div className="border rounded-lg p-3 bg-secondary/50 space-y-2">
-                                        <ScrollArea className="max-h-[120px]">
-                                            <div className="space-y-1">
-                                                {allLabels.map(label => (
-                                                    <div key={label.id} className="flex items-center gap-2 p-1 rounded hover:bg-background/80 cursor-pointer" onClick={() => toggleLabel(label.id)}>
-                                                        <Checkbox checked={selectedLabelIds.includes(label.id)} />
-                                                        <div className="h-3 w-6 rounded" style={{ backgroundColor: label.color }} />
-                                                        <span className="text-sm">{label.name}</span>
-                                                    </div>
-                                                ))}
-                                                {allLabels.length === 0 && <span className="text-xs text-muted-foreground">No labels yet.</span>}
-                                            </div>
-                                        </ScrollArea>
-                                        <div className="flex gap-2 items-center border-t pt-2">
-                                            <Input placeholder="New label" value={newLabelName} onChange={e => setNewLabelName(e.target.value)} className="h-7 text-xs flex-1" />
-                                            <div className="flex gap-1">
-                                                {LABEL_COLORS.map(c => (
-                                                    <div key={c} className={`size-4 rounded-full cursor-pointer ${newLabelColor === c ? 'ring-2 ring-primary' : ''}`}
-                                                        style={{ backgroundColor: c }} onClick={() => setNewLabelColor(c)} />
-                                                ))}
-                                            </div>
-                                            <Button type="button" size="sm" className="h-7 text-xs" disabled={!newLabelName.trim()} onClick={handleCreateLabel}>Add</Button>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+                            )}
                         </div>
-                    )}
+
+                        {/* Collapsible extra settings */}
+                        <button
+                            type="button"
+                            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+                            onClick={() => setShowExtra(!showExtra)}
+                        >
+                            <ChevronDown className={`size-3.5 transition-transform ${showExtra ? 'rotate-0' : '-rotate-90'}`} />
+                            Extra settings
+                            {(priority !== 'MEDIUM' || selectedLabelIds.length > 0 || devEta) && (
+                                <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded">customized</span>
+                            )}
+                        </button>
+
+                        {showExtra && (
+                            <div className="flex flex-col gap-4 pl-2 border-l-2 border-muted">
+                                <div className="flex flex-col gap-2">
+                                    <Label>Model</Label>
+                                    {availableModels.length > 0 ? (
+                                        <Select value={selectedModelName} onValueChange={setSelectedModelName}>
+                                            <SelectTrigger><SelectValue placeholder="Select model..." /></SelectTrigger>
+                                            <SelectContent>
+                                                {availableModels.map(model => (
+                                                    <SelectItem key={model.name} value={model.name}>
+                                                        <span className="font-mono">{model.name}</span>
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    ) : (
+                                        <p className="text-xs text-muted-foreground">
+                                            No models configured for this assignee — can be set later.
+                                        </p>
+                                    )}
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                    <Label>Dev ETA (Hours)</Label>
+                                    <Input type="number" min="0" step="0.5" value={devEta} onChange={e => setDevEta(e.target.value)} placeholder="e.g. 5" />
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                    <Label>Priority</Label>
+                                    <div className="flex gap-2">
+                                        {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(p => (
+                                            <Button key={p} type="button" variant={priority === p ? 'default' : 'outline'} size="sm" className="flex-1"
+                                                onClick={() => setPriority(p)}>
+                                                {p}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                    <Label>Labels</Label>
+                                    <div className="flex flex-wrap gap-1.5 min-h-[32px] items-center">
+                                        {selectedLabelIds.map(id => {
+                                            const label = allLabels.find(l => l.id === id);
+                                            if (!label) return null;
+                                            return (
+                                                <Badge key={id} className="gap-1 pr-1 text-xs text-white border-0" style={{ backgroundColor: label.color }}>
+                                                    {label.name}
+                                                    <button type="button" onClick={() => toggleLabel(id)} className="hover:opacity-70">
+                                                        <X className="size-3" />
+                                                    </button>
+                                                </Badge>
+                                            );
+                                        })}
+                                        <Button type="button" variant="outline" size="sm" className="h-6 text-xs px-2" onClick={() => setShowLabelPicker(!showLabelPicker)}>
+                                            <Plus className="size-3 mr-1" /> {showLabelPicker ? 'Close' : 'Add Labels'}
+                                        </Button>
+                                    </div>
+                                    {showLabelPicker && (
+                                        <div className="border rounded-lg p-3 bg-secondary/50 space-y-2">
+                                            <ScrollArea className="max-h-[120px]">
+                                                <div className="space-y-1">
+                                                    {allLabels.map(label => (
+                                                        <div key={label.id} className="flex items-center gap-2 p-1 rounded hover:bg-background/80 cursor-pointer" onClick={() => toggleLabel(label.id)}>
+                                                            <Checkbox checked={selectedLabelIds.includes(label.id)} />
+                                                            <div className="h-3 w-6 rounded" style={{ backgroundColor: label.color }} />
+                                                            <span className="text-sm">{label.name}</span>
+                                                        </div>
+                                                    ))}
+                                                    {allLabels.length === 0 && <span className="text-xs text-muted-foreground">No labels yet.</span>}
+                                                </div>
+                                            </ScrollArea>
+                                            <div className="flex gap-2 items-center border-t pt-2">
+                                                <Input placeholder="New label" value={newLabelName} onChange={e => setNewLabelName(e.target.value)} className="h-7 text-xs flex-1" />
+                                                <div className="flex gap-1">
+                                                    {LABEL_COLORS.map(c => (
+                                                        <div key={c} className={`size-4 rounded-full cursor-pointer ${newLabelColor === c ? 'ring-2 ring-primary' : ''}`}
+                                                            style={{ backgroundColor: c }} onClick={() => setNewLabelColor(c)} />
+                                                    ))}
+                                                </div>
+                                                <Button type="button" size="sm" className="h-7 text-xs" disabled={!newLabelName.trim()} onClick={handleCreateLabel}>Add</Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                     <div className="flex gap-3 justify-end mt-2">
                         <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-                        <Button type="submit" disabled={loading || !title.trim() || !description.trim() || !boardId || !selectedUserId}>
-                            {loading ? 'Creating...' : 'Create Task'}
+                        <Button type="submit" disabled={loading || uploadingScreenshots || !title.trim() || !description.trim() || !boardId || !selectedUserId || hasImageModelMismatch}>
+                            {uploadingScreenshots
+                                ? `Uploading ${stagedFiles.length} image${stagedFiles.length !== 1 ? 's' : ''}...`
+                                : loading
+                                    ? 'Creating...'
+                                    : stagedFiles.length > 0
+                                        ? `Create Task + ${stagedFiles.length} image${stagedFiles.length !== 1 ? 's' : ''}`
+                                        : 'Create Task'
+                            }
                         </Button>
                     </div>
                 </form>

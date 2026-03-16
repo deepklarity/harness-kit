@@ -76,6 +76,15 @@ class TaskManager:
     def get_task(self, task_id: str) -> Optional[Task]:
         return self._load(task_id)
 
+    def get_task_raw(self, task_id: str) -> dict:
+        """Fetch raw task data dict from backend (includes reference_images and other API fields).
+
+        Falls back to empty dict when no backend is configured.
+        """
+        if self._backend:
+            return self._backend.get_task_raw(task_id)
+        return {}
+
     def list_tasks(
         self,
         status: Optional[TaskStatus] = None,

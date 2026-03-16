@@ -52,6 +52,14 @@ class BoardBackend(ABC):
         """
         return []
 
+    def get_task_raw(self, task_id: str) -> Dict[str, Any]:
+        """Fetch raw task data as a dict (includes reference_images and other API fields).
+
+        Default implementation returns empty dict. Backends that support
+        rich task data (e.g. TaskIt REST) should override.
+        """
+        return {}
+
     def record_execution_result(
         self,
         task_id: str,

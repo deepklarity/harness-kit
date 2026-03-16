@@ -8,6 +8,7 @@ export interface ModelInfo {
     name: string;
     description: string;
     is_default: boolean;
+    supports_image_input?: boolean;
     input_price_per_1m_tokens?: number | null;
     output_price_per_1m_tokens?: number | null;
     cache_read_price_per_1m_tokens?: number | null;
@@ -111,6 +112,7 @@ export interface Task {
     commentCount?: number;
     estimatedCostUsd?: number | null;
     reflectionCostUsd?: number | null;
+    referenceImages?: CommentFileAttachment[];
     usage?: {
         total_tokens?: number;
         input_tokens?: number;

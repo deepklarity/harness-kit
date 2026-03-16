@@ -8,6 +8,8 @@ import re
 import traceback
 import time
 from pathlib import Path
+
+import httpx
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from odin.config import load_config
@@ -682,6 +684,42 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         return session.run()
 
     # ------------------------------------------------------------------
+    # _download_reference_images()
+    # ------------------------------------------------------------------
+
+    def _download_reference_images(self, task_id: str, working_dir: str) -> list:
+        """Download task reference images to working_dir/.odin/task_images/{task_id[:8]}/.
+
+        Returns list of local file paths. Silently skips images that fail to download.
+        """
+        task_data = self.task_mgr.get_task_raw(task_id)
+        images = task_data.get("reference_images", [])
+        if not images:
+            return []
+
+        img_dir = Path(working_dir) / ".odin" / "task_images" / task_id[:8]
+        img_dir.mkdir(parents=True, exist_ok=True)
+
+        paths = []
+        for img in images:
+            url = img.get("url", "")
+            filename = img.get("original_filename", f"image_{img.get('id', 'unknown')}.png")
+            if not url:
+                continue
+            try:
+                resp = httpx.get(url, follow_redirects=True, timeout=30)
+                resp.raise_for_status()
+                dest = img_dir / filename
+                dest.write_bytes(resp.content)
+                paths.append(str(dest))
+                self._log.info("[task:%s] Downloaded reference image: %s", task_id, filename)
+            except Exception:
+                self._log.warning(
+                    "[task:%s] Failed to download reference image: %s", task_id, url, exc_info=True
+                )
+        return paths
+
+    # ------------------------------------------------------------------
     # exec_task()
     # ------------------------------------------------------------------
 
@@ -809,6 +847,17 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         task_ctx = self._build_task_context(full_id)
         if task_ctx:
             desc = f"{task_ctx}\n\n---\n\n{desc}"
+
+        # Download reference images and inject file paths into prompt
+        image_paths = self._download_reference_images(full_id, working_dir)
+        if image_paths:
+            relative_paths = [os.path.relpath(p, working_dir) for p in image_paths]
+            image_block = "## Reference Images\n\n"
+            image_block += "The following reference images were provided with this task. "
+            image_block += "Read them to understand the visual requirements:\n\n"
+            for rp in relative_paths:
+                image_block += f"- {rp}\n"
+            desc = f"{image_block}\n---\n\n{desc}"
 
         sem = asyncio.Semaphore(1)
         return await self._execute_task(
