@@ -7,7 +7,8 @@ from pathlib import Path
 import yaml
 
 from django.conf import settings
-from django.db.models import Count, F, Q
+from django.db import transaction
+from django.db.models import Case, Count, F, IntegerField, Q, Value, When
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -61,6 +62,7 @@ from .serializers import (
     TaskDetailSerializer,
     TaskHistorySerializer,
     TaskListSerializer,
+    TaskSearchResultSerializer,
     TaskSerializer,
     TaskWithHistorySerializer,
     UnassignTaskSerializer,
@@ -79,11 +81,37 @@ EXECUTING_LOCKED_MUTATION_FIELDS = {
 }
 
 
+
 def _reflection_reviewer_defaults():
     selection = get_forced_provider_selection()
     if selection.enabled:
         return selection.provider, selection.model
     return "claude", "claude-sonnet-4-5-20250929"
+
+
+def _normalize_directory_name(directory_name):
+    name = (directory_name or "").strip()
+    if not name:
+        raise ValidationError({"directory_name": "Directory name cannot be empty."})
+    if name in {".", ".."}:
+        raise ValidationError({"directory_name": "Directory name cannot be '.' or '..'."})
+    if "/" in name or "\\" in name:
+        raise ValidationError({"directory_name": "Directory name must be a single path segment."})
+    return name
+
+
+def _normalize_managed_file_name(file_name):
+    name = (file_name or "").strip()
+    if not name:
+        raise ValidationError({"file_name": "File name cannot be empty."})
+    if name in {".", ".."}:
+        raise ValidationError({"file_name": "File name cannot be '.' or '..'."})
+    if "/" in name or "\\" in name:
+        raise ValidationError({"file_name": "File name must stay in the board root."})
+    if not name.lower().endswith(".md"):
+        raise ValidationError({"file_name": "File name must end with .md"})
+    return name
+
 
 
 def _agent_provider_name(user):
@@ -606,11 +634,16 @@ class BoardViewSet(viewsets.ModelViewSet):
         ser = CreateBoardSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
 
+        directory_mode = ser.validated_data.pop("directory_mode", "existing")
+        parent_directory = ser.validated_data.pop("parent_directory", None)
+        directory_name = ser.validated_data.pop("directory_name", None)
         working_dir = ser.validated_data.pop("working_dir", None)
         auto_init = ser.validated_data.pop("auto_init", True)
         disabled_agents = ser.validated_data.pop("disabled_agents", [])
 
-        if working_dir:
+        if directory_mode == "create":
+            working_dir = self._create_working_dir(parent_directory, directory_name)
+        elif working_dir:
             self._validate_working_dir(working_dir)
 
         board = Board.objects.create(**ser.validated_data, working_dir=working_dir)
@@ -635,10 +668,58 @@ class BoardViewSet(viewsets.ModelViewSet):
         # Let DRF handle remaining fields
         return super().update(request, *args, **kwargs)
 
+    def _resolve_child_path(self, parent_directory, directory_name):
+        normalized_name = _normalize_directory_name(directory_name)
+        try:
+            parent_resolved = Path(os.path.expanduser(parent_directory)).resolve()
+        except (ValueError, OSError) as exc:
+            raise ValidationError({"parent_directory": f"Invalid path: {exc}"})
+
+        if not parent_resolved.is_absolute():
+            raise ValidationError({"parent_directory": "Path must be absolute."})
+
+        if str(parent_resolved) in self._BLOCKED_DIRS:
+            raise ValidationError({"parent_directory": "System directories cannot be used as project directories."})
+
+        if not parent_resolved.exists():
+            raise ValidationError({"parent_directory": f"Directory does not exist: {parent_resolved}"})
+
+        if not parent_resolved.is_dir():
+            raise ValidationError({"parent_directory": f"Path is not a directory: {parent_resolved}"})
+
+        if not os.access(str(parent_resolved), os.W_OK):
+            raise ValidationError({"parent_directory": f"Directory is not writable: {parent_resolved}"})
+
+        child_path = (parent_resolved / normalized_name).resolve()
+        if child_path.parent != parent_resolved:
+            raise ValidationError({"directory_name": "Directory name must stay within the selected parent directory."})
+        if str(child_path) in self._BLOCKED_DIRS:
+            raise ValidationError({"directory_name": "System directories cannot be used as project directories."})
+        if child_path.exists():
+            raise ValidationError({"directory_name": f"Directory already exists: {child_path}"})
+        if Board.objects.filter(working_dir=str(child_path)).exists():
+            existing = Board.objects.filter(working_dir=str(child_path)).first()
+            raise ValidationError({
+                "directory_name": f'Already linked to board "{existing.name}" (ID {existing.id}).'
+            })
+        return child_path
+
+    def _create_working_dir(self, parent_directory, directory_name):
+        child_path = self._resolve_child_path(parent_directory, directory_name)
+        try:
+            child_path.mkdir(parents=False, exist_ok=False)
+        except FileExistsError:
+            raise ValidationError({"directory_name": f"Directory already exists: {child_path}"})
+        except PermissionError:
+            raise ValidationError({"parent_directory": f"Permission denied creating directory: {child_path}"})
+        except OSError as exc:
+            raise ValidationError({"directory_name": f"Failed to create directory: {exc}"})
+        return str(child_path)
+
     def _validate_working_dir(self, path_str, exclude_board_id=None):
         """Validate a working directory path."""
         try:
-            resolved = Path(path_str).resolve()
+            resolved = Path(os.path.expanduser(path_str)).resolve()
         except (ValueError, OSError) as exc:
             raise ValidationError({"working_dir": f"Invalid path: {exc}"})
 
@@ -742,19 +823,46 @@ class BoardViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="check-dir")
     def check_dir(self, request, *args, **kwargs):
         """Pre-flight check whether a directory can be used for a new board."""
-        path = request.query_params.get("path", "").strip()
-        if not path:
-            return Response({"error": "path query param required"}, status=status.HTTP_400_BAD_REQUEST)
+        mode = (request.query_params.get("mode") or "existing").strip().lower()
+        if mode not in {"existing", "create"}:
+            return Response({"error": "mode must be 'existing' or 'create'"}, status=status.HTTP_400_BAD_REQUEST)
 
         result = {
             "odin_exists": False,
             "linked_board": None,
             "can_init": False,
             "message": "",
+            "resolved_path": "",
         }
 
+        if mode == "create":
+            parent_directory = request.query_params.get("parent_directory", "").strip()
+            directory_name = request.query_params.get("directory_name", "").strip()
+            if not parent_directory or not directory_name:
+                return Response({"error": "parent_directory and directory_name query params required"}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                resolved = self._resolve_child_path(parent_directory, directory_name)
+            except ValidationError as exc:
+                if isinstance(exc.detail, dict):
+                    first_value = next(iter(exc.detail.values()))
+                    if isinstance(first_value, (list, tuple)):
+                        result["message"] = str(first_value[0])
+                    else:
+                        result["message"] = str(first_value)
+                else:
+                    result["message"] = str(exc.detail)
+                return Response(result)
+            result["resolved_path"] = str(resolved)
+            result["can_init"] = True
+            result["message"] = "Ready to create and initialize directory."
+            return Response(result)
+
+        path = request.query_params.get("path", "").strip()
+        if not path:
+            return Response({"error": "path query param required"}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            resolved = Path(path).resolve()
+            resolved = Path(os.path.expanduser(path)).resolve()
         except (ValueError, OSError):
             result["message"] = "Invalid path."
             return Response(result)
@@ -778,6 +886,7 @@ class BoardViewSet(viewsets.ModelViewSet):
             result["message"] = f'Already linked to board "{existing.name}" (ID {existing.id}).'
             return Response(result)
 
+        result["resolved_path"] = str(resolved)
         result["can_init"] = True
         if result["odin_exists"]:
             result["message"] = "Odin config exists. Will be overwritten on init."
@@ -2089,6 +2198,39 @@ class SpecViewSet(viewsets.ModelViewSet):
     serializer_class = SpecSerializer
     pagination_class = StandardPagination
 
+    def _ensure_board_working_dir(self, board):
+        working_dir = (board.working_dir or "").strip()
+        if not working_dir:
+            raise ValidationError({"board_id": "Board has no working directory."})
+        base_path = Path(working_dir).resolve()
+        if not base_path.exists() or not base_path.is_dir():
+            raise ValidationError({"board_id": "Board working directory is unavailable on disk."})
+        if not os.access(str(base_path), os.W_OK):
+            raise ValidationError({"board_id": "Board working directory is not writable."})
+        return base_path
+
+    def _managed_spec_target_path(self, board, file_name):
+        base_path = self._ensure_board_working_dir(board)
+        normalized_name = _normalize_managed_file_name(file_name)
+        target_path = (base_path / normalized_name).resolve()
+        if target_path.parent != base_path:
+            raise ValidationError({"file_name": "Managed specs must stay in the board root."})
+        return base_path, target_path, normalized_name
+
+    def _managed_spec_metadata(self, spec, file_name):
+        metadata = dict(spec.metadata or {})
+        metadata[MANAGED_SPEC_PATH_KEY] = file_name
+        metadata.setdefault("working_dir", spec.board.working_dir)
+        metadata["managed_origin"] = "taskit_ui"
+        return metadata
+
+    def _write_managed_spec_file(self, path_obj, content):
+        try:
+            path_obj.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            raise ValidationError({"content": f"Failed to write spec file: {exc}"})
+
+    
     def get_queryset(self):
         query_params = self.request.query_params
         qs = Spec.objects.annotate(task_count=Count("tasks", distinct=True))
@@ -2158,17 +2300,21 @@ class SpecViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         spec = self.get_object()
         title = request.data.get("title")
+        content = request.data.get("content")
         abandoned = request.data.get("abandoned")
         metadata = request.data.get("metadata")
 
         if title is not None:
             spec.title = title
+        if content is not None:
+            spec.content = content
         if abandoned is not None:
             spec.abandoned = abandoned
         if metadata is not None:
             spec.metadata = metadata
         spec.save()
         return Response(SpecSerializer(spec).data)
+
 
     @action(detail=True, methods=["get"], url_path="diagnostic")
     def diagnostic(self, request, pk=None):
@@ -2400,6 +2546,54 @@ def kanban(request):
         qs = qs.filter(board_id=board_id)
     qs = _apply_date_range(qs, query_params, "created_at", "date_from", "date_to")
     return Response(TaskListSerializer(qs, many=True).data)
+
+
+@api_view(["GET"])
+def task_search(request):
+    query = (request.query_params.get("q") or "").strip()
+    if not query:
+        raise ValidationError({"q": "This query parameter is required."})
+
+    scope = (request.query_params.get("scope") or "board").strip().lower()
+    if scope not in {"board", "global"}:
+        raise ValidationError({"scope": "Must be one of: board, global."})
+
+    board_id = request.query_params.get("board_id") or request.query_params.get("board")
+    if scope == "board" and not board_id:
+        raise ValidationError({"board_id": "This query parameter is required for board scope."})
+
+    limit = _coerce_limit(request.query_params.get("limit"), default=10)
+    limit = max(1, min(limit, 10))
+
+    qs = Task.objects.select_related("board", "spec")
+    if scope == "board":
+        qs = qs.filter(board_id=board_id)
+
+    qs = qs.filter(Q(title__icontains=query) | Q(spec__title__icontains=query))
+    qs = qs.annotate(
+        search_rank=Case(
+            When(title__istartswith=query, then=Value(0)),
+            When(spec__title__istartswith=query, then=Value(1)),
+            When(title__icontains=query, then=Value(2)),
+            When(spec__title__icontains=query, then=Value(3)),
+            default=Value(4),
+            output_field=IntegerField(),
+        )
+    ).order_by("search_rank", "-last_updated_at", "id")[:limit]
+
+    payload = [
+        {
+            "task_id": task.id,
+            "title": task.title,
+            "status": task.status,
+            "board_id": task.board_id,
+            "board_name": task.board.name,
+            "spec_id": task.spec_id,
+            "spec_title": task.spec.title if task.spec_id else None,
+        }
+        for task in qs
+    ]
+    return Response({"results": TaskSearchResultSerializer(payload, many=True).data})
 
 
 @api_view(["GET"])

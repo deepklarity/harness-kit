@@ -184,10 +184,18 @@ class CreateBoardSerializer(serializers.ModelSerializer):
     disabled_agents = serializers.ListField(
         child=serializers.CharField(), required=False, default=list,
     )
+    directory_mode = serializers.ChoiceField(
+        choices=["existing", "create"], required=False, default="existing",
+    )
+    parent_directory = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    directory_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Board
-        fields = ["name", "description", "is_trial", "working_dir", "auto_init", "disabled_agents"]
+        fields = [
+            "name", "description", "is_trial", "working_dir", "auto_init", "disabled_agents",
+            "directory_mode", "parent_directory", "directory_name",
+        ]
         extra_kwargs = {
             "description": {"required": False, "default": ""},
             "is_trial": {"required": False, "default": False},
@@ -198,6 +206,30 @@ class CreateBoardSerializer(serializers.ModelSerializer):
         if value in (None, ""):
             return None
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        mode = attrs.get("directory_mode", "existing")
+        working_dir = attrs.get("working_dir")
+        parent_directory = attrs.get("parent_directory")
+        directory_name = attrs.get("directory_name")
+
+        if mode == "existing":
+            if not working_dir:
+                raise serializers.ValidationError({"working_dir": "This field is required when using an existing directory."})
+            attrs["parent_directory"] = None
+            attrs["directory_name"] = None
+            return attrs
+
+        if mode == "create":
+            if not parent_directory:
+                raise serializers.ValidationError({"parent_directory": "This field is required when creating a new directory."})
+            if not directory_name:
+                raise serializers.ValidationError({"directory_name": "This field is required when creating a new directory."})
+            attrs["working_dir"] = None
+            return attrs
+
+        raise serializers.ValidationError({"directory_mode": "Invalid directory mode."})
 
 
 class BoardListSerializer(BoardSerializer):
@@ -279,6 +311,7 @@ class CreateSpecSerializer(serializers.ModelSerializer):
             "content": {"default": ""},
             "metadata": {"default": dict},
         }
+
 
 
 class PlanningResultSerializer(serializers.Serializer):
@@ -364,6 +397,16 @@ class TaskListSerializer(TaskSerializer):
 
     class Meta(TaskSerializer.Meta):
         fields = TaskSerializer.Meta.fields + ["comment_count"]
+
+
+class TaskSearchResultSerializer(serializers.Serializer):
+    task_id = serializers.IntegerField()
+    title = serializers.CharField()
+    status = serializers.CharField()
+    board_id = serializers.IntegerField()
+    board_name = serializers.CharField()
+    spec_id = serializers.IntegerField(allow_null=True)
+    spec_title = serializers.CharField(allow_null=True)
 
 
 class MemberListSerializer(UserSerializer):

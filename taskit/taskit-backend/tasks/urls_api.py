@@ -15,6 +15,7 @@ urlpatterns = [
     path("presets/", views.list_presets),
     path("timeline/", views.timeline),
     path("kanban/", views.kanban),
+    path("tasks/search/", views.task_search),
     path("runtime/directories/suggest/", views.runtime_directories_suggest),
     path("runtime/directories/children/", views.runtime_directories_children),
     path("runtime/forced-provider/", views.runtime_forced_provider),

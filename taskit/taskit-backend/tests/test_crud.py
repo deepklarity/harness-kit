@@ -118,6 +118,31 @@ class TestBoardCRUD(APITestCase):
         resp = self.client.post("/boards/", {"name": "Trial"}, format="json")
         self.assertFalse(resp.data["is_trial"])
 
+    def test_create_board_in_existing_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            resp = self.client.post("/boards/", {
+                "name": "Existing Dir Board",
+                "directory_mode": "existing",
+                "working_dir": tmpdir,
+                "auto_init": False,
+            }, format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["working_dir"], str(Path(tmpdir).resolve()))
+
+    def test_create_board_in_new_child_directory(self):
+        with tempfile.TemporaryDirectory() as parent_dir:
+            resp = self.client.post("/boards/", {
+                "name": "New Dir Board",
+                "directory_mode": "create",
+                "parent_directory": parent_dir,
+                "directory_name": "child-project",
+                "auto_init": False,
+            }, format="json")
+            self.assertEqual(resp.status_code, 201)
+            expected_path = Path(parent_dir) / "child-project"
+            self.assertTrue(expected_path.is_dir())
+            self.assertEqual(resp.data["working_dir"], str(expected_path.resolve()))
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Label CRUD

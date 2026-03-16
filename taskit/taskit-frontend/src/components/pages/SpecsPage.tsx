@@ -163,6 +163,7 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
 
     const isEmpty = !loading && specs.length === 0;
 
+
     return (
         <div>
             <FilterBar resultCount={loading ? undefined : count} resultLabel={count === 1 ? 'spec' : 'specs'} onClearAll={() => setSearchParams(prev => {
@@ -172,8 +173,8 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                 return next;
             }, { replace: true })}
                 trailing={
-                    <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
-                        <Plus className="size-3.5 mr-1" />
+               <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
+                 <Plus className="size-3.5 mr-1" />
                         Spec
                     </Button>
                 }

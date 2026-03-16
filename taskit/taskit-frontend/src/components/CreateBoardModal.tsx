@@ -9,14 +9,23 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { Badge } from '@/components/ui/badge';
 import { FolderOpen, CheckCircle2, AlertCircle, Loader2, Bot } from 'lucide-react';
 
 interface CreateBoardModalProps {
     onClose: () => void;
-    onCreate: (name: string, description: string, workingDir: string, disabledAgents?: string[]) => Promise<void>;
-    autoOpen?: boolean;
+    onCreate: (
+        input: {
+            name: string;
+            description: string;
+            disabledAgents?: string[];
+        } & (
+            { directoryMode: 'existing'; workingDir: string }
+            | { directoryMode: 'create'; parentDirectory: string; directoryName: string }
+        )
+    ) => Promise<void>;
 }
 
 type DirCheckStatus = {
@@ -24,12 +33,17 @@ type DirCheckStatus = {
     result: DirectoryCheckResult | null;
 };
 
+type DirectoryMode = 'existing' | 'create';
+
 export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
     const service = useService();
     const { toast } = useToast();
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
+    const [directoryMode, setDirectoryMode] = useState<DirectoryMode>('existing');
     const [workingDir, setWorkingDir] = useState('~/');
+    const [parentDirectory, setParentDirectory] = useState('~/');
+    const [directoryName, setDirectoryName] = useState('');
     const [dirSuggestions, setDirSuggestions] = useState<DirectoryEntry[]>([]);
     const [dirInputFocused, setDirInputFocused] = useState(false);
     const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
@@ -41,11 +55,18 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
     const [availableAgents, setAvailableAgents] = useState<Member[]>([]);
     const [agentsLoading, setAgentsLoading] = useState(false);
 
-    const debouncedWorkingDir = useDebouncedValue(workingDir, 220);
-    const debouncedDirForCheck = useDebouncedValue(workingDir, 500);
+    const activeDirectoryInput = directoryMode === 'existing' ? workingDir : parentDirectory;
+    const debouncedDirectoryInput = useDebouncedValue(activeDirectoryInput, 220);
+    const debouncedDirForCheck = useDebouncedValue(
+        directoryMode === 'existing' ? workingDir : `${parentDirectory}::${directoryName}`,
+        500,
+    );
     const showSuggestions = dirInputFocused && dirSuggestions.length > 0;
+    const resolvedPath = dirCheck.result?.resolved_path
+        || (directoryMode === 'create' && parentDirectory.trim() && directoryName.trim()
+            ? `${parentDirectory.trim().replace(/[\\/]+$/, '')}/${directoryName.trim()}`
+            : workingDir.trim());
 
-    // Fetch available agents
     const loadAgents = useCallback(async () => {
         setAgentsLoading(true);
         try {
@@ -62,10 +83,9 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
         loadAgents();
     }, [loadAgents]);
 
-    // Directory suggestions
     useEffect(() => {
         let cancelled = false;
-        const query = debouncedWorkingDir.trim();
+        const query = debouncedDirectoryInput.trim();
         if (!query) {
             setDirSuggestions([]);
             setActiveSuggestionIndex(-1);
@@ -84,19 +104,41 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
                 setActiveSuggestionIndex(-1);
             });
         return () => { cancelled = true; };
-    }, [debouncedWorkingDir, service]);
+    }, [debouncedDirectoryInput, service]);
 
-    // Directory pre-flight check
     useEffect(() => {
         let cancelled = false;
-        const path = debouncedDirForCheck.trim();
-        if (!path || path === '~/') {
+        if (directoryMode === 'existing') {
+            const path = debouncedDirForCheck.trim();
+            if (!path || path === '~/') {
+                setDirCheck({ checking: false, result: null });
+                return;
+            }
+            setDirCheck(prev => ({ ...prev, checking: true }));
+            service
+                .checkDirectory(path, { mode: 'existing' })
+                .then(result => {
+                    if (!cancelled) setDirCheck({ checking: false, result });
+                })
+                .catch(() => {
+                    if (!cancelled) setDirCheck({ checking: false, result: null });
+                });
+            return () => { cancelled = true; };
+        }
+
+        const trimmedParent = parentDirectory.trim();
+        const trimmedName = directoryName.trim();
+        if (!trimmedParent || !trimmedName) {
             setDirCheck({ checking: false, result: null });
             return;
         }
         setDirCheck(prev => ({ ...prev, checking: true }));
         service
-            .checkDirectory(path)
+            .checkDirectory('', {
+                mode: 'create',
+                parentDirectory: trimmedParent,
+                directoryName: trimmedName,
+            })
             .then(result => {
                 if (!cancelled) setDirCheck({ checking: false, result });
             })
@@ -104,7 +146,7 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
                 if (!cancelled) setDirCheck({ checking: false, result: null });
             });
         return () => { cancelled = true; };
-    }, [debouncedDirForCheck, service]);
+    }, [debouncedDirForCheck, directoryMode, parentDirectory, directoryName, service]);
 
     useEffect(() => {
         return () => {
@@ -120,7 +162,8 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
     };
 
     const applySuggestion = (entry: DirectoryEntry) => {
-        setWorkingDir(entry.path);
+        if (directoryMode === 'existing') setWorkingDir(entry.path);
+        else setParentDirectory(entry.path);
         setDirInputFocused(false);
         setDirSuggestions([]);
         setActiveSuggestionIndex(-1);
@@ -149,15 +192,38 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
         }
     };
 
-    const canSubmit = name.trim() && workingDir.trim() && !loading
-        && !dirCheck.checking && dirCheck.result?.can_init !== false;
+    const canSubmit = Boolean(
+        name.trim()
+        && !loading
+        && !dirCheck.checking
+        && dirCheck.result?.can_init
+        && (directoryMode === 'existing' ? workingDir.trim() : (parentDirectory.trim() && directoryName.trim()))
+    );
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!canSubmit) return;
         setLoading(true);
         try {
-            await onCreate(name, description, workingDir.trim(), disabledAgents.size > 0 ? [...disabledAgents] : undefined);
+            const disabled = disabledAgents.size > 0 ? [...disabledAgents] : undefined;
+            if (directoryMode === 'existing') {
+                await onCreate({
+                    name,
+                    description,
+                    workingDir: workingDir.trim(),
+                    directoryMode,
+                    disabledAgents: disabled,
+                });
+            } else {
+                await onCreate({
+                    name,
+                    description,
+                    parentDirectory: parentDirectory.trim(),
+                    directoryName: directoryName.trim(),
+                    directoryMode,
+                    disabledAgents: disabled,
+                });
+            }
             onClose();
         } catch {
             toast({
@@ -197,14 +263,16 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
         }
         return (
             <p className="text-[11px] text-muted-foreground">
-                Start typing to search. Odin will be initialized automatically.
+                {directoryMode === 'existing'
+                    ? 'Select an existing directory. Odin will be initialized automatically.'
+                    : 'Pick a parent directory and a new folder name.'}
             </p>
         );
     };
 
     return (
         <Dialog open onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-[460px]">
+            <DialogContent className="sm:max-w-[520px]">
                 <DialogHeader>
                     <DialogTitle>Create New Board</DialogTitle>
                 </DialogHeader>
@@ -220,38 +288,104 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
                         />
                     </div>
 
-                    <div className="flex flex-col gap-2 relative">
+                    <div className="flex flex-col gap-3 relative">
                         <Label className="flex items-center gap-1.5">
                             <FolderOpen className="size-3.5" />
                             Project Directory
                         </Label>
-                        <Input
-                            required
-                            value={workingDir}
-                            onChange={e => setWorkingDir(e.target.value)}
-                            onFocus={() => setDirInputFocused(true)}
-                            onBlur={handleDirInputBlur}
-                            onKeyDown={handleKeyDown}
-                            placeholder="/absolute/path/to/project"
-                            className="font-mono text-xs"
-                        />
-                        {showSuggestions && (
-                            <div className="absolute top-[62px] left-0 right-0 z-50 rounded border bg-popover shadow-md">
-                                <ScrollArea className="max-h-[180px]">
-                                    <div className="p-1">
-                                        {dirSuggestions.map((entry, idx) => (
-                                            <button
-                                                key={entry.path}
-                                                type="button"
-                                                className={`w-full rounded px-2 py-1.5 text-left text-xs font-mono ${idx === activeSuggestionIndex ? 'bg-accent' : 'hover:bg-accent/70'}`}
-                                                onMouseDown={e => { e.preventDefault(); applySuggestion(entry); }}
-                                            >
-                                                {entry.path}
-                                            </button>
-                                        ))}
+                        <ToggleGroup
+                            type="single"
+                            variant="outline"
+                            size="sm"
+                            value={directoryMode}
+                            onValueChange={(value) => {
+                                if (value === 'existing' || value === 'create') setDirectoryMode(value);
+                            }}
+                        >
+                            <ToggleGroupItem value="existing">Use Existing Directory</ToggleGroupItem>
+                            <ToggleGroupItem value="create">Create New Directory</ToggleGroupItem>
+                        </ToggleGroup>
+
+                        {directoryMode === 'existing' ? (
+                            <div className="flex flex-col gap-2 relative">
+                                <Input
+                                    required
+                                    value={workingDir}
+                                    onChange={e => setWorkingDir(e.target.value)}
+                                    onFocus={() => setDirInputFocused(true)}
+                                    onBlur={handleDirInputBlur}
+                                    onKeyDown={handleKeyDown}
+                                    placeholder="/absolute/path/to/project"
+                                    className="font-mono text-xs"
+                                />
+                                {showSuggestions && (
+                                    <div className="absolute top-[40px] left-0 right-0 z-50 rounded border bg-popover shadow-md">
+                                        <ScrollArea className="max-h-[180px]">
+                                            <div className="p-1">
+                                                {dirSuggestions.map((entry, idx) => (
+                                                    <button
+                                                        key={entry.path}
+                                                        type="button"
+                                                        className={`w-full rounded px-2 py-1.5 text-left text-xs font-mono ${idx === activeSuggestionIndex ? 'bg-accent' : 'hover:bg-accent/70'}`}
+                                                        onMouseDown={e => { e.preventDefault(); applySuggestion(entry); }}
+                                                    >
+                                                        {entry.path}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </ScrollArea>
                                     </div>
-                                </ScrollArea>
+                                )}
                             </div>
+                        ) : (
+                            <div className="grid gap-3 sm:grid-cols-[1.4fr,1fr]">
+                                <div className="flex flex-col gap-2 relative">
+                                    <Label className="text-xs text-muted-foreground">Parent Directory</Label>
+                                    <Input
+                                        required
+                                        value={parentDirectory}
+                                        onChange={e => setParentDirectory(e.target.value)}
+                                        onFocus={() => setDirInputFocused(true)}
+                                        onBlur={handleDirInputBlur}
+                                        onKeyDown={handleKeyDown}
+                                        placeholder="/absolute/path/to/parent"
+                                        className="font-mono text-xs"
+                                    />
+                                    {showSuggestions && (
+                                        <div className="absolute top-[58px] left-0 right-0 z-50 rounded border bg-popover shadow-md">
+                                            <ScrollArea className="max-h-[180px]">
+                                                <div className="p-1">
+                                                    {dirSuggestions.map((entry, idx) => (
+                                                        <button
+                                                            key={entry.path}
+                                                            type="button"
+                                                            className={`w-full rounded px-2 py-1.5 text-left text-xs font-mono ${idx === activeSuggestionIndex ? 'bg-accent' : 'hover:bg-accent/70'}`}
+                                                            onMouseDown={e => { e.preventDefault(); applySuggestion(entry); }}
+                                                        >
+                                                            {entry.path}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </ScrollArea>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <Label className="text-xs text-muted-foreground">New Folder Name</Label>
+                                    <Input
+                                        required
+                                        value={directoryName}
+                                        onChange={e => setDirectoryName(e.target.value)}
+                                        placeholder="project-name"
+                                        className="font-mono text-xs"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        {directoryMode === 'create' && resolvedPath && (
+                            <p className="text-[10px] font-mono text-muted-foreground break-all">
+                                Final path: {resolvedPath}
+                            </p>
                         )}
                         {renderDirStatus()}
                     </div>
@@ -266,7 +400,6 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
                         />
                     </div>
 
-                    {/* Agent toggles — only visible when directory can be initialized */}
                     {dirCheck.result?.can_init && (
                         <div className="flex flex-col gap-2">
                             <Label className="flex items-center gap-1.5">

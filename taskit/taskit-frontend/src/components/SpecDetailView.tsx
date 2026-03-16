@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Spec, SpecComment, Task } from '../types';
 import { useService } from '../contexts/ServiceContext';
+import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '../services/harness/HarnessTimeService';
 import { parseActor } from '../services/harness/HarnessTimeService';
 import { formatCost } from '../utils/costEstimation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+
 import {
     AlertDialog,
     AlertDialogAction,
@@ -20,7 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Separator } from '@/components/ui/separator';
 import { getStatusColor, formatDuration, formatTokens, shortModelName } from '../utils/transformer';
-import { ArrowLeft, AlertTriangle, FileText, Clock, Code2, FolderOpen, Trash2, Bug, DollarSign, ChevronDown, ChevronRight, Brain, Route, Activity } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, FileText, Clock, Code2, FolderOpen, Trash2, Bug, DollarSign, ChevronDown, ChevronRight, Brain, Route, Activity, Pencil } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { TraceViewer } from './TraceViewer';
 import { parseCommentBody } from '../utils/commentParser';
@@ -36,10 +38,12 @@ interface SpecDetailViewProps {
 
 export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, onDeleteSpec }: SpecDetailViewProps) {
     const service = useService();
+    const { toast } = useToast();
     const [searchParams] = useSearchParams();
     const [spec, setSpec] = useState<Spec | null>(cachedSpec || null);
     const [loading, setLoading] = useState(!cachedSpec);
     const [error, setError] = useState<{ notFound: boolean; message: string } | null>(null);
+    const [editOpen, setEditOpen] = useState(false);
     const [showPlanningTrace, setShowPlanningTrace] = useState(false);
     const [showRoutingConfig, setShowRoutingConfig] = useState(false);
     const [showContent, setShowContent] = useState(false);
@@ -129,6 +133,8 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
 
     // Cost data comes from the backend — single source of truth
     const costSummary = spec.costSummary;
+
+    const routingConfig = spec.metadata?.model_routing as Array<{ agent: string; model: string }> | undefined;
 
     return (
         <div>
@@ -359,12 +365,12 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
             />
 
             {/* Routing Config — only show models actually used by tasks */}
-            {spec.metadata?.model_routing && (() => {
+            {routingConfig && (() => {
                 const usedModels = new Set(sortedTasks.map(t => {
                     const sm = t.metadata?.selected_model as string | undefined;
                     return sm || t.modelName || '';
                 }).filter(Boolean));
-                const routes = (spec.metadata.model_routing as Array<{ agent: string; model: string }>)
+                const routes = routingConfig
                     .filter(r => usedModels.has(r.model));
                 if (routes.length === 0) return null;
                 return (
@@ -407,6 +413,7 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                 </Card>
                 );
             })()}
+
         </div>
     );
 }

@@ -35,6 +35,17 @@ export interface DirectoryCheckResult {
     linked_board: { id: number; name: string } | null;
     can_init: boolean;
     message: string;
+    resolved_path?: string;
+}
+
+export interface TaskSearchResult {
+    taskId: string;
+    title: string;
+    status: string;
+    boardId: string;
+    boardName: string;
+    specId?: string;
+    specTitle?: string;
 }
 
 export interface IntegrationService {
@@ -54,12 +65,20 @@ export interface IntegrationService {
     fetchBoardsPage(query: { search?: string; sort?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Board>>;
     fetchTimelinePage(query: TimelineQuery): Promise<PaginatedResponse<Task>>;
     fetchKanban(boardId?: string, query?: { date_from?: string; date_to?: string }): Promise<Task[]>;
+    searchTasks(query: { q: string; scope: 'board' | 'global'; boardId?: string; limit?: number }): Promise<TaskSearchResult[]>;
     suggestDirectories(query: string, limit?: number): Promise<DirectoryEntry[]>;
     listDirectoryChildren(path: string, limit?: number): Promise<DirectoryEntry[]>;
-    checkDirectory(path: string): Promise<DirectoryCheckResult>;
+    checkDirectory(path: string, options?: { mode?: 'existing' | 'create'; parentDirectory?: string; directoryName?: string }): Promise<DirectoryCheckResult>;
 
     updateTaskAssignees(taskId: string, memberIds: string[]): Promise<void>;
-    createBoard(name: string, description?: string, workingDir?: string, disabledAgents?: string[]): Promise<unknown>;
+    createBoard(input: {
+        name: string;
+        description?: string;
+        disabledAgents?: string[];
+    } & (
+        { directoryMode: 'existing'; workingDir: string }
+        | { directoryMode: 'create'; parentDirectory: string; directoryName: string }
+    )): Promise<unknown>;
     deleteBoard(boardId: string): Promise<void>;
     initOdin(boardId: string): Promise<unknown>;
     updateBoard(boardId: string, updates: Record<string, unknown>): Promise<unknown>;

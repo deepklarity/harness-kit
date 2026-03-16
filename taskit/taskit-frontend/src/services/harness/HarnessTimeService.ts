@@ -1,4 +1,4 @@
-import type { IntegrationService, AuthState, DirectoryEntry } from '../integration/IntegrationService';
+import type { IntegrationService, AuthState, DirectoryEntry, TaskSearchResult } from '../integration/IntegrationService';
 import type {
     AgentConfig,
     Board as DashBoard,
@@ -118,6 +118,20 @@ interface HarnessTask {
     comments?: HarnessTaskComment[];
     comment_count?: number;
     reference_images?: Array<Record<string, unknown>>;
+}
+
+interface HarnessTaskSearchResult {
+    task_id: number;
+    title: string;
+    status: string;
+    board_id: number;
+    board_name: string;
+    spec_id?: number | null;
+    spec_title?: string | null;
+}
+
+interface HarnessTaskSearchResponse {
+    results: HarnessTaskSearchResult[];
 }
 
 interface HarnessTaskComment {
@@ -669,6 +683,28 @@ export class HarnessTimeService implements IntegrationService {
         return raw.map(task => this.transformTask(task, false));
     }
 
+    async searchTasks(query: { q: string; scope: 'board' | 'global'; boardId?: string; limit?: number }): Promise<TaskSearchResult[]> {
+        const trimmed = query.q.trim();
+        if (!trimmed) return [];
+
+        const qs = this.buildQuery({
+            q: trimmed,
+            scope: query.scope,
+            board_id: query.scope === 'board' ? query.boardId : undefined,
+            limit: query.limit,
+        });
+        const raw = await this.get<HarnessTaskSearchResponse>(`/api/tasks/search/${qs}`);
+        return (raw.results || []).map(result => ({
+            taskId: String(result.task_id),
+            title: result.title,
+            status: result.status,
+            boardId: String(result.board_id),
+            boardName: result.board_name,
+            specId: result.spec_id != null ? String(result.spec_id) : undefined,
+            specTitle: result.spec_title || undefined,
+        }));
+    }
+
     async suggestDirectories(query: string, limit: number = 20): Promise<DirectoryEntry[]> {
         const trimmed = query.trim();
         if (!trimmed) return [];
@@ -677,10 +713,27 @@ export class HarnessTimeService implements IntegrationService {
         return raw.entries || [];
     }
 
-    async checkDirectory(path: string): Promise<import('../integration/IntegrationService').DirectoryCheckResult> {
+    async checkDirectory(
+        path: string,
+        options?: { mode?: 'existing' | 'create'; parentDirectory?: string; directoryName?: string }
+    ): Promise<import('../integration/IntegrationService').DirectoryCheckResult> {
+        const mode = options?.mode || 'existing';
         const trimmed = path.trim();
+        if (mode === 'create') {
+            const parentDirectory = options?.parentDirectory?.trim() || '';
+            const directoryName = options?.directoryName?.trim() || '';
+            if (!parentDirectory || !directoryName) {
+                return { odin_exists: false, linked_board: null, can_init: false, message: '', resolved_path: '' };
+            }
+            const qs = this.buildQuery({
+                mode,
+                parent_directory: parentDirectory,
+                directory_name: directoryName,
+            });
+            return this.get(`/api/boards/check-dir/${qs}`);
+        }
         if (!trimmed) return { odin_exists: false, linked_board: null, can_init: false, message: '' };
-        const qs = this.buildQuery({ path: trimmed });
+        const qs = this.buildQuery({ path: trimmed, mode });
         return this.get(`/api/boards/check-dir/${qs}`);
     }
 
@@ -703,10 +756,25 @@ export class HarnessTimeService implements IntegrationService {
         }
     }
 
-    async createBoard(name: string, description?: string, workingDir?: string, disabledAgents?: string[]): Promise<unknown> {
-        const body: Record<string, unknown> = { name, description };
-        if (workingDir) body.working_dir = workingDir;
-        if (disabledAgents && disabledAgents.length > 0) body.disabled_agents = disabledAgents;
+    async createBoard(input: {
+        name: string;
+        description?: string;
+        disabledAgents?: string[];
+    } & (
+        { directoryMode: 'existing'; workingDir: string }
+        | { directoryMode: 'create'; parentDirectory: string; directoryName: string }
+    )): Promise<unknown> {
+        const body: Record<string, unknown> = {
+            name: input.name,
+            description: input.description,
+            directory_mode: input.directoryMode,
+        };
+        if (input.directoryMode === 'existing') body.working_dir = input.workingDir;
+        else {
+            body.parent_directory = input.parentDirectory;
+            body.directory_name = input.directoryName;
+        }
+        if (input.disabledAgents && input.disabledAgents.length > 0) body.disabled_agents = input.disabledAgents;
         return this.post('/api/boards/', body);
     }
 
@@ -1092,7 +1160,6 @@ export class HarnessTimeService implements IntegrationService {
         }));
         return {
             id: String(s.id),
-
             title: s.title,
             source: s.source,
             content: s.content,
@@ -1104,6 +1171,8 @@ export class HarnessTimeService implements IntegrationService {
             costSummary: s.cost_summary || undefined,
             taskCount: s.task_count ?? tasks.length,
             comments,
+            fileName: typeof s.metadata?.managed_file_path === 'string' ? s.metadata.managed_file_path : undefined,
+            isManaged: s.source === 'taskit_ui_file',
             tasks: tasks.map(t => ({
                 id: String(t.id),
                 name: t.title || t.description.substring(0, 50),
@@ -1223,6 +1292,7 @@ export class HarnessTimeService implements IntegrationService {
     async deleteSpec(specId: string): Promise<void> {
         await this.del(`/api/specs/${Number(specId)}/`);
     }
+
 
     async clearBoard(boardId: string): Promise<{ tasks_deleted: number; specs_deleted: number }> {
         return this.post(`/api/boards/${Number(boardId)}/clear/`, {});

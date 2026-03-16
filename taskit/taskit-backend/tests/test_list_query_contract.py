@@ -54,6 +54,26 @@ class TestListQueryContract(APITestCase):
             status="DONE",
             priority="MEDIUM",
         )
+        self.task_prefix = self.make_task(
+            self.board1,
+            title="Spec alpha board card",
+            description="prefix ranking candidate",
+            status="TODO",
+            priority="MEDIUM",
+            spec=self.spec_active,
+        )
+        self.task_spec_match = self.make_task(
+            self.board1,
+            title="Unrelated title",
+            description="search via spec title",
+            status="REVIEW",
+            priority="MEDIUM",
+            spec=self.spec_abandoned,
+        )
+        self.spec_active.title = "spec-alpha.md"
+        self.spec_active.save(update_fields=["title"])
+        self.spec_abandoned.title = "pictionary.md"
+        self.spec_abandoned.save(update_fields=["title"])
 
         self.task_a.labels.add(self.label_bug)
         self.task_b.labels.add(self.label_feature)
@@ -168,6 +188,53 @@ class TestListQueryContract(APITestCase):
         self.assertIsInstance(resp.data, list)
         self.assertEqual(len(resp.data), 1)
         self.assertEqual(resp.data[0]["id"], self.task_b.id)
+
+    def test_task_search_board_scope_matches_title_and_spec_title(self):
+        resp = self.client.get(f"/api/tasks/search/?scope=board&board_id={self.board1.id}&q=alpha")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data["results"]
+        ids = {item["task_id"] for item in results}
+        self.assertIn(self.task_a.id, ids)
+        self.assertIn(self.task_prefix.id, ids)
+
+        resp = self.client.get(f"/api/tasks/search/?scope=board&board_id={self.board1.id}&q=pictionary")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["task_id"], self.task_spec_match.id)
+        self.assertEqual(results[0]["spec_title"], "pictionary.md")
+
+    def test_task_search_global_scope_crosses_boards(self):
+        resp = self.client.get("/api/tasks/search/?scope=global&q=other")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["task_id"], self.task_c.id)
+        self.assertEqual(results[0]["board_name"], self.board2.name)
+
+    def test_task_search_prefers_prefix_matches(self):
+        resp = self.client.get(f"/api/tasks/search/?scope=board&board_id={self.board1.id}&q=spec")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data["results"]
+        self.assertGreaterEqual(len(results), 2)
+        self.assertEqual(results[0]["task_id"], self.task_prefix.id)
+
+    def test_task_search_ignores_date_filters(self):
+        date_from = timezone.now().date().isoformat()
+        date_to = timezone.now().date().isoformat()
+        resp = self.client.get(
+            f"/api/tasks/search/?scope=board&board_id={self.board1.id}&q=alpha&created_from={date_from}&created_to={date_to}"
+        )
+        self.assertEqual(resp.status_code, 200)
+        ids = {item["task_id"] for item in resp.data["results"]}
+        self.assertIn(self.task_a.id, ids)
+
+    def test_task_search_validates_required_params(self):
+        resp = self.client.get("/api/tasks/search/?scope=board")
+        self.assertEqual(resp.status_code, 400)
+
+        resp = self.client.get("/api/tasks/search/?scope=invalid&q=alpha")
+        self.assertEqual(resp.status_code, 400)
 
 
 class TestRoleBackfillDefaults(APITestCase):

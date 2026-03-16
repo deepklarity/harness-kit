@@ -3,8 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import { format, subDays } from 'date-fns';
 import type { Board, Label, Member, Task } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
+import { useToast } from '@/hooks/use-toast';
 import { usePolling } from '@/hooks/usePolling';
 import { KanbanBoard } from '@/components/KanbanBoard';
+import { KanbanTaskSearch } from '@/components/KanbanTaskSearch';
 import { TimelineView } from '@/components/TimelineView';
 import { OdinGuideModal, OdinGuideContent } from '@/components/OdinGuideModal';
 import { FilterBar, MultiSelectFilter, PaginationControls, SearchBar, SortControl, DateRangeFilter } from '@/components/filters';
@@ -13,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ClipboardList, Columns3, Calendar, Plus, Terminal } from 'lucide-react';
+import type { TaskSearchResult } from '@/services/integration/IntegrationService';
 import { didLeaveProgressStatus, markExecutionTransitionUnseen } from '@/utils/unseenStatusTransitions';
 
 // ─── Types ──────────────────────────────────────────────────
@@ -234,6 +237,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     onStopExecution: (taskId: string, targetStatus: string) => Promise<boolean>;
 }) {
     const service = useService();
+    const { toast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
@@ -340,24 +344,60 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     }, [setSearchParams]);
 
     const isEmpty = !loading && visibleTasks.length === 0;
+    const handleSearchSelect = useCallback((result: TaskSearchResult, scope: 'board' | 'global') => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            if (scope === 'global') {
+                next.set('board', result.boardId);
+            }
+            next.set('taskId', result.taskId);
+            return next;
+        }, { replace: false });
+    }, [setSearchParams]);
 
     return (
         <div>
-            <div className="flex items-center justify-end gap-2 mb-4">
-                <span className="text-xs text-muted-foreground tabular-nums mr-auto">
-                    {!loading && <>{visibleTasks.length} {visibleTasks.length === 1 ? 'task' : 'tasks'}</>}
-                </span>
-                <DateRangeFilter
-                    label="Created"
-                    from={dateFrom}
-                    to={dateTo}
-                    onChange={handleDateChange}
-                />
-                <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
-                    <Plus className="size-3.5 mr-1" />
-                    Spec
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => void polling.refreshNow()}>Refresh</Button>
+
+            <div className="flex items-center justify-between mb-4">
+
+                {/* Left Side */}
+                <div className="flex items-center gap-2">
+                
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                        {!loading && (
+                            <>
+                                {visibleTasks.length} {visibleTasks.length === 1 ? "task" : "tasks"}
+                            </>
+                        )}
+                    </span>
+
+                             <KanbanTaskSearch
+                        selectedBoard={selectedBoard}
+                        onSelect={handleSearchSelect}
+                        className="w-96"
+                    />
+                </div>
+
+                {/* Right Side */}
+                <div className="flex items-center gap-2">
+               
+                    <DateRangeFilter
+                        label="Created"
+                        from={dateFrom}
+                        to={dateTo}
+                        onChange={handleDateChange}
+                    />
+
+                    <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
+                        <Plus className="size-3.5 mr-1" />
+                        Spec
+                    </Button>
+
+                    <Button size="sm" variant="outline" onClick={() => void polling.refreshNow()}>
+                        Refresh
+                    </Button>
+                </div>
+
             </div>
             {error && <div className="text-sm text-destructive mb-3">{error}</div>}
             {loading ? (

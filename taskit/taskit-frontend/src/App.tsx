@@ -329,8 +329,17 @@ function App() {
         await service.updateUser(id, name, email, color, availableModels);
         setRefreshKey(k => k + 1);
     };
-    const handleCreateBoard = async (name: string, description: string, workingDir: string, disabledAgents?: string[]) => {
-        const result = await service.createBoard(name, description, workingDir, disabledAgents) as { id?: number };
+    const handleCreateBoard = async (
+        input: {
+            name: string;
+            description: string;
+            disabledAgents?: string[];
+        } & (
+            { directoryMode: 'existing'; workingDir: string }
+            | { directoryMode: 'create'; parentDirectory: string; directoryName: string }
+        )
+    ) => {
+        const result = await service.createBoard(input) as { id?: number };
         if (result?.id) {
             updateSearchParam('board', String(result.id));
         }
@@ -570,7 +579,7 @@ function App() {
                                 <SpecsPage selectedBoard={boardFilter} refreshKey={refreshKey} currentBoard={currentBoard} onSpecClick={(s: Spec) => {
                                     const board = searchParams.get('board');
                                     navigate(board ? `/specs/${s.id}?board=${board}` : `/specs/${s.id}`);
-                                }} />
+                                }} onDataChange={() => setRefreshKey(k => k + 1)} />
                             </>
                         } />
                         <Route path="/specs/:specId" element={
