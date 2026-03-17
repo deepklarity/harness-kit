@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { AgentConfig, Board, Member } from '../types';
 import { useService } from '../contexts/ServiceContext';
 import { Button } from '@/components/ui/button';
@@ -15,9 +15,14 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users } from 'lucide-react';
+import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from '@/components/ui/popover';
 
 interface SettingsViewProps {
     boards: Board[];
@@ -48,6 +53,25 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
 
     // Agent configs per board (for showing enabled/disabled status in summary)
     const [agentsByBoard, setAgentsByBoard] = useState<Record<string, AgentConfig[]>>({});
+    const [membersByBoard, setMembersByBoard] = useState<Record<string, Member[]>>({});
+
+    // Table view states
+    const PAGE_SIZE = 10;
+    const [searchQuery, setSearchQuery] = useState('');
+    const [sortConfig, setSortConfig] = useState<{ key: 'id' | 'name' | 'tasks' | 'members', dir: 'asc' | 'desc' }>({ key: 'id', dir: 'asc' });
+    const [currentPage, setCurrentPage] = useState(1);
+    const [expandedBoardId, setExpandedBoardId] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!expandedBoardId) return;
+        let active = true;
+        service.fetchBoardMembers(expandedBoardId)
+            .then(members => {
+                if (active) setMembersByBoard(prev => ({ ...prev, [expandedBoardId]: members }));
+            })
+            .catch(() => {});
+        return () => { active = false; };
+    }, [expandedBoardId, service]);
 
     const loadBoardAgents = useCallback(async (board: Board) => {
         if (!board.odinInitialized) return;
@@ -62,6 +86,67 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
     useEffect(() => {
         boards.filter(b => b.odinInitialized).forEach(loadBoardAgents);
     }, [boards, loadBoardAgents]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery]);
+
+    const processedBoards = useMemo(() => {
+        // 1. Filter
+        let result = boards;
+        if (searchQuery.trim()) {
+            const query = searchQuery.toLowerCase();
+            result = result.filter(b => 
+                b.name.toLowerCase().includes(query) || 
+                b.id.toLowerCase().includes(query)
+            );
+        }
+
+        // 2. Sort
+        result = [...result].sort((a, b) => {
+            const getMembersCount = (board: Board) => board.memberCount ?? board.members.length;
+            const getTasksCount = (board: Board) => board.taskCount ?? 0;
+            
+            let cmp = 0;
+            switch (sortConfig.key) {
+                case 'id':
+                    cmp = a.id.localeCompare(b.id, undefined, { numeric: true });
+                    break;
+                case 'name':
+                    cmp = a.name.localeCompare(b.name);
+                    break;
+                case 'tasks':
+                    cmp = getTasksCount(a) - getTasksCount(b);
+                    break;
+                case 'members':
+                    cmp = getMembersCount(a) - getMembersCount(b);
+                    break;
+            }
+            return sortConfig.dir === 'asc' ? cmp : -cmp;
+        });
+
+        // 3. Paginate
+        const start = (currentPage - 1) * PAGE_SIZE;
+        return result.slice(start, start + PAGE_SIZE);
+    }, [boards, searchQuery, sortConfig, currentPage]);
+
+    const totalFiltered = useMemo(() => {
+        if (!searchQuery.trim()) return boards.length;
+        const query = searchQuery.toLowerCase();
+        return boards.filter(b => 
+            b.name.toLowerCase().includes(query) || 
+            b.id.toLowerCase().includes(query)
+        ).length;
+    }, [boards, searchQuery]);
+
+    const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
+
+    const handleSort = (key: 'id' | 'name' | 'tasks' | 'members') => {
+        setSortConfig(prev => ({
+            key,
+            dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc'
+        }));
+    };
 
     useEffect(() => {
         let active = true;
@@ -157,237 +242,264 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
             <div>
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-medium text-muted-foreground">Boards</h3>
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={onCreateBoard}>
-                        <Plus className="size-3.5" />
-                        Create Board
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <div className="relative w-64">
+                            <Search className="absolute left-2 top-2 size-3.5 text-muted-foreground" />
+                            <Input 
+                                placeholder="Search boards..." 
+                                className="h-8 pl-8 text-xs" 
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                        </div>
+                        <Button variant="outline" size="sm" className="gap-1.5" onClick={onCreateBoard}>
+                            <Plus className="size-3.5" />
+                            Create Board
+                        </Button>
+                    </div>
                 </div>
-                <div className="space-y-4">
-                    {boards.length === 0 && (
-                        <div className="border border-border rounded-lg p-4 text-sm text-muted-foreground">No boards found.</div>
-                    )}
-                    {boards.map(board => {
-                        const boardMembers = board.members;
-                        const humanMembers = boardMembers.filter(m => !isAgentUser(m));
-                        const agentConfigs = agentsByBoard[board.id] || [];
-                        const activeAgentMembers = boardMembers.filter(m => isAgentUser(m));
-                        // Use config data if available (shows all agents incl. disabled), fall back to membership data
-                        const hasAgentConfigs = agentConfigs.length > 0;
-                        const hasAnyMembers = humanMembers.length > 0 || activeAgentMembers.length > 0 || agentConfigs.length > 0;
-                        return (
-                            <div key={board.id} className="border border-border rounded-lg">
-                                {/* Board header */}
-                                <div className="flex items-center justify-between p-4 border-b border-border">
-                                    <div className="flex items-center gap-3">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-medium text-sm">{board.name}</span>
-                                                {board.isTrial && (
-                                                    <Badge variant="outline" className="text-[10px] gap-1 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600">
-                                                        <FlaskConical className="size-3" />
-                                                        Trial
-                                                    </Badge>
-                                                )}
-                                                {board.odinInitialized ? (
-                                                    <Badge variant="outline" className="text-[10px] gap-1 text-emerald-600 border-emerald-300 dark:text-emerald-400 dark:border-emerald-600">
-                                                        <CheckCircle2 className="size-3" />
-                                                        Initialized
-                                                    </Badge>
-                                                ) : board.workingDir ? (
-                                                    <Badge variant="outline" className="text-[10px] gap-1 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600">
-                                                        <AlertCircle className="size-3" />
-                                                        Not Initialized
-                                                    </Badge>
-                                                ) : null}
-                                            </div>
-                                            <div className="text-xs text-muted-foreground mt-0.5">
-                                                {board.tasks.length} task{board.tasks.length !== 1 ? 's' : ''}
-                                                <span className="mx-1.5 text-border">|</span>
-                                                {boardMembers.length} member{boardMembers.length !== 1 ? 's' : ''}
-                                                <span className="mx-1.5 text-border">|</span>
-                                                ID: {board.id}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        {board.workingDir && !board.odinInitialized && (
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="gap-1.5"
-                                                disabled={initializingBoard === board.id}
-                                                onClick={() => handleInitOdin(board)}
-                                            >
-                                                <Zap className="size-3.5" />
-                                                {initializingBoard === board.id ? 'Initializing...' : 'Initialize Odin'}
-                                            </Button>
-                                        )}
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="gap-1.5"
-                                            onClick={() => navigate(`/reflections?board=${board.id}`)}
-                                        >
-                                            <Sparkles className="size-3.5" />
-                                            Reflections
-                                        </Button>
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                            onClick={() => setBoardToClear(board)}
-                                        >
-                                            <Trash2 className="size-3.5" />
-                                            Clear
-                                        </Button>
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                            onClick={() => { setBoardToDelete(board); setDeleteConfirmStep(1); setDeleteConfirmName(''); }}
-                                        >
-                                            <Trash2 className="size-3.5" />
-                                            Delete
-                                        </Button>
-                                    </div>
-                                </div>
-
-                                {/* Project directory (read-only after creation) */}
-                                <div className="px-4 py-3 border-b border-border bg-muted/20">
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-                                        <FolderOpen className="size-3.5" />
-                                        <span className="font-medium">Project Directory</span>
-                                    </div>
-                                    {board.workingDir ? (
-                                        <div className="text-xs font-mono text-foreground/80">
-                                            {board.workingDir}
-                                        </div>
-                                    ) : (
-                                        <div className="text-xs text-muted-foreground/60">
-                                            No project directory set
-                                        </div>
-                                    )}
-                                    <p className="text-[10px] text-muted-foreground/50 mt-1">
-                                        Cannot be changed after creation
-                                    </p>
-                                </div>
-
-                                {/* Members summary */}
-                                <div className="px-4 py-3 space-y-2.5">
-                                    {!hasAnyMembers ? (
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-xs text-muted-foreground">No members assigned</span>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="gap-1.5"
-                                                onClick={() => setManagingBoard(board)}
-                                            >
-                                                <Users className="size-3.5" />
-                                                Manage
-                                            </Button>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            {/* People row */}
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider w-14 shrink-0">People</span>
-                                                {humanMembers.length === 0 ? (
-                                                    <span className="text-xs text-muted-foreground/60">None</span>
-                                                ) : (
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {humanMembers.map(member => (
-                                                            <div
-                                                                key={member.id}
-                                                                className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/40 border border-border/50"
-                                                            >
-                                                                <div
-                                                                    className="size-4 rounded-full flex items-center justify-center text-[8px] font-medium text-white shrink-0"
-                                                                    style={{ backgroundColor: member.color }}
-                                                                >
-                                                                    {member.initials}
-                                                                </div>
-                                                                <span className="text-xs">{member.fullName}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Agents row — from config (all agents) or from membership (enabled only) */}
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider w-14 shrink-0">Agents</span>
-                                                {hasAgentConfigs ? (
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {agentConfigs.map(agent => (
-                                                            <div
-                                                                key={agent.name}
-                                                                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${
-                                                                    agent.enabled
-                                                                        ? 'bg-blue-500/10 border-blue-300/30 dark:border-blue-600/30'
-                                                                        : 'bg-muted/20 border-border/40 opacity-50'
-                                                                }`}
-                                                            >
-                                                                <Bot className={`size-3 ${agent.enabled ? 'text-blue-500' : 'text-muted-foreground/50'}`} />
-                                                                <span className={`text-xs ${agent.enabled ? '' : 'text-muted-foreground line-through'}`}>
-                                                                    {agent.name}
-                                                                </span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : activeAgentMembers.length === 0 ? (
-                                                    <span className="text-xs text-muted-foreground/60">None</span>
-                                                ) : (
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {activeAgentMembers.map(member => (
-                                                            <div
-                                                                key={member.id}
-                                                                className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-300/30 dark:border-blue-600/30"
-                                                            >
-                                                                <Bot className="size-3 text-blue-500" />
-                                                                <span className="text-xs">{member.fullName}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Manage button */}
-                                            <div className="flex items-center justify-between pt-1 border-t border-border/50">
-                                                <span className="text-xs text-muted-foreground">
-                                                    {(() => {
-                                                        const enabledAgents = hasAgentConfigs ? agentConfigs.filter(a => a.enabled).length : activeAgentMembers.length;
-                                                        const disabledAgents = hasAgentConfigs ? agentConfigs.filter(a => !a.enabled).length : 0;
-                                                        const activeCount = humanMembers.length + enabledAgents;
-                                                        return (
-                                                            <>
-                                                                {activeCount} active{' '}
-                                                                {disabledAgents > 0 && (
-                                                                    <span className="text-muted-foreground/50">
-                                                                        · {disabledAgents} disabled
-                                                                    </span>
+                
+                <div className="border border-border rounded-md overflow-hidden text-sm">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-muted/30 border-b border-border text-xs text-muted-foreground">
+                                <tr>
+                                    <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('id')}>
+                                        <div className="flex items-center gap-1">ID {sortConfig.key === 'id' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
+                                    </th>
+                                    <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('name')}>
+                                        <div className="flex items-center gap-1">Board {sortConfig.key === 'name' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
+                                    </th>
+                                    <th className="px-3 py-2 font-medium">Status</th>
+                                    <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('tasks')}>
+                                        <div className="flex items-center gap-1">Tasks {sortConfig.key === 'tasks' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
+                                    </th>
+                                    <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('members')}>
+                                        <div className="flex items-center gap-1">Members {sortConfig.key === 'members' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
+                                    </th>
+                                    <th className="px-3 py-2 font-medium">Agents</th>
+                                    <th className="px-3 py-2 font-medium text-center w-24">Manage</th>
+                                    <th className="px-3 py-2 font-medium text-center w-24">Details</th>
+                                    <th className="px-3 py-2 w-10"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/50">
+                                {processedBoards.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No boards found</td>
+                                    </tr>
+                                ) : (
+                                    processedBoards.map(board => {
+                                        const boardMembers = membersByBoard[board.id] || board.members;
+                                        const humanMembers = boardMembers.filter(m => !isAgentUser(m));
+                                        const agentConfigs = agentsByBoard[board.id] || [];
+                                        const activeAgentMembers = boardMembers.filter(m => isAgentUser(m));
+                                        const hasAgentConfigs = agentConfigs.length > 0;
+                                        const hasAnyMembers = humanMembers.length > 0 || activeAgentMembers.length > 0 || agentConfigs.length > 0;
+                                        const isExpanded = expandedBoardId === board.id;
+                                        
+                                        const enabledAgents = hasAgentConfigs ? agentConfigs.filter(a => a.enabled).length : activeAgentMembers.length;
+                                        
+                                        return (
+                                            <React.Fragment key={board.id}>
+                                                <tr className={`hover:bg-muted/10 transition-colors ${isExpanded ? 'bg-muted/10' : ''}`}>
+                                                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{board.id}</td>
+                                                    <td className="px-3 py-2 font-medium">{board.name}</td>
+                                                    <td className="px-3 py-2">
+                                                        {board.isTrial && (
+                                                            <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600">
+                                                                <FlaskConical className="size-2.5" /> Trial
+                                                            </Badge>
+                                                        )}
+                                                        {board.odinInitialized ? (
+                                                            <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-emerald-600 border-emerald-300 dark:text-emerald-400 dark:border-emerald-600 whitespace-nowrap">
+                                                                <CheckCircle2 className="size-2.5" /> Initialized
+                                                            </Badge>
+                                                        ) : board.workingDir ? (
+                                                            <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600 whitespace-nowrap">
+                                                                <AlertCircle className="size-2.5" /> Not Init
+                                                            </Badge>
+                                                        ) : null}
+                                                    </td>
+                                                    <td className="px-3 py-2 text-muted-foreground">{board.taskCount ?? 0}</td>
+                                                    <td className="px-3 py-2 text-muted-foreground">{board.memberCount ?? boardMembers.length}</td>
+                                                    <td className="px-3 py-2 text-muted-foreground">{enabledAgents}</td>
+                                                    <td className="px-3 py-2 text-center">
+                                                        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setManagingBoard(board)}>
+                                                            <Users className="size-3.5 mr-1.5" /> Manage
+                                                        </Button>
+                                                    </td>
+                                                    <td className="px-3 py-2 text-center">
+                                                        <Button 
+                                                            variant="ghost" 
+                                                            size="sm" 
+                                                            className={`h-7 px-2 ${isExpanded ? 'bg-muted' : ''}`}
+                                                            onClick={() => setExpandedBoardId(isExpanded ? null : board.id)}
+                                                        >
+                                                            <FileText className="size-3.5 mr-1" /> View
+                                                        </Button>
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        <Popover>
+                                                            <PopoverTrigger asChild>
+                                                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 ml-auto flex">
+                                                                    <MoreVertical className="size-4" />
+                                                                </Button>
+                                                            </PopoverTrigger>
+                                                            <PopoverContent align="end" className="w-56 p-1">
+                                                                {board.workingDir && !board.odinInitialized && (
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        className="w-full justify-start gap-2"
+                                                                        disabled={initializingBoard === board.id}
+                                                                        onClick={() => handleInitOdin(board)}
+                                                                    >
+                                                                        <Zap className="size-4" />
+                                                                        {initializingBoard === board.id ? 'Initializing...' : 'Initialize Odin'}
+                                                                    </Button>
                                                                 )}
-                                                            </>
-                                                        );
-                                                    })()}
-                                                </span>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="gap-1.5"
-                                                    onClick={() => setManagingBoard(board)}
-                                                >
-                                                    <Users className="size-3.5" />
-                                                    Manage
-                                                </Button>
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="w-full justify-start gap-2"
+                                                                    onClick={() => navigate(`/reflections?board=${board.id}`)}
+                                                                >
+                                                                    <Sparkles className="size-4" /> Reflections
+                                                                </Button>
+                                                                <div className="h-px bg-border my-1 mx-2" />
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                    onClick={() => setBoardToClear(board)}
+                                                                >
+                                                                    <Trash2 className="size-4" /> Clear Board
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                    onClick={() => { setBoardToDelete(board); setDeleteConfirmStep(1); setDeleteConfirmName(''); }}
+                                                                >
+                                                                    <Trash2 className="size-4" /> Delete Board
+                                                                </Button>
+                                                            </PopoverContent>
+                                                        </Popover>
+                                                    </td>
+                                                </tr>
+                                                {isExpanded && (
+                                                    <tr className="bg-muted/20 border-b border-border">
+                                                        <td colSpan={9} className="p-0">
+                                                            <div className="p-4 flex gap-6 text-sm flex-col">
+                                                                <div className="flex gap-2">
+                                                                    <FolderOpen className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                                                                    <div>
+                                                                        <div className="font-medium mb-0.5">Project Directory</div>
+                                                                        {board.workingDir ? (
+                                                                            <div className="text-xs font-mono text-foreground/80">{board.workingDir}</div>
+                                                                        ) : (
+                                                                            <div className="text-xs text-muted-foreground/60">No project directory set</div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                
+                                                                {hasAnyMembers && (
+                                                                    <div className={"grid grid-cols-[100px_1fr] gap-4 items-start"}>
+                                                                        <div className="font-medium text-xs text-muted-foreground uppercase tracking-wider mt-1">People</div>
+                                                                        {humanMembers.length === 0 ? (
+                                                                            <span className="text-xs text-muted-foreground/60 mt-1">None</span>
+                                                                        ) : (
+                                                                            <div className="flex flex-wrap gap-1.5">
+                                                                                {humanMembers.map(member => (
+                                                                                    <div key={member.id} className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-background border border-border">
+                                                                                        <div className="size-4 rounded-full flex items-center justify-center text-[8px] font-medium text-white shrink-0" style={{ backgroundColor: member.color }}>
+                                                                                            {member.initials}
+                                                                                        </div>
+                                                                                        <span className="text-xs">{member.fullName}</span>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                        
+                                                                        <div className="font-medium text-xs text-muted-foreground uppercase tracking-wider mt-1">Agents</div>
+                                                                        {hasAgentConfigs ? (
+                                                                            <div className="flex flex-wrap gap-1.5">
+                                                                                {agentConfigs.map(agent => (
+                                                                                    <div key={agent.name} className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${agent.enabled ? 'bg-blue-500/10 border-blue-300/30' : 'bg-background border-border opacity-50'}`}>
+                                                                                        <Bot className={`size-3 ${agent.enabled ? 'text-blue-500' : 'text-muted-foreground/50'}`} />
+                                                                                        <span className={`text-xs ${agent.enabled ? '' : 'text-muted-foreground line-through'}`}>{agent.name}</span>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : activeAgentMembers.length > 0 ? (
+                                                                            <div className="flex flex-wrap gap-1.5">
+                                                                                {activeAgentMembers.map(member => (
+                                                                                    <div key={member.id} className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-500/10 border border-blue-300/30">
+                                                                                        <Bot className="size-3 text-blue-500" />
+                                                                                        <span className="text-xs">{member.fullName}</span>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="text-xs text-muted-foreground/60 mt-1">None</span>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
+
+                {/* Pagination Controls */}
+                {totalFiltered > PAGE_SIZE && (
+                    <div className="flex items-center justify-between mt-4">
+                        <div className="text-xs text-muted-foreground">
+                            Showing {Math.min((currentPage - 1) * PAGE_SIZE + 1, totalFiltered)}–{Math.min(currentPage * PAGE_SIZE, totalFiltered)} of {totalFiltered} board{totalFiltered !== 1 ? 's' : ''}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-8" 
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                            >
+                                Previous
+                            </Button>
+                            <div className="flex items-center gap-1 px-2">
+                                {Array.from({ length: totalPages }).map((_, i) => (
+                                    <Button
+                                        key={i + 1}
+                                        variant={currentPage === i + 1 ? 'default' : 'ghost'}
+                                        size="sm"
+                                        className="h-8 w-8 p-0"
+                                        onClick={() => setCurrentPage(i + 1)}
+                                    >
+                                        {i + 1}
+                                    </Button>
+                                ))}
+                            </div>
+                            <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-8" 
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={currentPage === totalPages}
+                            >
+                                Next
+                            </Button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Clear Board Confirmation */}
