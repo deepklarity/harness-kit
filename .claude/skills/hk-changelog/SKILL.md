@@ -1,5 +1,5 @@
 ---
-name: dk-changelog
+name: hk-changelog
 description: Generate changelog entries from git diffs, prepend to CHANGELOG.md, and optionally commit + PR. Use when the user wants to update the changelog.
 argument-hint: [--dry-run | --commit]
 allowed-tools: Bash, Read, Edit, Write, Task
@@ -12,9 +12,9 @@ Generate a changelog entry from git changes, prepend it to `CHANGELOG.md`, and o
 ## Usage
 
 ```
-/dk-changelog              → full flow: write + commit + PR
-/dk-changelog --dry-run    → print the entry only (no file changes)
-/dk-changelog --commit     → write + commit (no PR)
+/hk-changelog              → full flow: write + commit + PR
+/hk-changelog --dry-run    → print the entry only (no file changes)
+/hk-changelog --commit     → write + commit (no PR)
 ```
 
 Arguments are passed via `$ARGUMENTS`.
@@ -176,6 +176,6 @@ Return the PR URL to the user.
 ### Step 7: Summary
 
 Tell the user what was done:
-- **dry-run**: "Here's your changelog entry. Run `/dk-changelog` to write and PR it."
+- **dry-run**: "Here's your changelog entry. Run `/hk-changelog` to write and PR it."
 - **commit**: "Changelog updated and committed on branch `changelog/YYYY-MM-DD`."
 - **default**: "Changelog updated, committed, and PR opened: [URL]"

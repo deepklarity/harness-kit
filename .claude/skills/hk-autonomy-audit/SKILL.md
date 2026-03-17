@@ -1,11 +1,11 @@
 ---
-name: dk-loop-audit
-description: "Audit whether an AI agent can autonomously close the loop on problems in a given area — from discovering a symptom to verifying a fix — without human intervention. Evaluates documentation, diagnostic tools, commands, logs, and flows for completeness and actionability. Generates a gap-focused report with ratings. Use this skill whenever someone wants to assess debugging readiness, check if docs are agent-sufficient, audit a workflow for autonomous solvability, evaluate operational tooling coverage, or wants to know 'could an agent fix this on its own?' Triggers on: 'loop audit', 'audit this flow', 'is this debuggable', 'agent readiness', 'can an agent solve this', 'autonomous debugging check', or /dk-loop-audit."
+name: hk-autonomy-audit
+description: "Audit whether an AI agent can autonomously close the loop on problems in a given area — from discovering a symptom to verifying a fix — without human intervention. Evaluates documentation, diagnostic tools, commands, logs, and flows for completeness and actionability. Generates a gap-focused report with ratings. Use this skill whenever someone wants to assess debugging readiness, check if docs are agent-sufficient, audit a workflow for autonomous solvability, evaluate operational tooling coverage, or wants to know 'could an agent fix this on its own?' Triggers on: 'loop audit', 'audit this flow', 'is this debuggable', 'agent readiness', 'can an agent solve this', 'autonomous debugging check', or /hk-autonomy-audit."
 argument-hint: "[area/flow/doc to audit, e.g. 'odin exec flow' or 'task failure debugging']"
 allowed-tools: Bash, Read, Edit, Write, Task, Grep, Glob
 ---
 
-# /dk-loop-audit — Autonomous Loop-Closing Readiness Audit
+# /hk-autonomy-audit — Autonomous Loop-Closing Readiness Audit
 
 You're auditing whether the tooling, docs, commands, and flows in a given area are sufficient for an AI agent to autonomously solve problems — from first symptom to verified fix — without stopping to ask a human.
 
@@ -84,7 +84,7 @@ For each stage, evaluate from the perspective of an AI agent that has access to 
 **DOCUMENT — Can the agent record what happened?**
 - Is there a documentation workflow? (Where to put learnings, what format)
 - Are there templates for incident docs? (Solution docs, RCA reports)
-- Is the compounding mechanism discoverable? (Would an agent know to use /dk-compound?)
+- Is the compounding mechanism discoverable? (Would an agent know to use /hk-compound?)
 
 ### Step 3: Rate each stage
 

@@ -1,11 +1,11 @@
 ---
-name: dk-breadcrumb-creator
-description: "Traces a workflow end-to-end through the harness-kit monorepo and creates a breadcrumb analysis doc in docs/breadcrumb_analysis/. Use this skill whenever the user wants to document a flow, trace a workflow, understand how a feature works across layers (frontend → backend → worker → CLI), or create debugging guides for a specific flow. Also use when the user mentions 'breadcrumb', 'trace this flow', 'how does X work end to end', 'document this workflow', or /dk-breadcrumb-creator."
+name: hk-breadcrumb-creator
+description: "Traces a workflow end-to-end through the harness-kit monorepo and creates a breadcrumb analysis doc in docs/breadcrumb_analysis/. Use this skill whenever the user wants to document a flow, trace a workflow, understand how a feature works across layers (frontend → backend → worker → CLI), or create debugging guides for a specific flow. Also use when the user mentions 'breadcrumb', 'trace this flow', 'how does X work end to end', 'document this workflow', or /hk-breadcrumb-creator."
 argument-hint: "<flow name or description, e.g. 'spec execution' or 'task creation from board view'>"
 allowed-tools: Bash, Read, Edit, Write, Task, Grep, Glob
 ---
 
-# /dk-breadcrumb-creator — Workflow Breadcrumb Analysis
+# /hk-breadcrumb-creator — Workflow Breadcrumb Analysis
 
 Traces a workflow through the harness-kit monorepo and produces a compact debugging reference. The output is for devs and agents who need to find where things break — not for onboarding docs or architecture overviews.
 

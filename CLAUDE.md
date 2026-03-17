@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Memory Policy
 
-**Never use MEMORY.md files.** Do not create, read, update, or reference any `MEMORY.md` files in this repository. All persistent project context belongs in `CLAUDE.md` files (root and per-project). If you need to store learnings, use `/workflows:compound` to write to `docs/solutions/` instead.
+**Never use MEMORY.md files.** Do not create, read, update, or reference any `MEMORY.md` files in this repository. All persistent project context belongs in `CLAUDE.md` files (root and per-project). If you need to store learnings, use `/hk-compound` to write to `docs/patterns/` instead.
 
 ## Git Safety: No Stash
 
@@ -75,9 +75,9 @@ When something is broken, unexpected, or unclear — resist the urge to jump to 
 
 ### When to anchor on disk
 
-- **Multi-step features**: Use `docs/mock-first/<feature-slug>/` with a `tracker.md` (see `/dk-local-mock-first-approach`)
-- **Iterative refinement**: Use a scratch directory with `loop.md` (see `/dk-close-the-loop`)
-- **Debugging investigations**: Write hypotheses and findings to `docs/solutions/` as you go, not just at the end
+- **Multi-step features**: Use `docs/mock-first/<feature-slug>/` with a `tracker.md` (see `/hk-mock-first`)
+- **Iterative refinement**: Use a scratch directory with `loop.md` (see `/hk-refine`)
+- **Debugging investigations**: Write hypotheses and findings to `docs/patterns/` as you go, not just at the end
 - **Any work that might be continued in a new session**: If you'd need to re-explain context to resume, it belongs on disk
 
 ### Organization rules (preventing workspace clutter)
@@ -86,7 +86,7 @@ When something is broken, unexpected, or unclear — resist the urge to jump to 
 |---|---|---|
 | Feature mock workspaces | `docs/mock-first/<feature-slug>/` | Kept until feature ships, then `summary.md` stays |
 | Iteration scratch dirs | Sibling to the thing being refined | Cleaned up after loop closes (summary stays) |
-| Compounded learnings | `docs/solutions/<category>/` | Permanent |
+| Compounded patterns | `docs/patterns/` | Permanent (living docs, updated as new instances appear) |
 | Loop audit reports | `docs/loop_audits/` | Permanent |
 | Breadcrumb analyses | `docs/breadcrumb_analysis/` | Permanent |
 | Temp debugging output | `/tmp/` or gitignored dirs | Ephemeral — never commit |
@@ -362,8 +362,4 @@ When to re-capture: after model/serializer changes, harness changes, or when sna
 
 ## Compounding Knowledge
 
-`/workflows:compound` captures solutions in `docs/solutions/`. Each solution should document **both**:
-1. **The technical fix** — exact code changes, error messages, root cause (searchable next time the symptom recurs)
-2. **The design principle** — the *why* behind the approach, reusable across contexts (e.g., "information hierarchy via progressive disclosure" applies to any sidebar, not just TaskDetailModal)
-
-Solutions in `design-patterns/` are principle-heavy. Solutions in `ui-bugs/`, `runtime-errors/`, etc. are fix-heavy. Both should include the other dimension — a bug fix should note the principle it violates; a design pattern should include concrete code.
+`/hk-compound` captures reusable patterns in `docs/patterns/`. Each pattern is a named, transferable principle — not a record of what happened, but a reusable insight that gets richer as more instances accumulate under it. Patterns are living docs: when you encounter a new instance of an existing pattern, append it rather than creating a new file. The value compounds because each instance sharpens the principle and makes it easier to recognize next time.

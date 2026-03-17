@@ -1,11 +1,11 @@
 ---
-name: dk-local-mock-first-approach
-description: "Mock-first, layer-by-layer feature development. Instead of building a feature end-to-end and hoping the interface works, start by mocking at the user-facing surface with realistic data, get user acceptance on the experience, then deepen one complexity layer at a time with TDD. Everything is anchored on disk so work survives across sessions. Use whenever building a new feature, adding significant UI, planning a multi-layer change, or when the user mentions 'mock first', 'let me see it first', 'prototype this', 'simulate this feature', 'build this layer by layer', or /dk-local-mock-first-approach."
+name: hk-mock-first
+description: "Mock-first, layer-by-layer feature development. Instead of building a feature end-to-end and hoping the interface works, start by mocking at the user-facing surface with realistic data, get user acceptance on the experience, then deepen one complexity layer at a time with TDD. Everything is anchored on disk so work survives across sessions. Use whenever building a new feature, adding significant UI, planning a multi-layer change, or when the user mentions 'mock first', 'let me see it first', 'prototype this', 'simulate this feature', 'build this layer by layer', or /hk-mock-first."
 argument-hint: "[feature description or area to mock]"
 allowed-tools: Bash, Read, Edit, Write, Task, Grep, Glob
 ---
 
-# /dk-local-mock-first-approach — Mock-First, Layer-by-Layer Feature Development
+# /hk-mock-first — Mock-First, Layer-by-Layer Feature Development
 
 The traditional approach — build the plumbing, wire the API, then hope the UI works — inverts the feedback loop. You discover experience problems *after* committing to implementation choices. This skill inverts the flow: validate the experience first with realistic mocks, then progressively replace mocks with real code, one complexity layer at a time.
 
@@ -315,11 +315,11 @@ Total iterations on mocks: [count]
 ```
 
 4. Update tracker.md status to `shipped`
-5. Consider running `/dk-compound` to capture any reusable learnings
+5. Consider running `/hk-compound` to capture any reusable learnings
 
 ## Context Management Rules
 
-Same discipline as dk-close-the-loop — the workspace is the memory, not the conversation:
+Same discipline as hk-refine — the workspace is the memory, not the conversation:
 
 1. **Never paste full mock data or test files into the conversation.** They live on disk. Subagents read them from disk.
 

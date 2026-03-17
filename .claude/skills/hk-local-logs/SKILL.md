@@ -1,11 +1,11 @@
 ---
-name: dk-local-logs
-description: "Inspect and debug errors via logs across the harness-kit monorepo. Reads the right log file based on the error layer — backend, frontend, celery, odin CLI, or odin task execution. Use this skill whenever someone mentions a 500 error, a stack trace, a crash, 'check the logs', 'what went wrong', a service not starting, celery task failures, or any runtime error. Also triggers on: 'getting 500', 'backend error', 'celery error', 'odin failed', 'check logs', 'tail logs', 'debug this error', or /dk-local-logs."
+name: hk-local-logs
+description: "Inspect and debug errors via logs across the harness-kit monorepo. Reads the right log file based on the error layer — backend, frontend, celery, odin CLI, or odin task execution. Use this skill whenever someone mentions a 500 error, a stack trace, a crash, 'check the logs', 'what went wrong', a service not starting, celery task failures, or any runtime error. Also triggers on: 'getting 500', 'backend error', 'celery error', 'odin failed', 'check logs', 'tail logs', 'debug this error', or /hk-local-logs."
 argument-hint: "[backend | frontend | celery | odin | task <id>] [--lines N] [--search <pattern>]"
 allowed-tools: Bash, Read, Grep
 ---
 
-# /dk-local-logs — Log Inspector & Error Debugger
+# /hk-local-logs — Log Inspector & Error Debugger
 
 Read the right log for the right problem, from the right place. No more guessing which of 5 log locations to check.
 
@@ -13,13 +13,13 @@ Read the right log for the right problem, from the right place. No more guessing
 
 | Symptom | Log to check | Command |
 |---------|-------------|---------|
-| 500 error, API broken | Backend | `/dk-local-logs backend` |
-| UI not loading, build error | Frontend | `/dk-local-logs frontend` |
-| Task not executing, queue stuck | Celery | `/dk-local-logs celery` |
-| `odin plan`/`odin exec` failed | Odin | `/dk-local-logs odin` |
-| Specific task execution trace | Task | `/dk-local-logs task <id>` |
-| Migration error on startup | Backend | `/dk-local-logs backend --search migrate` |
-| Don't know where the error is | Auto | `/dk-local-logs` (no args) |
+| 500 error, API broken | Backend | `/hk-local-logs backend` |
+| UI not loading, build error | Frontend | `/hk-local-logs frontend` |
+| Task not executing, queue stuck | Celery | `/hk-local-logs celery` |
+| `odin plan`/`odin exec` failed | Odin | `/hk-local-logs odin` |
+| Specific task execution trace | Task | `/hk-local-logs task <id>` |
+| Migration error on startup | Backend | `/hk-local-logs backend --search migrate` |
+| Don't know where the error is | Auto | `/hk-local-logs` (no args) |
 
 ## Arguments
 
@@ -204,9 +204,9 @@ Then show the full traceback from whichever log has the most recent error.
 
 ## Handoff to other skills
 
-- If the error points to a **specific task** (task ID visible), suggest: `/dk-local-inspect task <id>` for structured diagnostic data (status, metadata, comments, dependency chain)
-- If the error points to a **spec run**, suggest: `/dk-local-inspect spec <id>`
-- This skill reads raw logs; `/dk-local-inspect` reads structured Django ORM data. Use both together for full picture.
+- If the error points to a **specific task** (task ID visible), suggest: `/hk-local-diagnose task <id>` for structured diagnostic data (status, metadata, comments, dependency chain)
+- If the error points to a **spec run**, suggest: `/hk-local-diagnose spec <id>`
+- This skill reads raw logs; `/hk-local-diagnose` reads structured Django ORM data. Use both together for full picture.
 
 ## Error handling
 

@@ -1,11 +1,11 @@
 ---
-name: dk-rca
-description: "Interactive Root Cause Analysis enforcer. Guides you through the 7-step RCA protocol: Reproduce, Locate, Hypothesis, Failing Test, Fix, Verify Live, Document. Use when debugging a bug, investigating a failure, or when something unexpected happened. This skill gates each step — it won't let you skip to a fix without stating a hypothesis first. Triggers on: 'something is broken', 'debug this', 'why is this failing', 'RCA', 'root cause', or /dk-rca."
+name: hk-rca
+description: "Interactive Root Cause Analysis enforcer. Guides you through the 7-step RCA protocol: Reproduce, Locate, Hypothesis, Failing Test, Fix, Verify Live, Document. Use when debugging a bug, investigating a failure, or when something unexpected happened. This skill gates each step — it won't let you skip to a fix without stating a hypothesis first. Triggers on: 'something is broken', 'debug this', 'why is this failing', 'RCA', 'root cause', or /hk-rca."
 argument-hint: "[optional: brief description of the bug or symptom]"
 allowed-tools: Bash, Read, Edit, Write, Task, Grep, Glob
 ---
 
-# /dk-rca — Root Cause Analysis Protocol
+# /hk-rca — Root Cause Analysis Protocol
 
 This skill enforces the discipline of methodical debugging. The protocol exists because the most common debugging failure is jumping from "I see the symptom" to "I'll try this fix" — skipping the hypothesis, the test, and the verification.
 

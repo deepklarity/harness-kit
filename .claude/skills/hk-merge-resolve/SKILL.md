@@ -1,8 +1,8 @@
 ---
-name: dk-merge-resolve
+name: hk-merge-resolve
 description: >
   Resolve merge conflicts in the current branch. Only invoke when the user
-  explicitly runs /dk-merge-resolve. Do NOT auto-trigger on mentions of merge
+  explicitly runs /hk-merge-resolve. Do NOT auto-trigger on mentions of merge
   conflicts, conflict markers, or similar keywords.
 allowed-tools: Bash, Read, Edit, Grep, Glob, AskUserQuestion
 ---

@@ -1,24 +1,24 @@
 ---
-name: dk-local-inspect
-description: "Run diagnostic scripts on tasks, specs, boards, or reflections. Wraps testing_tools/ with proper working directory and output mode selection. Use this skill whenever the user wants to inspect, debug, or check the state of a task, spec, board, or reflection — even if they don't say 'inspect' explicitly. Triggers on: 'why did task X fail', 'show me spec Y', 'what's on the board', 'check task', 'inspect', 'diagnose', or /dk-local-inspect."
+name: hk-local-diagnose
+description: "Run diagnostic scripts on tasks, specs, boards, or reflections. Wraps testing_tools/ with proper working directory and output mode selection. Use this skill whenever the user wants to inspect, debug, or check the state of a task, spec, board, or reflection — even if they don't say 'inspect' explicitly. Triggers on: 'why did task X fail', 'show me spec Y', 'what's on the board', 'check task', 'inspect', 'diagnose', or /hk-local-diagnose."
 argument-hint: <type> <id> [--brief | --full | --json] [--sections a,b]
 allowed-tools: Bash, Read
 ---
 
-# /dk-local-inspect — Diagnostic Script Runner
+# /hk-local-diagnose — Diagnostic Script Runner
 
 Run the right diagnostic script with the right flags, from the right directory. No more remembering paths or cd-ing around.
 
 ## Usage
 
 ```
-/dk-local-inspect task 42
-/dk-local-inspect task 42 --brief
-/dk-local-inspect spec 15 --json --sections tasks,problems
-/dk-local-inspect board
-/dk-local-inspect board 3
-/dk-local-inspect reflection 8 --full
-/dk-local-inspect snapshot sp25 ../../tests/e2e_snapshots/smoke
+/hk-local-diagnose task 42
+/hk-local-diagnose task 42 --brief
+/hk-local-diagnose spec 15 --json --sections tasks,problems
+/hk-local-diagnose board
+/hk-local-diagnose board 3
+/hk-local-diagnose reflection 8 --full
+/hk-local-diagnose snapshot sp25 ../../tests/e2e_snapshots/smoke
 ```
 
 ## Arguments
@@ -77,13 +77,13 @@ If the script exits with a non-zero code, show the error and suggest:
 If `$ARGUMENTS` is empty or missing the type, print usage help:
 
 ```
-Usage: /dk-local-inspect <type> <id> [flags]
+Usage: /hk-local-diagnose <type> <id> [flags]
 
 Types: task, spec, board, reflection, snapshot
 Flags: --brief (default), --full, --json, --slim, --sections <list>
 
 Examples:
-  /dk-local-inspect task 42
-  /dk-local-inspect spec 15 --json --sections tasks,problems
-  /dk-local-inspect board
+  /hk-local-diagnose task 42
+  /hk-local-diagnose spec 15 --json --sections tasks,problems
+  /hk-local-diagnose board
 ```

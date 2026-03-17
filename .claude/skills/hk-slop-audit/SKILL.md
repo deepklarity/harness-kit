@@ -1,11 +1,11 @@
 ---
-name: dk-slop-audit
-description: "Run a codebase hygiene audit. Scans for misplaced files, dead code, temp files, security issues, structural problems, dependency slop, and git slop. Outputs a prioritized report with P0-P4 findings. Use periodically or before releases. Triggers on: 'audit the codebase', 'find slop', 'hygiene check', 'clean up', or /dk-slop-audit."
+name: hk-slop-audit
+description: "Run a codebase hygiene audit. Scans for misplaced files, dead code, temp files, security issues, structural problems, dependency slop, and git slop. Outputs a prioritized report with P0-P4 findings. Use periodically or before releases. Triggers on: 'audit the codebase', 'find slop', 'hygiene check', 'clean up', or /hk-slop-audit."
 argument-hint: "[optional: directory or category to focus on]"
 allowed-tools: Bash, Read, Edit, Write, Task, Grep, Glob
 ---
 
-# /dk-slop-audit — Codebase Hygiene Auditor
+# /hk-slop-audit — Codebase Hygiene Auditor
 
 Systematically scan the codebase for slop — code that degrades quality through misplacement, abandonment, inconsistency, or negligence. Produce a prioritized, actionable report.
 

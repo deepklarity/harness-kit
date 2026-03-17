@@ -6,8 +6,8 @@ Master index for all documentation in the harness-kit monorepo.
 
 | Type | Location | Purpose | Created by |
 |------|----------|---------|------------|
-| **Breadcrumbs** | `breadcrumb_analysis/` | End-to-end flow traces (FLOW + DETAILS + DEBUG) | `/dk-breadcrumb-creator` |
-| **Solutions** | `solutions/<category>/` | Compounded learnings — fixes, patterns, anti-patterns | `/dk-compound` |
+| **Breadcrumbs** | `breadcrumb_analysis/` | End-to-end flow traces (FLOW + DETAILS + DEBUG) | `/hk-breadcrumb-creator` |
+| **Solutions** | `solutions/<category>/` | Compounded learnings — fixes, patterns, anti-patterns | `/hk-compound` |
 | **Philosophy** | `philosophy/` | Core design principles that govern how we build | Manual |
 | **Testing process** | `testing_process/` | Testing framework, RCA protocol, test categories | Manual |
 | **Guides** | `guides/` | Operational how-tos — deployment, building MCPs | Manual |

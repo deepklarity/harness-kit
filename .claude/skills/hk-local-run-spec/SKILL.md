@@ -1,21 +1,21 @@
 ---
-name: dk-local-run-spec
-description: "Plan and execute an odin spec. Handles working directory, auth, nested-session detection, and post-run diagnostics. Use whenever the user wants to run a spec, test a spec, or do a smoke test. Triggers on: 'run this spec', 'test this spec', 'odin plan', 'smoke test', or /dk-local-run-spec."
+name: hk-local-run-spec
+description: "Plan and execute an odin spec. Handles working directory, auth, nested-session detection, and post-run diagnostics. Use whenever the user wants to run a spec, test a spec, or do a smoke test. Triggers on: 'run this spec', 'test this spec', 'odin plan', 'smoke test', or /hk-local-run-spec."
 argument-hint: <spec_path> [--mock] [--quick] [--exec-only <task_id>]
 allowed-tools: Bash, Read
 ---
 
-# /dk-local-run-spec — Spec Runner
+# /hk-local-run-spec — Spec Runner
 
 Run the full odin spec workflow: plan, review, execute. Handles the gotchas so you don't have to remember them.
 
 ## Usage
 
 ```
-/dk-local-run-spec ../sample_specs/poem_spec.md
-/dk-local-run-spec ../sample_specs/poem_spec.md --quick
-/dk-local-run-spec ../sample_specs/poem_spec.md --mock
-/dk-local-run-spec --exec-only a1b2
+/hk-local-run-spec ../sample_specs/poem_spec.md
+/hk-local-run-spec ../sample_specs/poem_spec.md --quick
+/hk-local-run-spec ../sample_specs/poem_spec.md --mock
+/hk-local-run-spec --exec-only a1b2
 ```
 
 ## Arguments
@@ -118,7 +118,7 @@ Always remind the user to run the diagnostic after execution:
 
 ```
 After execution completes, check results with:
-  /dk-local-inspect spec <spec_id> --brief
+  /hk-local-diagnose spec <spec_id> --brief
 ```
 
 This connects the two skills into a natural workflow.

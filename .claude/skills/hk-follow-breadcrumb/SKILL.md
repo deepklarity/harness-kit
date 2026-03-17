@@ -1,11 +1,11 @@
 ---
-name: dk-local-follow-breadcrumb
+name: hk-follow-breadcrumb
 description: "Consults existing breadcrumb analysis docs before exploring the codebase. Use this skill whenever the user asks about how a flow works, where something happens in the code, how to debug or test a specific area, what files are involved in a feature, or needs to understand the path data takes through the system. Also trigger when the user mentions 'where does X happen', 'how does Y work', 'trace this', 'what files handle Z', 'how to test this flow', 'debug this area', or when you're about to spawn multiple exploration subagents to understand a cross-cutting flow. Even if the user doesn't explicitly ask — if the task requires understanding how multiple layers connect (frontend → backend → worker → CLI), check breadcrumbs first. This is cheaper and more accurate than re-discovering the same information through code search."
 argument-hint: "<what you're trying to understand, e.g. 'how does task execution work' or 'where do traces get ingested'>"
 allowed-tools: Read, Grep, Glob, Task, Bash
 ---
 
-# /dk-local-follow-breadcrumb — Breadcrumb-First Exploration
+# /hk-follow-breadcrumb — Breadcrumb-First Exploration
 
 This skill is about reading before searching. The `docs/breadcrumb_analysis/` directory contains end-to-end workflow traces that have already been carefully researched and documented. Loading a relevant breadcrumb takes seconds and costs a fraction of what spawning exploration subagents costs. The breadcrumb docs are maintained alongside code changes, so they're the most reliable "map" of how flows work.
 
@@ -57,7 +57,7 @@ Tell the user:
 
 ```
 No existing breadcrumb covers this flow. I'll explore the code directly.
-Consider running /dk-breadcrumb-creator afterward to document this flow for next time.
+Consider running /hk-breadcrumb-creator afterward to document this flow for next time.
 ```
 
 Then proceed with normal exploration (grep, glob, file reads, subagents as needed).
@@ -88,7 +88,7 @@ If the user's exploration uncovered a flow that isn't documented (outcome C), or
 
 ```
 This flow isn't documented in breadcrumb analysis yet. Want me to create one?
-Run /dk-breadcrumb-creator to trace and document it for future reference.
+Run /hk-breadcrumb-creator to trace and document it for future reference.
 ```
 
 This closes the loop — exploration that finds undocumented territory feeds back into the documentation system.
@@ -96,5 +96,5 @@ This closes the loop — exploration that finds undocumented territory feeds bac
 ## When NOT to use this skill
 
 - **Single-file questions** — "What does `function_name` in `file.py` do?" → Just read the file directly.
-- **Creating new breadcrumbs** — Use `/dk-breadcrumb-creator` instead. This skill reads; that one writes.
+- **Creating new breadcrumbs** — Use `/hk-breadcrumb-creator` instead. This skill reads; that one writes.
 - **General codebase search** — "Find all TODO comments" → Just grep. Breadcrumbs trace flows, not search for patterns.

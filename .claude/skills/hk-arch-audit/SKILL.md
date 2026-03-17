@@ -1,12 +1,12 @@
 ---
-name: dk-agent-native-audit
-description: "Run comprehensive agent-native architecture review with scored principles. Audits a codebase against 8 agent-native architecture principles (Action Parity, Tools as Primitives, Context Injection, Shared Workspace, CRUD Completeness, UI Integration, Capability Discovery, Prompt-Native Features) by launching parallel sub-agents and producing a scored report. Use when the user wants to evaluate how agent-friendly their architecture is, or audit specific principles. Triggers on: 'agent native audit', 'architecture review', 'how agent-friendly is this', or /dk-agent-native-audit."
+name: hk-arch-audit
+description: "Run comprehensive agent-native architecture review with scored principles. Audits a codebase against 8 agent-native architecture principles (Action Parity, Tools as Primitives, Context Injection, Shared Workspace, CRUD Completeness, UI Integration, Capability Discovery, Prompt-Native Features) by launching parallel sub-agents and producing a scored report. Use when the user wants to evaluate how agent-friendly their architecture is, or audit specific principles. Triggers on: 'agent native audit', 'architecture review', 'how agent-friendly is this', or /hk-arch-audit."
 argument-hint: "[optional: specific principle to audit, e.g. 'action parity' or '1']"
 allowed-tools: Bash, Read, Grep, Glob, Task
 disable-model-invocation: true
 ---
 
-# /dk-agent-native-audit — Agent-Native Architecture Review
+# /hk-arch-audit — Agent-Native Architecture Review
 
 Conducts a comprehensive review of the codebase against agent-native architecture principles, launching parallel sub-agents for each principle and producing a scored report.
 

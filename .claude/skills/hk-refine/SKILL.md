@@ -1,11 +1,11 @@
 ---
-name: dk-close-the-loop
-description: "Iteratively improve any output by running a structured observe-hypothesize-change-rerun loop. Uses an organized scratch directory to prevent context blowup — the conversation stays thin while iterations accumulate on disk. Use when an output (reflection, plan, prompt, pipeline result) isn't good enough and needs systematic refinement. Triggers on: 'close the loop', 'this output isn't good enough', 'iterate on this', 'refine this output', 'improve this reflection', or /dk-close-the-loop."
+name: hk-refine
+description: "Iteratively improve any output by running a structured observe-hypothesize-change-rerun loop. Uses an organized scratch directory to prevent context blowup — the conversation stays thin while iterations accumulate on disk. Use when an output (reflection, plan, prompt, pipeline result) isn't good enough and needs systematic refinement. Triggers on: 'close the loop', 'this output isn't good enough', 'iterate on this', 'refine this output', 'improve this reflection', or /hk-refine."
 argument-hint: "[scratch_dir] [description of what to improve]"
 allowed-tools: Bash, Read, Edit, Write, Task, Grep, Glob
 ---
 
-# /dk-close-the-loop — Iterative Output Refinement
+# /hk-refine — Iterative Output Refinement
 
 You have an open loop: something produced output, the output isn't good enough, and you need to systematically improve it. This skill closes that loop.
 
