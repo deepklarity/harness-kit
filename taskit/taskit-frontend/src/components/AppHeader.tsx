@@ -54,6 +54,11 @@ export function AppHeader({
             <div className="max-w-[90vw] mx-auto flex items-center justify-between h-14">
                 <div className="flex items-center gap-4">
                     <button type="button" className="text-base font-bold tracking-tight hover:text-foreground/80 transition-colors" onClick={onNavigateHome}>Taskit</button>
+                    {import.meta.env.VITE_INSTANCE && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider bg-primary text-primary-foreground px-1.5 py-0.5 rounded">
+                            {import.meta.env.VITE_INSTANCE}
+                        </span>
+                    )}
                     <div className="flex items-center gap-3">
                         <Select value={selectedBoard} onValueChange={(val) => val === CREATE_BOARD_ID ? onCreateBoard() : onBoardChange(val)}>
                             <SelectTrigger className="w-[220px] h-8 text-sm">

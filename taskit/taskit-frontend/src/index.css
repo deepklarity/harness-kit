@@ -149,6 +149,20 @@
     --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 
+/* Dev instance theme — warm amber accent for visual distinction */
+[data-instance="dev"] {
+    --primary: hsl(25 95% 35%);
+    --ring: hsl(25 95% 35%);
+    --sidebar-primary: hsl(25 90% 40%);
+    --sidebar-ring: hsl(25 90% 50%);
+}
+[data-instance="dev"].dark {
+    --primary: hsl(30 90% 55%);
+    --ring: hsl(30 90% 55%);
+    --sidebar-primary: hsl(30 85% 50%);
+    --sidebar-ring: hsl(30 85% 55%);
+}
+
 @layer base {
     * {
         @apply border-border outline-ring/50;

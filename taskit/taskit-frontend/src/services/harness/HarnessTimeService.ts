@@ -258,7 +258,7 @@ export class HarnessTimeService implements IntegrationService {
     private cachedBoardNames: Map<string, string> = new Map();
 
     constructor() {
-        this.baseUrl = import.meta.env.VITE_HARNESS_TIME_API_URL || 'http://localhost:8000';
+        this.baseUrl = import.meta.env.VITE_HARNESS_TIME_API_URL || 'http://localhost:9100';
     }
 
     setTokenProvider(provider: () => Promise<string | null>): void {

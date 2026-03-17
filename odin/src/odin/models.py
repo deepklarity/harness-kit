@@ -93,7 +93,7 @@ class ChromeDevToolsConfig(BaseModel):
 class TaskItConfig(BaseModel):
     """Configuration for connecting to a TaskIt instance."""
 
-    base_url: str = "http://localhost:8000"
+    base_url: str = "http://localhost:9100"
     board_id: int = 1
     created_by: str = "odin@harness.kit"
     trial_board_name: str = "odin-trial"

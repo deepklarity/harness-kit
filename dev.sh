@@ -14,6 +14,17 @@ FRONTEND_DIR="$ROOT_DIR/taskit/taskit-frontend"
 ODIN_DIR="$ROOT_DIR/odin"
 LOG_DIR="$ROOT_DIR/.dev-logs"
 
+INSTANCE="${INSTANCE:-}"
+
+# Dev instance auto-offsets ports by 1 to avoid collisions with stable
+if [ "$INSTANCE" = "dev" ]; then
+    BACKEND_PORT="${BACKEND_PORT:-9101}"
+    FRONTEND_PORT="${FRONTEND_PORT:-9201}"
+else
+    BACKEND_PORT="${BACKEND_PORT:-9100}"
+    FRONTEND_PORT="${FRONTEND_PORT:-9200}"
+fi
+
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m'
@@ -86,19 +97,30 @@ mkdir -p "$LOG_DIR"
 
 # --- Start ---
 
-python "$BACKEND_DIR/manage.py" runserver 0.0.0.0:8000 > "$LOG_DIR/backend.log" 2>&1 &
+# Auto-set CORS and API URL so frontend/backend connect on non-default ports
+export CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS:-http://localhost:$FRONTEND_PORT}"
+export VITE_HARNESS_TIME_API_URL="${VITE_HARNESS_TIME_API_URL:-http://localhost:$BACKEND_PORT}"
+export VITE_INSTANCE="${INSTANCE}"
+
+python "$BACKEND_DIR/manage.py" runserver 0.0.0.0:$BACKEND_PORT > "$LOG_DIR/backend.log" 2>&1 &
 PIDS+=($!)
 
-(cd "$FRONTEND_DIR" && npm run dev) > "$LOG_DIR/frontend.log" 2>&1 &
+(cd "$FRONTEND_DIR" && npm run dev -- --port $FRONTEND_PORT) > "$LOG_DIR/frontend.log" 2>&1 &
 PIDS+=($!)
 
 (cd "$BACKEND_DIR" && celery -A config worker --beat --loglevel=info --concurrency=3 --pool=prefork) > "$LOG_DIR/celery.log" 2>&1 &
 PIDS+=($!)
 
 BOLD='\033[1m'
+AMBER='\033[0;33m'
 echo ""
-echo -e "${BOLD}${GREEN}  → Open http://localhost:5173${NC}"
+if [ -n "$INSTANCE" ]; then
+    echo -e "${BOLD}${AMBER}  → [$INSTANCE] http://localhost:$FRONTEND_PORT${NC}"
+else
+    echo -e "${BOLD}${GREEN}  → Open http://localhost:$FRONTEND_PORT${NC}"
+fi
 echo ""
-info "API running on localhost:8000"
+info "API running on localhost:$BACKEND_PORT"
+[ -n "$INSTANCE" ] && info "Instance: $INSTANCE (amber theme, badge, wrench favicon)"
 info "Ctrl-C to stop  |  Trouble? tail -f .dev-logs/backend.log"
 wait

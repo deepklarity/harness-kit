@@ -70,6 +70,18 @@ function App() {
     }, [dark]);
 
     useEffect(() => {
+        const instance = import.meta.env.VITE_INSTANCE;
+        if (instance) {
+            document.documentElement.dataset.instance = instance;
+            document.title = `[${instance.toUpperCase()}] ${document.title.replace(/^\[[^\]]+\]\s*/, '')}`;
+            const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement
+                || Object.assign(document.createElement('link'), { rel: 'icon' });
+            link.href = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>`;
+            document.head.appendChild(link);
+        }
+    }, []);
+
+    useEffect(() => {
         service.setTokenProvider(getIdToken);
     }, [getIdToken, service]);
 

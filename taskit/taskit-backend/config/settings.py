@@ -53,7 +53,7 @@ if AUTH_ENABLED:
     CORS_ALLOW_CREDENTIALS = True
     CORS_ALLOWED_ORIGINS = [
         item.strip()
-        for item in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+        for item in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:9200").split(",")
         if item.strip()
     ]
 else:

@@ -21,7 +21,7 @@ python manage.py runserver 0.0.0.0:8000
 
 ```bash
 npm install
-npm run dev       # Dev server on http://localhost:5173
+npm run dev       # Dev server on http://localhost:9200
 npm run build     # TypeScript check + Vite build
 npm run lint      # ESLint
 npm run test      # Vitest (watch mode)
@@ -67,4 +67,4 @@ See `taskit-backend/CLAUDE.md` for detailed backend architecture, models, domain
 ### Environment
 
 Backend `.env`: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `PORT`, `SECRET_KEY`, `DEBUG`, `AUTH_ENABLED` (default: `False`), `JWT_ACCESS_SECONDS`, `JWT_REFRESH_SECONDS`, `CORS_ALLOWED_ORIGINS`.
-Frontend `.env`: `VITE_HARNESS_TIME_API_URL` (default: `http://localhost:8000`), `VITE_AUTH_ENABLED` (default: `false`).
+Frontend `.env`: `VITE_HARNESS_TIME_API_URL` (default: `http://localhost:9100`), `VITE_AUTH_ENABLED` (default: `false`), `VITE_INSTANCE` (instance label, e.g. `dev`).

@@ -64,7 +64,7 @@ PORT=8080
 AUTH_ENABLED=False                       # Master auth switch (default: disabled for dev)
 JWT_ACCESS_SECONDS=900                   # Access token lifetime (15 min)
 JWT_REFRESH_SECONDS=604800               # Refresh token lifetime (7 days)
-CORS_ALLOWED_ORIGINS=http://localhost:5173
+CORS_ALLOWED_ORIGINS=http://localhost:9200
 
 # Odin execution
 ODIN_EXECUTION_STRATEGY=                 # "local" or "celery_dag" (empty = disabled)

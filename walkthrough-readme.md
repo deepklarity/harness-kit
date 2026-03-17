@@ -53,15 +53,15 @@ From the **root of the `harness-kit` repository**, start all services:
 Wait until you see this line in the terminal:
 
 ```
-→ Open http://localhost:5173
+→ Open http://localhost:9200
 ```
 
 That means all three services started successfully:
 
 | Service | Port |
 |---------|------|
-| Django backend | 8000 |
-| React frontend | 5173 |
+| Django backend | 9100 |
+| React frontend | 9200 |
 | Celery worker | — (async task execution) |
 
 > `./dev.sh` stays running in the foreground. **Open a new terminal** for the next step.
@@ -95,7 +95,7 @@ pip install -e .
 
 Open the frontend and set up a board:
 
-1. Go to **http://localhost:5173**
+1. Go to **http://localhost:9200**
 
 2. The **"Create New Board"** dialog appears automatically on first launch. You can also click **create board** from the board selector.
 
@@ -202,7 +202,7 @@ Press `Ctrl+C` twice to exit. Tasks will be created on the board.
 
 ## 7. Monitor Task Execution
 
-Open the board at http://localhost:5173/board
+Open the board at http://localhost:9200/board
 
 You will see tasks created from the spec appearing on the board. Each task shows:
 
@@ -242,7 +242,7 @@ Inside the task view you can see:
 
 ## 8. Spec Details
 
-Open the Specs page at http://localhost:5173/specs
+Open the Specs page at http://localhost:9200/specs
 
 Find the spec for the board you want to review and click its card.
 

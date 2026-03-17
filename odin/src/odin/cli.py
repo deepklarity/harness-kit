@@ -191,7 +191,7 @@ class OdinCLI:
         Example:
             odin init
             odin init --force
-            odin init --board-id 42 --base-url http://localhost:8000
+            odin init --board-id 42 --base-url http://localhost:9100
         """
         odin_dir = Path.cwd() / ".odin"
         config_dest = odin_dir / "config.yaml"

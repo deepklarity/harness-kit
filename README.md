@@ -56,7 +56,7 @@ cd odin/
 pip install -e . 
 ```
 
-Opens at [localhost:5173](http://localhost:5173).
+Opens at [localhost:9200](http://localhost:9200).
 
 First run creates a venv, installs everything, migrates SQLite, and seeds agent users (~60s). After that, starts in ~3s. `Ctrl-C` stops all services.
 

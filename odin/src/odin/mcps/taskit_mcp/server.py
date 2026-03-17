@@ -54,7 +54,7 @@ def _resolve_auth_token() -> str:
     password = os.environ.get("ODIN_ADMIN_PASSWORD", "")
     if email and password:
         from odin.backends.taskit import TaskItAuth
-        base_url = os.environ.get("TASKIT_URL", "http://localhost:8000")
+        base_url = os.environ.get("TASKIT_URL", "http://localhost:9100")
         auth = TaskItAuth(f"{base_url}/auth/login/", email, password)
         return auth.get_token()  # raises TaskItAuthError on failure
 
@@ -76,7 +76,7 @@ def _make_client(task_id: str) -> TaskItToolClient:
     for authentication (same .env file odin uses).
     """
     return TaskItToolClient(
-        base_url=os.environ.get("TASKIT_URL", "http://localhost:8000"),
+        base_url=os.environ.get("TASKIT_URL", "http://localhost:9100"),
         task_id=task_id,
         auth_token=_get_auth_token(),
         author_email=os.environ.get("TASKIT_AUTHOR_EMAIL", "agent@odin.agent"),

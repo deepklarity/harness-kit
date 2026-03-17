@@ -23,7 +23,7 @@ def client_from_args(
 
     Priority: explicit args > environment variables > defaults.
     """
-    resolved_url = url or os.environ.get("TASKIT_URL", "http://localhost:8000")
+    resolved_url = url or os.environ.get("TASKIT_URL", "http://localhost:9100")
     resolved_task_id = task_id or os.environ.get("TASKIT_TASK_ID", "")
     resolved_token = auth_token or os.environ.get("TASKIT_AUTH_TOKEN", "")
     resolved_email = author_email or os.environ.get("TASKIT_AUTHOR_EMAIL", "agent@odin.agent")
