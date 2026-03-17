@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+
+import React, { useState, useEffect, useCallback, useMemo,useRef } from 'react';
 import type { AgentConfig, Board, Member } from '../types';
 import { useService } from '../contexts/ServiceContext';
 import { Button } from '@/components/ui/button';
@@ -18,11 +19,15 @@ import {
 import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
+
 import {
     Popover,
     PopoverContent,
     PopoverTrigger,
 } from '@/components/ui/popover';
+
+import { NotificationSettings } from './NotificationSettings';
+
 
 interface SettingsViewProps {
     boards: Board[];
@@ -50,6 +55,19 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
     const [deleteConfirmStep, setDeleteConfirmStep] = useState<1 | 2>(1);
     const [deleteConfirmName, setDeleteConfirmName] = useState('');
     const [deleting, setDeleting] = useState(false);
+
+    // Scroll to hash anchor on mount (e.g. /settings#notifications)
+    const didScrollRef = useRef(false);
+    useEffect(() => {
+        if (didScrollRef.current) return;
+        const hash = window.location.hash.slice(1);
+        if (!hash) return;
+        const el = document.getElementById(hash);
+        if (el) {
+            didScrollRef.current = true;
+            el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    });
 
     // Agent configs per board (for showing enabled/disabled status in summary)
     const [agentsByBoard, setAgentsByBoard] = useState<Record<string, AgentConfig[]>>({});
@@ -590,6 +608,12 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Notification Settings */}
+            <div id="notifications" className="mt-8">
+                <h2 className="text-lg font-semibold mb-4">Notifications</h2>
+                <NotificationSettings />
+            </div>
 
             {/* Manage Members Modal */}
             {managingBoard && (

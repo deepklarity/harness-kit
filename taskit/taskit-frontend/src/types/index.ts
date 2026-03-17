@@ -394,4 +394,34 @@ export interface PresetsResponse {
     presets: TaskPreset[];
 }
 
-export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections';
+export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications';
+
+// ─── Notification Types ───────────────────────────────────────
+
+export type NotificationType = 'task_assigned' | 'comment_added' | 'status_changed' | 'planning_complete' | 'question_asked' | 'spec_finished';
+
+export interface Notification {
+    id: number;
+    recipient: number;
+    notification_type: NotificationType;
+    title: string;
+    body: string;
+    task: number | null;
+    task_title: string | null;
+    spec: number | null;
+    spec_title: string | null;
+    board: number | null;
+    board_name: string | null;
+    actor_email: string;
+    is_read: boolean;
+    created_at: string;
+}
+
+export interface NotificationPreference {
+    desktop_enabled: boolean;
+    sound_enabled: boolean;
+    disabled_types: string[];
+    quiet_hours_start: string | null;
+    quiet_hours_end: string | null;
+    quiet_hours_timezone: string;
+}
