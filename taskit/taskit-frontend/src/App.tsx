@@ -25,6 +25,7 @@ import { markCommentsSeen } from './utils/unseenComments';
 import { getLatestExecutionTransitionTimestamp, markExecutionTransitionSeen } from './utils/unseenStatusTransitions';
 import { EditUserModal } from './components/EditUserModal';
 import { BoardPage, SpecsPage } from './components/pages';
+import { NotificationsPage } from './components/NotificationsPage';
 
 function pathToViewMode(pathname: string): ViewMode {
     const match = VIEW_ROUTES.find(r => r.path === pathname);
@@ -33,6 +34,7 @@ function pathToViewMode(pathname: string): ViewMode {
     if (pathname.includes('/debug')) return 'specs';
     if (pathname.startsWith('/reflections')) return 'reflections';
     if (pathname === '/settings') return 'settings';
+    if (pathname === '/notifications') return 'notifications';
     return 'board';
 }
 
@@ -594,6 +596,7 @@ function App() {
                         <Route path="/reflections/:reportId" element={
                             <ReflectionDetailRoute onTaskClick={handleTaskSelect} />
                         } />
+                        <Route path="/notifications" element={<NotificationsPage />} />
                         <Route path="/settings" element={
                             <>
                                 <SectionHeader title="Settings" />

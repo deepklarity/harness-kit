@@ -1323,6 +1323,41 @@ export class HarnessTimeService implements IntegrationService {
         await this.post<{ status: string }>(`/tasks/${Number(taskId)}/summarize/`, {});
     }
 
+    // ─── Notification API ─────────────────────────────────────
+
+    async fetchNotifications(params?: { is_read?: boolean; type?: string; since?: string }): Promise<{ results: import('../../types').Notification[] }> {
+        const qp = new URLSearchParams();
+        if (params?.is_read !== undefined) qp.set('is_read', String(params.is_read));
+        if (params?.type) qp.set('type', params.type);
+        if (params?.since) qp.set('since', params.since);
+        const qs = qp.toString();
+        return this.get(`/api/notifications/${qs ? `?${qs}` : ''}`);
+    }
+
+    async fetchUnreadCount(): Promise<{ count: number }> {
+        return this.get('/api/notifications/unread_count/');
+    }
+
+    async markNotificationRead(id: number): Promise<import('../../types').Notification> {
+        return this.post(`/api/notifications/${id}/read/`, {});
+    }
+
+    async markAllNotificationsRead(): Promise<{ updated: number }> {
+        return this.post('/api/notifications/mark_all_read/', {});
+    }
+
+    async deleteNotification(id: number): Promise<void> {
+        await this.del(`/api/notifications/${id}/`);
+    }
+
+    async fetchNotificationPreferences(): Promise<import('../../types').NotificationPreference> {
+        return this.get('/api/notifications/preferences/');
+    }
+
+    async updateNotificationPreferences(prefs: Partial<import('../../types').NotificationPreference>): Promise<import('../../types').NotificationPreference> {
+        return this.post('/api/notifications/preferences/', prefs, 'PUT');
+    }
+
     private async post<T>(path: string, body: unknown, method: 'POST' | 'PUT' | 'PATCH' = 'POST'): Promise<T> {
         const auth = await this.authHeaders();
         const res = await fetch(`${this.baseUrl}${path}`, {

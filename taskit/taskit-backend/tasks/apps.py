@@ -10,4 +10,5 @@ class TasksConfig(AppConfig):
 
         validate_forced_provider_config()
         import tasks.signals  # noqa: F401
+        import tasks.notification_signals  # noqa: F401
         import tasks.dag_executor  # noqa: F401 — register Celery tasks

@@ -11,6 +11,7 @@ import {
     Plus, LogOut, Moon, Sun, Settings,
     Activity,
 } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 import type { LucideIcon } from 'lucide-react';
 
 const ALL_BOARDS_ID = '__ALL__';
@@ -122,6 +123,7 @@ export function AppHeader({
                             <Settings className="size-4" />
                         </Link>
                     </Button>
+                    <NotificationBell />
                     <Button variant="ghost" size="sm" className="size-8 p-0" onClick={onToggleDark}>
                         {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
                     </Button>

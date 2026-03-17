@@ -15,6 +15,7 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 | `trace-data-pipeline/` | Trace capture (harness JSONL) -> backend ingestion -> cost/token computation -> frontend TraceViewer. Covers all 6 harness formats, snapshot golden data, and regression testing gaps |
 | `board-project-lifecycle/` | Board creation → project directory linkage → spec/task execution. Current flow + PROPOSED.md for board-as-project refactor (working_dir on Board, odin init via API, UI-first onboarding) |
 | `prompt-presets/` | Prompt presets in CreateTaskModal: static JSON data → backend endpoint → PresetPicker component → form auto-population. 5 categories, 27 templates for code review, UI audit, documentation, analysis, and quality process tasks |
+| `notification-system/` | Full notification flow: 6 backend triggers → notify() filtering → DB bulk_create → 30s frontend poll → bell badge + sound + desktop popup. Also covers Web Push path (VAPID → service worker → push delivery) |
 | `task-preset-tdd-enforcement/` | **PROPOSED** — Task presets (test, implement, scaffold, integrate, verify, standalone) with context isolation and verification gates. Embeds TDD philosophy into odin plan/exec so projects built by odin inherit fail-first testing |
 
 ## Quick navigation
@@ -36,6 +37,10 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 - **odin exec fails with "no such directory"?** → `board-project-lifecycle/DEBUG.md`
 - **board_id mismatch between CLI config and UI?** → `board-project-lifecycle/DEBUG.md`
 - **Fresh install — where to start?** → `board-project-lifecycle/PROPOSED.md` (onboarding flow)
+- **Notifications not appearing?** → `notification-system/DEBUG.md`
+- **Bell badge stuck at 0?** → `notification-system/DEBUG.md`
+- **Push notifications not delivering?** → `notification-system/DEBUG.md`
+- **Sound not playing on notification?** → `notification-system/DEBUG.md`
 - **Presets not showing in CreateTaskModal?** → `prompt-presets/DEBUG.md`
 - **New category color not appearing?** → `prompt-presets/DEBUG.md` (CATEGORY_COLORS map)
 - **How to add a new preset?** → `prompt-presets/DEBUG.md` (Adding new presets section)

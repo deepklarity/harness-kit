@@ -341,8 +341,6 @@ Notes:
 | `DAG_EXECUTOR_MAX_CONCURRENCY` | `3` (or custom) | Max parallel task execution |
 | `DAG_EXECUTOR_POLL_INTERVAL` | `5` (seconds) | Polling interval for runnable tasks |
 
----
-
 ## Tests
 
 Uses in-memory SQLite (no PostgreSQL needed).

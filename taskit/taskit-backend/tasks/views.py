@@ -445,6 +445,7 @@ def _record_change(histories, task, field_name, old_value, new_value, changed_by
     return False
 
 
+
 class StandardPagination(PageNumberPagination):
     page_size = 25
     page_size_query_param = "page_size"
@@ -1587,6 +1588,17 @@ class TaskViewSet(viewsets.ModelViewSet):
         # Auto-add assignee to board
         _ensure_board_membership(task.board, assignee)
 
+        # Notify assignee
+        from .notification_service import notify
+        notify(
+            recipient_ids=[assignee.id],
+            notification_type="task_assigned",
+            title=f'You were assigned to "{task.title}"',
+            task=task,
+            board=task.board,
+            actor_email=ser.validated_data["updated_by"],
+        )
+
         return Response(_task_response(task.id))
 
     @action(detail=True, methods=["post"])
@@ -1693,6 +1705,29 @@ class TaskViewSet(viewsets.ModelViewSet):
             "Comment on task %s by %s: %s",
             task.id, comment.author_label or comment.author_email, comment.content[:100],
         )
+
+        # Notify board members about new comment — skip if content is JSON (agent/system messages)
+        try:
+            json.loads(comment.content)
+            _is_json = True
+        except (json.JSONDecodeError, ValueError, TypeError):
+            _is_json = False
+
+        if not _is_json:
+            from .notification_service import notify
+            member_ids = list(
+                BoardMembership.objects.filter(board=task.board).values_list("user_id", flat=True)
+            )
+            notify(
+                recipient_ids=member_ids,
+                notification_type="comment_added",
+                title=f'New comment on "{task.title}"',
+                body=comment.content[:200],
+                task=task,
+                board=task.board,
+                actor_email=comment.author_email,
+            )
+
         return Response(
             TaskCommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED
         )
@@ -1754,6 +1789,21 @@ class TaskViewSet(viewsets.ModelViewSet):
         task.metadata = task.metadata or {}
         task.metadata["has_pending_question"] = True
         task.save(update_fields=["metadata"])
+
+        # Notify board human members about the question
+        from .notification_service import notify
+        member_ids = list(
+            BoardMembership.objects.filter(board=task.board).values_list("user_id", flat=True)
+        )
+        notify(
+            recipient_ids=member_ids,
+            notification_type="question_asked",
+            title=f'Question on "{task.title}"',
+            body=ser.validated_data["content"][:200],
+            task=task,
+            board=task.board,
+            actor_email=ser.validated_data["author_email"],
+        )
 
         return Response(
             TaskCommentSerializer(comment, context={"request": request}).data, status=status.HTTP_201_CREATED
@@ -2432,6 +2482,22 @@ class SpecViewSet(viewsets.ModelViewSet):
             author_label=f"{d['agent']} ({d['model']})",
             content=comment_text,
             comment_type=CommentType.PLANNING,
+        )
+
+        # Notify board members about planning result
+        from .notification_service import notify
+        member_ids = list(
+            BoardMembership.objects.filter(board=spec.board).values_list("user_id", flat=True)
+        )
+        verb = "completed" if d["success"] else "failed"
+        notify(
+            recipient_ids=member_ids,
+            notification_type="planning_complete",
+            title=f'Planning {verb} for "{spec.title}"',
+            body=f"Agent: {d['agent']}, Duration: {d['duration_ms'] / 1000:.1f}s",
+            spec=spec,
+            board=spec.board,
+            actor_email=author_email,
         )
 
         return Response(SpecSerializer(spec).data)

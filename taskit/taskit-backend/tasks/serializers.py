@@ -1,6 +1,10 @@
 from rest_framework import serializers
 
-from .models import Board, CommentAttachment, CommentType, Label, ReflectionReport, Spec, SpecComment, Task, TaskComment, TaskHistory, TaskPriority, TaskStatus, User
+from .models import (
+    Board, CommentAttachment, CommentType, Label, Notification, NotificationPreference,
+    ReflectionReport, Spec, SpecComment, Task, TaskComment,
+    TaskHistory, TaskPriority, TaskStatus, User,
+)
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -565,3 +569,28 @@ class RoutingAgentSerializer(serializers.Serializer):
 class ModelToggleSerializer(serializers.Serializer):
     """Payload for toggling a model's enabled state."""
     enabled = serializers.BooleanField()
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    task_title = serializers.CharField(source="task.title", read_only=True, default=None)
+    spec_title = serializers.CharField(source="spec.title", read_only=True, default=None)
+    board_name = serializers.CharField(source="board.name", read_only=True, default=None)
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id", "recipient", "notification_type", "title", "body",
+            "task", "task_title", "spec", "spec_title",
+            "board", "board_name", "actor_email",
+            "is_read", "created_at",
+        ]
+        read_only_fields = ["id", "recipient", "created_at"]
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = [
+            "desktop_enabled", "sound_enabled", "disabled_types",
+            "quiet_hours_start", "quiet_hours_end", "quiet_hours_timezone",
+        ]
