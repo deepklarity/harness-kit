@@ -240,11 +240,11 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                 </Card>
             ) : (
                 <>
-                    <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5">
                         {specs.map(spec => (
-                            <Card key={spec.id} className="cursor-pointer hover:border-primary/40 transition-colors" onClick={() => onSpecClick(spec)}>
-                                <CardContent className="p-4">
-                                    <div className="flex items-center justify-between mb-2">
+                            <Card key={spec.id} className="cursor-pointer hover:border-primary/40 transition-colors overflow-hidden" onClick={() => onSpecClick(spec)}>
+                                <CardContent className="p-4 min-w-0">
+                                    <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2">
                                         <Badge variant="outline" className="text-[10px] font-mono">#{spec.id}</Badge>
                                         <div className="flex gap-1.5 items-center">
                                             <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-primary transition-colors"
@@ -272,7 +272,7 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                                             </Badge>
                                         </div>
                                     </div>
-                                    <div className="text-base font-semibold mb-2">{spec.title}</div>
+                                    <div className="text-base font-semibold mb-2 break-all">{spec.title}</div>
                                     {(spec.costSummary?.total_cost_usd || spec.costSummary?.reflection_cost_usd) ? (
                                         <div className="flex items-center gap-3 text-[10px] font-mono mb-1.5">
                                             <span className="flex items-center gap-1 text-emerald-400">

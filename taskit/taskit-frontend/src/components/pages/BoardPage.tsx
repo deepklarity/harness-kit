@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { format, subDays } from 'date-fns';
 import type { Board, Label, Member, Task } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
-import { useToast } from '@/hooks/use-toast';
 import { usePolling } from '@/hooks/usePolling';
 import { KanbanBoard } from '@/components/KanbanBoard';
 import { KanbanTaskSearch } from '@/components/KanbanTaskSearch';
@@ -51,9 +50,9 @@ function ViewToggle({ value, onChange }: { value: BoardView; onChange: (v: Board
             {VIEW_OPTIONS.map(opt => {
                 const Icon = opt.icon;
                 return (
-                    <ToggleGroupItem key={opt.value} value={opt.value} aria-label={opt.label} className="gap-1.5 text-xs px-3">
+                    <ToggleGroupItem key={opt.value} value={opt.value} aria-label={opt.label} className="gap-1.5 text-xs px-2 sm:px-3">
                         <Icon className="size-3.5" />
-                        {opt.label}
+                        <span className="hidden sm:inline">{opt.label}</span>
                     </ToggleGroupItem>
                 );
             })}
@@ -252,11 +251,13 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
 
 // ─── Kanban View ────────────────────────────────────────────
 
-function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap, currentBoard, onTaskClick, onTaskMove, onStopExecution, onDeleteTask }: {
+function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap, members, labels, currentBoard, onTaskClick, onTaskMove, onStopExecution, onDeleteTask }: {
     selectedBoard?: string;
     refreshKey?: number;
     filteredMemberId?: string | null;
     memberMap: Map<string, Member>;
+    members: Member[];
+    labels: Label[];
     currentBoard?: Board | null;
     onTaskClick: (task: Task) => void;
     onTaskMove: (taskId: string, move: { status: string; targetIndex?: number }) => Promise<boolean>;
@@ -264,7 +265,6 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     onDeleteTask?: (taskId: string) => void;
 }) {
     const service = useService();
-    const { toast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
@@ -273,6 +273,19 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     const [guideOpen, setGuideOpen] = useState(false);
     const defaultsApplied = useRef(false);
     const hasLoadedOnce = useRef(false);
+
+    const filterAssignee = useMemo(() => splitParam(searchParams.get('assignee')), [searchParams]);
+    const filterPriority = useMemo(() => splitParam(searchParams.get('priority')), [searchParams]);
+    const filterLabels = useMemo(() => splitParam(searchParams.get('labels')), [searchParams]);
+    const hasActiveFilters = filterAssignee.length > 0 || filterPriority.length > 0 || filterLabels.length > 0;
+
+    const setParam = useCallback((key: string, value?: string) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            if (!value) next.delete(key); else next.set(key, value);
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
 
     useEffect(() => {
         if (defaultsApplied.current) return;
@@ -331,7 +344,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         };
     }, [load, refreshKey]);
 
-    const polling = usePolling(() => load({ silent: true }), {
+    usePolling(() => load({ silent: true }), {
         enabled: pollingEnabled,
         intervalMs: Number(import.meta.env.VITE_POLL_INTERVAL_MS || 15000),
         immediate: false,
@@ -356,10 +369,13 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         return ok;
     }, [onStopExecution, load]);
 
-    const visibleTasks = useMemo(
-        () => filteredMemberId ? tasks.filter(t => t.assigneeIds.includes(filteredMemberId)) : tasks,
-        [tasks, filteredMemberId],
-    );
+    const visibleTasks = useMemo(() => {
+        let result = filteredMemberId ? tasks.filter(t => t.assigneeIds.includes(filteredMemberId)) : tasks;
+        if (filterAssignee.length > 0) result = result.filter(t => t.assigneeIds.some(id => filterAssignee.includes(id)));
+        if (filterPriority.length > 0) result = result.filter(t => t.priority && filterPriority.includes(t.priority));
+        if (filterLabels.length > 0) result = result.filter(t => t.labels?.some(l => filterLabels.includes(String(l.id))));
+        return result;
+    }, [tasks, filteredMemberId, filterAssignee, filterPriority, filterLabels]);
 
     const handleDateChange = useMemo(() => (from: string, to: string) => {
         setSearchParams(prev => {
@@ -385,42 +401,60 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     return (
         <div>
 
-            <div className="flex items-center mb-4">
-
-                {/* Left Side */}
-                <div className="flex items-center gap-2">
-                
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                        {!loading && (
-                            <>
-                                {visibleTasks.length} {visibleTasks.length === 1 ? "task" : "tasks"}
-                            </>
-                        )}
-                    </span>
-
-                             <KanbanTaskSearch
-                        selectedBoard={selectedBoard}
-                        onSelect={handleSearchSelect}
-                        className="w-96"
-                    />
-                </div>
-
-                {/* Right Side - Action buttons */}
-                <div className="flex items-center gap-2 ml-auto">
-               
-                    <DateRangeFilter
-                        label="Created"
-                        from={dateFrom}
-                        to={dateTo}
-                        onChange={handleDateChange}
-                    />
-
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+                <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                    {!loading && (
+                        <>{visibleTasks.length} {visibleTasks.length === 1 ? 'task' : 'tasks'}</>
+                    )}
+                </span>
+                <KanbanTaskSearch
+                    selectedBoard={selectedBoard}
+                    onSelect={handleSearchSelect}
+                    className="w-96"
+                />
+                <MultiSelectFilter
+                    label="Assignee"
+                    options={members.map(m => ({ label: m.fullName, value: m.id }))}
+                    selected={filterAssignee}
+                    onChange={(next) => setParam('assignee', next.length ? next.join(',') : undefined)}
+                />
+                <MultiSelectFilter
+                    label="Priority"
+                    options={PRIORITY_OPTIONS.map(s => ({ label: s, value: s }))}
+                    selected={filterPriority}
+                    onChange={(next) => setParam('priority', next.length ? next.join(',') : undefined)}
+                />
+                <MultiSelectFilter
+                    label="Labels"
+                    options={labels.map(l => ({ label: l.name, value: String(l.id) }))}
+                    selected={filterLabels}
+                    onChange={(next) => setParam('labels', next.length ? next.join(',') : undefined)}
+                />
+                <DateRangeFilter
+                    label="Created"
+                    from={dateFrom}
+                    to={dateTo}
+                    onChange={handleDateChange}
+                />
+                {hasActiveFilters && (
+                    <Button size="sm" variant="ghost" className="text-xs text-muted-foreground h-7 px-2" onClick={() => {
+                        setSearchParams(prev => {
+                            const next = new URLSearchParams(prev);
+                            next.delete('assignee');
+                            next.delete('priority');
+                            next.delete('labels');
+                            return next;
+                        }, { replace: true });
+                    }}>
+                        Clear filters
+                    </Button>
+                )}
+                <div className="ml-auto flex items-center gap-2">
                     <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
                         <Plus className="size-3.5 mr-1" />
                         Spec
                     </Button>
                 </div>
-
             </div>
             {error && <div className="text-sm text-destructive mb-3">{error}</div>}
             {loading ? (
@@ -516,7 +550,7 @@ function TimelineViewWrapper({ selectedBoard, refreshKey = 0, members, onTaskCli
 
     return (
         <div>
-            <div className="flex items-center justify-end gap-2 mb-4">
+            <div className="flex flex-wrap items-center justify-end gap-2 mb-4">
                 <span className="text-xs text-muted-foreground tabular-nums mr-auto">
                     {!loading && <>{tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}</>}
                 </span>
@@ -594,6 +628,8 @@ export function BoardPage({
                     refreshKey={refreshKey}
                     filteredMemberId={filteredMemberId}
                     memberMap={memberMap}
+                    members={members}
+                    labels={labels}
                     currentBoard={currentBoard}
                     onTaskClick={onTaskClick}
                     onTaskMove={onTaskMove}

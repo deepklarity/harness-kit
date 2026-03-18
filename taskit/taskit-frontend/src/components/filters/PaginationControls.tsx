@@ -23,7 +23,7 @@ export function PaginationControls({
     const current = Math.min(page, totalPages);
 
     return (
-        <div className="flex items-center justify-between gap-3 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 py-4">
             <div className="flex items-center gap-2">
                 {!hideRowsSelector && (
                     <>
@@ -41,17 +41,18 @@ export function PaginationControls({
                     </>
                 )}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3">
                 <Button
                     variant="outline"
                     size="sm"
                     onClick={() => onPageChange(current - 1)}
                     disabled={current <= 1}
                 >
-                    <ChevronLeft className="size-3.5 mr-1" /> Previous
+                    <ChevronLeft className="size-3.5 sm:mr-1" />
+                    <span className="hidden sm:inline">Previous</span>
                 </Button>
-                <span className="text-sm text-muted-foreground" aria-current="page">
-                    Page {current} of {totalPages}
+                <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap" aria-current="page">
+                    {current} / {totalPages}
                 </span>
                 <Button
                     variant="outline"
@@ -59,7 +60,8 @@ export function PaginationControls({
                     onClick={() => onPageChange(current + 1)}
                     disabled={current >= totalPages}
                 >
-                    Next <ChevronRight className="size-3.5 ml-1" />
+                    <span className="hidden sm:inline">Next</span>
+                    <ChevronRight className="size-3.5 sm:ml-1" />
                 </Button>
             </div>
         </div>

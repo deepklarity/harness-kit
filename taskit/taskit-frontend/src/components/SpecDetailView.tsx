@@ -138,11 +138,11 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
 
     return (
         <div>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                 <Button variant="ghost" size="sm" className="gap-1.5" onClick={onBack}>
                     <ArrowLeft className="size-3.5" /> Back to specs
                 </Button>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <Link to={`/specs/${specId}/debug${searchParams.get('board') ? `?board=${searchParams.get('board')}` : ''}`} className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 h-8 text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors group">
                         <Bug className="size-3.5 group-hover:text-orange-400 transition-colors" /> Debug Execution
                     </Link>
@@ -250,7 +250,7 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
             {/* Cost + Tasks side by side */}
             <div className="flex gap-4 items-start mb-6 max-md:flex-col">
                 {/* Cost Breakdown — compact key-value layout */}
-                <Card className="border-border w-64 shrink-0">
+                <Card className="border-border w-full md:w-64 md:shrink-0">
                     <CardHeader className="pb-2">
                         <CardTitle className="text-sm flex items-center gap-1.5">
                             <DollarSign className="size-3.5" /> Cost Breakdown
@@ -314,13 +314,13 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Tasks</h3>
                     <div className="rounded-lg border border-border overflow-hidden">
                         {/* Header */}
-                        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] max-md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold items-center">
+                        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold items-center">
                             <span>#</span>
                             <span>Task</span>
                             <span>Status</span>
-                            <span>Model</span>
-                            <span>Time</span>
-                            <span className="max-md:hidden">Timeline</span>
+                            <span className="hidden sm:block">Model</span>
+                            <span className="hidden sm:block">Time</span>
+                            <span className="hidden md:block">Timeline</span>
                             <span className="text-right">Build</span>
                             <span className="text-right">Review</span>
                         </div>
@@ -334,18 +334,18 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                             />
                         ))}
                         {/* Totals */}
-                        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] max-md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 bg-muted/20 border-t border-border text-xs font-semibold items-center">
+                        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 bg-muted/20 border-t border-border text-xs font-semibold items-center">
                             <span />
                             <span className="text-muted-foreground">{sortedTasks.length} tasks</span>
                             <span />
-                            <span />
-                            <span className="font-mono text-muted-foreground">
+                            <span className="hidden sm:block" />
+                            <span className="hidden sm:block font-mono text-muted-foreground">
                                 {formatDuration(sortedTasks.reduce((sum, t) => {
                                     const tis = t.timeInStatuses || {};
                                     return sum + (tis['EXECUTING'] || 0) + (tis['REVIEW'] || 0);
                                 }, 0))}
                             </span>
-                            <span className="max-md:hidden" />
+                            <span className="hidden md:block" />
                             <span className="text-right font-mono text-emerald-400">
                                 {formatCost(costSummary?.total_cost_usd ?? null)}
                             </span>
@@ -437,7 +437,7 @@ function TaskTableRow({ task, maxActiveTime, onClick }: { task: Task; maxActiveT
 
     return (
         <div
-            className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] max-md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 border-t border-border/50 hover:bg-muted/30 cursor-pointer items-center transition-colors"
+            className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 border-t border-border/50 hover:bg-muted/30 cursor-pointer items-center transition-colors"
             onClick={onClick}
         >
             <span className="text-[10px] font-mono text-muted-foreground">#{task.idShort}</span>
@@ -446,10 +446,10 @@ function TaskTableRow({ task, maxActiveTime, onClick }: { task: Task; maxActiveT
                 <span className="size-1.5 rounded-full shrink-0" style={{ background: color }} />
                 <span className="truncate">{task.currentStatus}</span>
             </span>
-            <span className="text-[10px] font-mono text-muted-foreground truncate">{model}</span>
-            <span className="text-[10px] font-mono text-muted-foreground">{formatDuration(activeTime)}</span>
+            <span className="hidden sm:block text-[10px] font-mono text-muted-foreground truncate">{model}</span>
+            <span className="hidden sm:block text-[10px] font-mono text-muted-foreground">{formatDuration(activeTime)}</span>
             {/* Timeline bar — execution+review only, hidden on narrow screens */}
-            <span className="max-md:hidden flex items-center" title={tooltipLines.join('\n')}>
+            <span className="hidden md:flex items-center" title={tooltipLines.join('\n')}>
                 {barWidth > 0 ? (
                     <span className="flex h-1.5 rounded-full overflow-hidden" style={{ width: `${barWidth}%`, minWidth: '4px' }}>
                         {activeEntries.map(([status, ms]) => (

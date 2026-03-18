@@ -122,7 +122,7 @@ export function SpecListView({ specs, onSpecClick, onDataChange }: SpecListViewP
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-5">
                     {pageSpecs.map((spec, i) => (
                         <Card key={spec.id}
-                            className="cursor-pointer bg-card/50 backdrop-blur-sm border-border hover:border-primary/30 hover:shadow-lg hover:-translate-y-0.5 transition-all animate-in-up group"
+                            className="cursor-pointer bg-card/50 backdrop-blur-sm border-border hover:border-primary/30 hover:shadow-lg hover:-translate-y-0.5 transition-all animate-in-up group overflow-hidden"
                             style={{ animationDelay: `${Math.min(i + 1, 6) * 50}ms` }}
                             onClick={() => onSpecClick(spec)}>
                             <CardContent className="p-5">
@@ -154,7 +154,7 @@ export function SpecListView({ specs, onSpecClick, onDataChange }: SpecListViewP
                                         </Badge>
                                     </div>
                                 </div>
-                                <div className="text-base font-semibold leading-snug mb-2">{spec.title}</div>
+                                <div className="text-base font-semibold leading-snug mb-2 break-all">{spec.title}</div>
                                 <div className="text-xs text-muted-foreground">
                                     Source: {spec.source}
                                 </div>

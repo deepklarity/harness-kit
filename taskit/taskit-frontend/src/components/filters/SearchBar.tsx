@@ -32,7 +32,7 @@ export function SearchBar({
     }, [internal, value, debounceMs, onSearchChange]);
 
     return (
-        <div className="relative min-w-[220px]">
+        <div className="relative min-w-[160px] sm:min-w-[220px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" aria-hidden="true" />
             <Input
                 value={internal}

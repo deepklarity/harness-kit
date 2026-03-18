@@ -26,6 +26,9 @@ import { getLatestExecutionTransitionTimestamp, markExecutionTransitionSeen } fr
 import { EditUserModal } from './components/EditUserModal';
 import { BoardPage, SpecsPage } from './components/pages';
 import { NotificationsPage } from './components/NotificationsPage';
+import { CommandPalette } from './components/CommandPalette';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 
 function pathToViewMode(pathname: string): ViewMode {
     const match = VIEW_ROUTES.find(r => r.path === pathname);
@@ -107,6 +110,32 @@ function App() {
     const [overviewError, setOverviewError] = useState<string | null>(null);
     const [processModalOpen, setProcessModalOpen] = useState(false);
     const [selectedUser, setSelectedUser] = useState<Member | null>(null);
+    const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+    const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState<string | undefined>();
+    const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+
+    const suppressSingleKeys = showCreateTask || showCreateBoard || !!selectedTask
+        || processModalOpen || !!selectedUser || commandPaletteOpen || shortcutsModalOpen;
+
+    const globalShortcutActions = useCallback(() => ({
+        openCommandPalette: (initialQuery?: string) => {
+            setCommandPaletteInitialQuery(initialQuery);
+            setCommandPaletteOpen(true);
+        },
+        openShortcutsModal: () => setShortcutsModalOpen(true),
+        createTask: () => setShowCreateTask(true),
+        navigateTo: (path: string) => {
+            const board = searchParams.get('board');
+            navigate(board ? `${path}?board=${board}` : path);
+        },
+    }), [navigate, searchParams]);
+
+    useGlobalShortcuts(globalShortcutActions(), suppressSingleKeys);
+
+    const handleOpenCommandPalette = useCallback(() => {
+        setCommandPaletteInitialQuery(undefined);
+        setCommandPaletteOpen(true);
+    }, []);
 
     const needsMembers = viewMode === 'board'
         || viewMode === 'settings'
@@ -561,9 +590,11 @@ function App() {
                         navigate(board ? `/board?board=${board}` : '/board');
                     }}
                     onOpenProcessMonitor={() => setProcessModalOpen(true)}
+                    onOpenCommandPalette={handleOpenCommandPalette}
+                    onOpenShortcuts={() => setShortcutsModalOpen(true)}
                 />
 
-                <main className={`flex-1 w-full p-8 ${isFullWidthBoard ? 'max-w-none px-6 lg:px-8' : 'max-w-[90vw] mx-auto'}`}>
+                <main className={`flex-1 w-full py-6 px-4 sm:px-6 lg:px-8 ${isFullWidthBoard ? 'max-w-none' : 'max-w-[90vw] mx-auto'}`}>
                     <Routes>
                         <Route path="/" element={<Navigate to="/board" replace />} />
                         <Route path="/stats" element={
@@ -681,6 +712,24 @@ function App() {
                     boardId={boardFilter}
                     refreshKey={refreshKey}
                     onTaskStopped={() => setRefreshKey(k => k + 1)}
+                />
+
+                <KeyboardShortcutsModal
+                    open={shortcutsModalOpen}
+                    onClose={() => setShortcutsModalOpen(false)}
+                />
+
+                <CommandPalette
+                    open={commandPaletteOpen}
+                    onClose={() => { setCommandPaletteOpen(false); setCommandPaletteInitialQuery(undefined); }}
+                    boards={boards}
+                    navigate={(path) => { const b = searchParams.get('board'); navigate(b ? `${path}?board=${b}` : path); }}
+                    onCreateTask={() => { setCommandPaletteOpen(false); setShowCreateTask(true); }}
+                    onCreateBoard={() => { setCommandPaletteOpen(false); setShowCreateBoard(true); }}
+                    onTaskSelect={(taskId) => { setCommandPaletteOpen(false); handleTaskSelect(taskId); }}
+                    onBoardChange={(id) => { setCommandPaletteOpen(false); handleBoardChange(id); }}
+                    onOpenProcessMonitor={() => { setCommandPaletteOpen(false); setProcessModalOpen(true); }}
+                    initialQuery={commandPaletteInitialQuery}
                 />
             </div>
             <Toaster />

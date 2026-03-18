@@ -81,12 +81,6 @@ export function KanbanTaskSearch({ selectedBoard, onSelect, className }: KanbanT
         return () => document.removeEventListener('mousedown', handlePointerDown);
     }, []);
 
-    const helperText = useMemo(() => {
-        if (scope === 'global') return 'Search all boards';
-        if (selectedBoard) return 'Search this board';
-        return 'Select a board to search';
-    }, [scope, selectedBoard]);
-
     const handleSelect = (result: TaskSearchResult) => {
         onSelect(result, scope);
         setOpen(false);
@@ -96,7 +90,7 @@ export function KanbanTaskSearch({ selectedBoard, onSelect, className }: KanbanT
     };
 
     return (
-        <div ref={rootRef} className={cn("relative w-full max-w-xl", className)}>
+        <div ref={rootRef} className={cn("relative w-full max-w-sm sm:max-w-md", className)}>
             <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
@@ -174,7 +168,6 @@ export function KanbanTaskSearch({ selectedBoard, onSelect, className }: KanbanT
                     </Button>
                 </div>
             </div>
-            <div className="mt-1 px-1 text-[11px] text-muted-foreground">{helperText}</div>
 
             {open && (trimmed || error) && (
                 <div className="absolute z-30 mt-2 max-h-96 w-full overflow-y-auto rounded-md border border-border bg-background shadow-lg">
