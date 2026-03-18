@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -53,11 +52,6 @@ export function SortControl({ value, options, onChange }: SortControlProps) {
                     <SelectItem value="desc">Desc</SelectItem>
                 </SelectContent>
             </Select>
-            {value && (
-                <Button size="sm" variant="outline" className="h-8" onClick={() => onChange(undefined)} aria-label="Clear sort">
-                    <X className="size-3.5" />
-                </Button>
-            )}
         </div>
     );
 }

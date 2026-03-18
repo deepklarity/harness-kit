@@ -598,17 +598,21 @@ class BoardViewSet(viewsets.ModelViewSet):
 
         search = query_params.get("search")
         if search:
-            qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
+            if search.isdigit():
+                qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search) | Q(id=search))
+            else:
+                qs = qs.filter(Q(name__icontains=search) | Q(description__icontains=search))
 
         qs = _apply_date_range(qs, query_params, "created_at", "created_from", "created_to")
         qs = _apply_date_range(qs, query_params, "updated_at", "updated_from", "updated_to")
 
         tokens = _parse_sort_tokens(
             query_params.get("sort"),
-            {"name", "created_at", "updated_at", "member_count", "task_count"},
+            {"id", "name", "created_at", "updated_at", "member_count", "task_count"},
             default_tokens=[("created_at", True)],
         )
         qs = qs.order_by(*_build_order_by(tokens, {
+            "id": "id",
             "name": "name",
             "created_at": "created_at",
             "updated_at": "updated_at",

@@ -49,10 +49,12 @@ interface TaskMove {
 
 interface KanbanBoardProps {
     tasks: Task[];
+    allTasks?: Task[];
     onTaskClick: (task: Task) => void;
     onTaskMove?: (taskId: string, move: TaskMove) => Promise<boolean>;
     onStopExecution?: (taskId: string, targetStatus: string) => Promise<boolean>;
     onTaskRename?: (taskId: string, newTitle: string) => Promise<void> | void;
+    onDeleteTask?: (taskId: string) => void;
     memberMap?: Map<string, Member>;
 }
 
@@ -164,6 +166,8 @@ const SortableTask = memo(function SortableTask({
     memberMap,
     blockedByFailed,
     onRename,
+    onDelete,
+    allTasks,
 }: {
     task: Task;
     onClick: (task: Task) => void;
@@ -171,6 +175,8 @@ const SortableTask = memo(function SortableTask({
     memberMap?: Map<string, Member>;
     blockedByFailed?: boolean;
     onRename?: (taskId: string, newTitle: string) => Promise<void> | void;
+    onDelete?: (taskId: string) => void;
+    allTasks?: Task[];
 }) {
     const {
         attributes,
@@ -199,6 +205,8 @@ const SortableTask = memo(function SortableTask({
                 memberMap={memberMap}
                 blockedByFailed={blockedByFailed}
                 onRename={onRename}
+                onDelete={onDelete}
+                allTasks={allTasks}
                 showInlineEdit
                 compact
             />
@@ -221,6 +229,8 @@ function DroppableColumn({
     failedTaskIds,
     maxColumnHeight,
     onTaskRename,
+    onDeleteTask,
+    allTasks,
 }: {
     column: typeof COLUMNS[0];
     tasks: Task[];
@@ -234,6 +244,8 @@ function DroppableColumn({
     failedTaskIds?: Set<string>;
     maxColumnHeight: number;
     onTaskRename?: (taskId: string, newTitle: string) => Promise<void> | void;
+    onDeleteTask?: (taskId: string) => void;
+    allTasks?: Task[];
 }) {
     const { setNodeRef } = useDroppable({
         id: column.status,
@@ -285,7 +297,7 @@ function DroppableColumn({
                                 )}
                                 {displayTasks.map(task => (
                                     <SortableTask key={task.id} task={task} onClick={onTaskClick} suppressClickUntil={suppressClickUntil} memberMap={memberMap}
-                                        blockedByFailed={!!(failedTaskIds && task.dependsOn?.some(dep => failedTaskIds.has(dep)))} onRename={onTaskRename} />
+                                        blockedByFailed={!!(failedTaskIds && task.dependsOn?.some(dep => failedTaskIds.has(dep)))} onRename={onTaskRename} onDelete={onDeleteTask} allTasks={allTasks} />
                                 ))}
                             </SortableContext>
                             {hiddenTaskCount > 0 && (
@@ -308,7 +320,7 @@ function DroppableColumn({
     );
 }
 
-export function KanbanBoard({ tasks, onTaskClick, onTaskMove, onStopExecution, onTaskRename, memberMap }: KanbanBoardProps) {
+export function KanbanBoard({ tasks, allTasks = [], onTaskClick, onTaskMove, onStopExecution, onTaskRename, onDeleteTask, memberMap }: KanbanBoardProps) {
     const columnsRowRef = useRef<HTMLDivElement | null>(null);
     const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => {
         try {
@@ -610,6 +622,8 @@ export function KanbanBoard({ tasks, onTaskClick, onTaskMove, onStopExecution, o
                                 failedTaskIds={failedTaskIds}
                                 maxColumnHeight={columnMaxHeight}
                                 onTaskRename={onTaskRename}
+                                onDeleteTask={onDeleteTask}
+                                allTasks={allTasks}
                             />
                         );
                     })}

@@ -96,7 +96,7 @@ function App() {
     const [shellError, setShellError] = useState<string | null>(null);
 
     const [refreshKey, setRefreshKey] = useState(0);
-    const [filteredMemberId, setFilteredMemberId] = useState<string | null>(null);
+    const [filteredMemberId] = useState<string | null>(null);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [taskDetailLoading, setTaskDetailLoading] = useState(false);
     const [showCreateBoard, setShowCreateBoard] = useState(false);
@@ -217,20 +217,19 @@ function App() {
         () => selectedBoard !== ALL_BOARDS_ID ? boards.find(b => b.id === selectedBoard) || null : null,
         [boards, selectedBoard],
     );
+    /*
     const contextMembers = useMemo(
         () => selectedBoard === ALL_BOARDS_ID ? members : (currentBoard?.members || []),
         [members, selectedBoard, currentBoard],
     );
+    */
     const memberMap = useMemo(
         () => new Map(members.map(member => [member.id, member])),
         [members],
     );
 
-    const sortedBoardsForSettings = useMemo(
-        () => [...boards].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true })),
-        [boards]
-    );
 
+    /*
     const contextStats = useMemo((): DashboardStats => {
         const tasks = overviewTasks;
         const completedTasks = tasks.filter(t => t.currentStatus === 'DONE');
@@ -271,6 +270,7 @@ function App() {
             mostActiveMember,
         };
     }, [overviewTasks, members, boards, currentBoard, selectedBoard]);
+    */
 
     const updateSearchParam = useCallback((key: string, value?: string | null) => {
         setSearchParams(prev => {
@@ -298,7 +298,9 @@ function App() {
 
     const handleBoardChange = (value: string) => {
         if (value === ALL_BOARDS_ID) {
-            navigate('/settings');
+            updateSearchParam('board', null);
+            const board = searchParams.get('board');
+            navigate(board ? `/settings?board=${board}` : '/settings');
         } else {
             updateSearchParam('board', value);
         }
@@ -348,7 +350,7 @@ function App() {
             .finally(() => setTaskDetailLoading(false));
     }, [searchParams, selectedTask?.id, service, markTaskSignalsSeen]);
 
-    const handleUpdateUser = async (id: string, name: string, email: string, color: string, availableModels?: Array<{name: string; description: string; is_default: boolean}>) => {
+    const handleUpdateUser = async (id: string, name: string, email: string, color: string, availableModels?: Array<{ name: string; description: string; is_default: boolean }>) => {
         await service.updateUser(id, name, email, color, availableModels);
         setRefreshKey(k => k + 1);
     };
@@ -358,9 +360,9 @@ function App() {
             description: string;
             disabledAgents?: string[];
         } & (
-            { directoryMode: 'existing'; workingDir: string }
-            | { directoryMode: 'create'; parentDirectory: string; directoryName: string }
-        )
+                { directoryMode: 'existing'; workingDir: string }
+                | { directoryMode: 'create'; parentDirectory: string; directoryName: string }
+            )
     ) => {
         const result = await service.createBoard(input) as { id?: number };
         if (result?.id) {
@@ -535,6 +537,7 @@ function App() {
         );
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const boardViewParam = searchParams.get('view');
     const isFullWidthBoard = viewMode === 'board';
 
@@ -589,6 +592,7 @@ function App() {
                                 onTaskClick={handleTaskSelect}
                                 onTaskMove={handleKanbanTaskMove}
                                 onStopExecution={handleStopExecution}
+                                onDeleteTask={handleDeleteTask}
                             />
                         } />
                         {/* Backwards-compat redirects */}
@@ -622,7 +626,7 @@ function App() {
                             <>
                                 <SectionHeader title="Settings" />
                                 <SettingsView
-                                    boards={sortedBoardsForSettings}
+
                                     members={members}
                                     onDataChange={() => setRefreshKey(k => k + 1)}
                                     onCreateBoard={() => setShowCreateBoard(true)}

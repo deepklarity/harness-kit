@@ -14,6 +14,7 @@ import { TaskList } from '@/components/TaskCard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ClipboardList, Columns3, Calendar, Plus, Terminal } from 'lucide-react';
 import type { TaskSearchResult } from '@/services/integration/IntegrationService';
 import { didLeaveProgressStatus, markExecutionTransitionUnseen } from '@/utils/unseenStatusTransitions';
@@ -33,6 +34,7 @@ interface BoardPageProps {
     onTaskClick: (task: Task) => void;
     onTaskMove: (taskId: string, move: { status: string; targetIndex?: number }) => Promise<boolean>;
     onStopExecution: (taskId: string, targetStatus: string) => Promise<boolean>;
+    onDeleteTask?: (taskId: string) => void;
 }
 
 // ─── View Toggle ────────────────────────────────────────────
@@ -69,13 +71,14 @@ function splitParam(value: string | null): string[] {
     return value.split(',').map(v => v.trim()).filter(Boolean);
 }
 
-function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, onTaskClick }: {
+function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, onTaskClick, onDeleteTask }: {
     selectedBoard?: string;
     refreshKey?: number;
     memberMap: Map<string, Member>;
     members: Member[];
     labels: Label[];
     onTaskClick: (task: Task) => void;
+    onDeleteTask?: (taskId: string) => void;
 }) {
     const service = useService();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -86,7 +89,7 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
 
     const query = useMemo(() => {
         const page = Number(searchParams.get('page') || '1');
-        const pageSize = Number(searchParams.get('page_size') || '25');
+        const pageSize = Number(searchParams.get('page_size') || '20');
         return {
             q: searchParams.get('q') || '',
             status: splitParam(searchParams.get('status')),
@@ -98,7 +101,7 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
             created_from: searchParams.get('created_from') || undefined,
             created_to: searchParams.get('created_to') || undefined,
             page: Number.isNaN(page) ? 1 : page,
-            page_size: Number.isNaN(pageSize) ? 25 : pageSize,
+            page_size: Number.isNaN(pageSize) ? 20 : pageSize,
         };
     }, [searchParams]);
 
@@ -136,16 +139,41 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
         load();
     }, [load, refreshKey]);
 
+    const hasFilters = useMemo(() => {
+        const filterKeys = ['q', 'status', 'assignee', 'priority', 'spec', 'labels', 'sort', 'created_from', 'created_to'];
+        return filterKeys.some(key => searchParams.has(key));
+    }, [searchParams]);
+
     return (
         <div>
-            <FilterBar resultCount={loading ? undefined : count} resultLabel={count === 1 ? 'task' : 'tasks'} onClearAll={() => setSearchParams(prev => {
-                const next = new URLSearchParams();
-                const board = prev.get('board');
-                if (board) next.set('board', board);
-                const view = prev.get('view');
-                if (view) next.set('view', view);
-                return next;
-            }, { replace: true })}>
+            <FilterBar 
+                onClearAll={() => setSearchParams(prev => {
+                    const next = new URLSearchParams();
+                    const board = prev.get('board');
+                    if (board) next.set('board', board);
+                    const view = prev.get('view');
+                    if (view) next.set('view', view);
+                    const pageSize = prev.get('page_size');
+                    if (pageSize) next.set('page_size', pageSize);
+                    return next;
+                }, { replace: true })}
+                showClearAll={hasFilters}
+                trailing={(
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">Cards per page</span>
+                        <Select value={String(query.page_size)} onValueChange={(v) => setParam('page_size', v)}>
+                            <SelectTrigger className="w-[70px] h-8" aria-label="Cards per page">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {[8, 20, 40, 100].map(size => (
+                                    <SelectItem key={size} value={String(size)}>{size}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
+            >
                 <SearchBar
                     value={query.q}
                     onSearchChange={(value) => setParam('q', value || undefined)}
@@ -200,9 +228,6 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
                         { label: 'Status', value: 'status' },
                     ]}
                 />
-                <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={() => { void load(); }}>Refresh</Button>
-                </div>
             </FilterBar>
 
             {error && <div className="text-sm text-destructive mb-3">{error}</div>}
@@ -210,13 +235,14 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
                 <div className="text-sm text-muted-foreground py-8">Loading tasks...</div>
             ) : (
                 <>
-                    <TaskList tasks={tasks} onTaskClick={onTaskClick} memberMap={memberMap} />
+                    <TaskList tasks={tasks} onTaskClick={onTaskClick} onDelete={onDeleteTask} memberMap={memberMap} allTasks={tasks} />
                     <PaginationControls
                         count={count}
                         page={query.page}
                         pageSize={query.page_size}
                         onPageChange={(page) => setParam('page', String(page))}
                         onPageSizeChange={(size) => setParam('page_size', String(size))}
+                        hideRowsSelector
                     />
                 </>
             )}
@@ -226,7 +252,7 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
 
 // ─── Kanban View ────────────────────────────────────────────
 
-function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap, currentBoard, onTaskClick, onTaskMove, onStopExecution }: {
+function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap, currentBoard, onTaskClick, onTaskMove, onStopExecution, onDeleteTask }: {
     selectedBoard?: string;
     refreshKey?: number;
     filteredMemberId?: string | null;
@@ -235,6 +261,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     onTaskClick: (task: Task) => void;
     onTaskMove: (taskId: string, move: { status: string; targetIndex?: number }) => Promise<boolean>;
     onStopExecution: (taskId: string, targetStatus: string) => Promise<boolean>;
+    onDeleteTask?: (taskId: string) => void;
 }) {
     const service = useService();
     const { toast } = useToast();
@@ -358,7 +385,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     return (
         <div>
 
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center mb-4">
 
                 {/* Left Side */}
                 <div className="flex items-center gap-2">
@@ -378,8 +405,8 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
                     />
                 </div>
 
-                {/* Right Side */}
-                <div className="flex items-center gap-2">
+                {/* Right Side - Action buttons */}
+                <div className="flex items-center gap-2 ml-auto">
                
                     <DateRangeFilter
                         label="Created"
@@ -391,10 +418,6 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
                     <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
                         <Plus className="size-3.5 mr-1" />
                         Spec
-                    </Button>
-
-                    <Button size="sm" variant="outline" onClick={() => void polling.refreshNow()}>
-                        Refresh
                     </Button>
                 </div>
 
@@ -421,9 +444,11 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
             ) : (
                 <KanbanBoard
                     tasks={visibleTasks}
+                    allTasks={tasks}
                     onTaskClick={onTaskClick}
                     onTaskMove={handleTaskMove}
                     onStopExecution={handleStopExecution}
+                    onDeleteTask={onDeleteTask}
                     memberMap={memberMap}
                 />
             )}
@@ -435,11 +460,12 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
 
 // ─── Timeline View Wrapper ──────────────────────────────────
 
-function TimelineViewWrapper({ selectedBoard, refreshKey = 0, members, onTaskClick }: {
+function TimelineViewWrapper({ selectedBoard, refreshKey = 0, members, onTaskClick, onDeleteTask }: {
     selectedBoard?: string;
     refreshKey?: number;
     members: Member[];
     onTaskClick: (task: Task) => void;
+    onDeleteTask?: (taskId: string) => void;
 }) {
     const service = useService();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -500,14 +526,13 @@ function TimelineViewWrapper({ selectedBoard, refreshKey = 0, members, onTaskCli
                     to={dateTo}
                     onChange={handleDateChange}
                 />
-                <Button size="sm" variant="outline" onClick={() => { void load(); }}>Refresh</Button>
             </div>
 
             {error && <div className="text-sm text-destructive mb-3">{error}</div>}
             {loading ? (
                 <div className="text-sm text-muted-foreground py-8">Loading timeline...</div>
             ) : (
-                <TimelineView tasks={tasks} allTasks={tasks} members={members} onTaskClick={onTaskClick} />
+                <TimelineView tasks={tasks} allTasks={tasks} members={members} onTaskClick={onTaskClick} onDelete={onDeleteTask} />
             )}
         </div>
     );
@@ -526,6 +551,7 @@ export function BoardPage({
     onTaskClick,
     onTaskMove,
     onStopExecution,
+    onDeleteTask,
 }: BoardPageProps) {
     const [searchParams, setSearchParams] = useSearchParams();
     const rawView = searchParams.get('view');
@@ -559,6 +585,7 @@ export function BoardPage({
                     members={members}
                     labels={labels}
                     onTaskClick={onTaskClick}
+                    onDeleteTask={onDeleteTask}
                 />
             )}
             {view === 'kanban' && (
@@ -571,6 +598,7 @@ export function BoardPage({
                     onTaskClick={onTaskClick}
                     onTaskMove={onTaskMove}
                     onStopExecution={onStopExecution}
+                    onDeleteTask={onDeleteTask}
                 />
             )}
             {view === 'timeline' && (
@@ -579,6 +607,7 @@ export function BoardPage({
                     refreshKey={refreshKey}
                     members={members}
                     onTaskClick={onTaskClick}
+                    onDeleteTask={onDeleteTask}
                 />
             )}
         </div>

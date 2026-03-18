@@ -19,6 +19,7 @@ interface TimelineViewProps {
     allTasks?: Task[];
     members?: Member[];
     onTaskClick?: (task: Task) => void;
+    onDelete?: (taskId: string) => void;
 }
 
 const MIN_ZOOM = 1;
@@ -63,7 +64,7 @@ function formatFullDate(dateStr: string): string {
     });
 }
 
-export function TimelineView({ tasks, allTasks, members, onTaskClick }: TimelineViewProps) {
+export function TimelineView({ tasks, allTasks, members, onTaskClick, onDelete }: TimelineViewProps) {
     // ─── ALL hooks must be called unconditionally, before any returns ───
     const [searchParams, setSearchParams] = useSearchParams();
     const viewMode: TimelineMode = searchParams.get('mode') === 'dag' ? 'dag' : 'timeline';

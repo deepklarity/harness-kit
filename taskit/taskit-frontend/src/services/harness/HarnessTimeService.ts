@@ -56,6 +56,7 @@ interface HarnessBoard {
     working_dir?: string | null;
     odin_initialized?: boolean;
     member_ids?: number[];
+    agents?: AgentConfig[];
     tasks?: HarnessTask[];
     created_at?: string;
     updated_at?: string;
@@ -652,6 +653,7 @@ export class HarnessTimeService implements IntegrationService {
                     workingDir: b.working_dir || null,
                     odinInitialized: b.odin_initialized || false,
                     memberIds: boardMemberIds,
+                    agents: (b as any).agents,
                     tasks: [],
                     members: [],
                     lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'],
@@ -1123,7 +1125,14 @@ export class HarnessTimeService implements IntegrationService {
 
         const history = includeHistory ? (task.history || []) : (task.history || []);
         const mutations = this.transformHistory(history, this.cachedMembers);
-        const timeInStatuses = this.computeTimeInStatuses(mutations, task.created_at);
+        
+        let timeInStatuses = task.time_in_statuses && Object.keys(task.time_in_statuses).length > 0 
+            ? task.time_in_statuses 
+            : this.computeTimeInStatuses(mutations, task.created_at);
+
+        if (Object.keys(timeInStatuses).length === 0) {
+            timeInStatuses = { [task.status]: Date.now() - new Date(task.created_at).getTime() };
+        }
         const totalLifespanMs = Date.now() - new Date(task.created_at).getTime();
         const workTimeMs = (timeInStatuses['IN_PROGRESS'] || 0) + (timeInStatuses['REVIEW'] || 0);
         const executingTimeMs = timeInStatuses['EXECUTING'] || 0;

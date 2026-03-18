@@ -173,14 +173,47 @@ class AddLabelsSerializer(serializers.Serializer):
 
 class BoardSerializer(serializers.ModelSerializer):
     member_ids = serializers.SerializerMethodField()
+    agents = serializers.SerializerMethodField()
 
     class Meta:
         model = Board
-        fields = ["id", "name", "description", "is_trial", "working_dir", "odin_initialized", "created_at", "updated_at", "member_ids"]
+        fields = ["id", "name", "description", "is_trial", "working_dir", "odin_initialized", "created_at", "updated_at", "member_ids", "agents"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_member_ids(self, obj):
         return list(obj.memberships.values_list("user_id", flat=True))
+
+    def get_agents(self, obj):
+        memberships = obj.memberships.filter(user__role="AGENT").select_related("user")
+        all_agents = User.objects.filter(role="AGENT")
+        member_user_ids = {m.user_id for m in memberships}
+
+        agents = []
+        for agent_user in all_agents:
+            membership = next((m for m in memberships if m.user_id == agent_user.id), None)
+            disabled = set(membership.disabled_models or []) if membership else set()
+
+            models_list = []
+            for m in agent_user.available_models:
+                if isinstance(m, dict):
+                    model_name = m.get("name", "")
+                    models_list.append({
+                        "name": model_name,
+                        "enabled": model_name not in disabled,
+                        "is_default": m.get("is_default", False),
+                        "description": m.get("description", ""),
+                    })
+            agents.append({
+                "name": agent_user.name,
+                "enabled": agent_user.id in member_user_ids,
+                "cli_command": agent_user.cli_command,
+                "capabilities": agent_user.capabilities or [],
+                "cost_tier": agent_user.cost_tier or "medium",
+                "default_model": agent_user.default_model,
+                "premium_model": agent_user.premium_model,
+                "models": models_list,
+            })
+        return agents
 
 
 class CreateBoardSerializer(serializers.ModelSerializer):

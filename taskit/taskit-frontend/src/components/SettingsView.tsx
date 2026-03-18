@@ -1,6 +1,5 @@
-
-import React, { useState, useEffect, useCallback, useMemo,useRef } from 'react';
-import type { AgentConfig, Board, Member } from '../types';
+import React, { useState, useEffect } from 'react';
+import type { Board, Member } from '../types';
 import { useService } from '../contexts/ServiceContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +15,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText } from 'lucide-react';
+import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
 
@@ -30,14 +29,13 @@ import { NotificationSettings } from './NotificationSettings';
 
 
 interface SettingsViewProps {
-    boards: Board[];
     members: Member[];
     onDataChange: () => void;
     onCreateBoard: () => void;
     onDeleteBoard: (boardId: string) => Promise<void>;
 }
 
-export function SettingsView({ boards, members, onDataChange, onCreateBoard, onDeleteBoard }: SettingsViewProps) {
+export function SettingsView({ members, onDataChange, onCreateBoard, onDeleteBoard }: SettingsViewProps) {
     const service = useService();
     const { toast } = useToast();
     const navigate = useNavigate();
@@ -56,29 +54,21 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
     const [deleteConfirmName, setDeleteConfirmName] = useState('');
     const [deleting, setDeleting] = useState(false);
 
-    // Scroll to hash anchor on mount (e.g. /settings#notifications)
-    const didScrollRef = useRef(false);
-    useEffect(() => {
-        if (didScrollRef.current) return;
-        const hash = window.location.hash.slice(1);
-        if (!hash) return;
-        const el = document.getElementById(hash);
-        if (el) {
-            didScrollRef.current = true;
-            el.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-    });
-
     // Agent configs per board (for showing enabled/disabled status in summary)
-    const [agentsByBoard, setAgentsByBoard] = useState<Record<string, AgentConfig[]>>({});
     const [membersByBoard, setMembersByBoard] = useState<Record<string, Member[]>>({});
 
-    // Table view states
-    const PAGE_SIZE = 10;
+    // Table UI state
     const [searchQuery, setSearchQuery] = useState('');
-    const [sortConfig, setSortConfig] = useState<{ key: 'id' | 'name' | 'tasks' | 'members', dir: 'asc' | 'desc' }>({ key: 'id', dir: 'asc' });
     const [currentPage, setCurrentPage] = useState(1);
+    const [sortConfig, setSortConfig] = useState<{ key: 'id' | 'name' | 'tasks' | 'members', dir: 'asc' | 'desc' }>({ key: 'id', dir: 'asc' });
     const [expandedBoardId, setExpandedBoardId] = useState<string | null>(null);
+
+    // Backend-driven table data
+    const [tableBoards, setTableBoards] = useState<Board[]>([]);
+    const [totalFiltered, setTotalFiltered] = useState(0);
+    const [isLoadingTable, setIsLoadingTable] = useState(false);
+
+    const PAGE_SIZE = 10;
 
     useEffect(() => {
         if (!expandedBoardId) return;
@@ -91,71 +81,37 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
         return () => { active = false; };
     }, [expandedBoardId, service]);
 
-    const loadBoardAgents = useCallback(async (board: Board) => {
-        if (!board.odinInitialized) return;
-        try {
-            const agents = await service.fetchBoardAgents(board.id);
-            setAgentsByBoard(prev => ({ ...prev, [board.id]: agents }));
-        } catch {
-            // Silent — summary just won't show disabled agents
-        }
-    }, [service]);
-
     useEffect(() => {
-        boards.filter(b => b.odinInitialized).forEach(loadBoardAgents);
-    }, [boards, loadBoardAgents]);
+        let active = true;
+        setIsLoadingTable(true);
 
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchQuery]);
+        const fetchTableData = async () => {
+            const sortToken = sortConfig.dir === 'asc' ? sortConfig.key : `-${sortConfig.key}`;
+            const mappedSortToken = sortToken.replace('tasks', 'task_count').replace('members', 'member_count');
 
-    const processedBoards = useMemo(() => {
-        // 1. Filter
-        let result = boards;
-        if (searchQuery.trim()) {
-            const query = searchQuery.toLowerCase();
-            result = result.filter(b => 
-                b.name.toLowerCase().includes(query) || 
-                b.id.toLowerCase().includes(query)
-            );
-        }
+            try {
+                const response = await service.fetchBoardsPage({
+                    page: currentPage,
+                    page_size: PAGE_SIZE,
+                    search: searchQuery || undefined,
+                    sort: mappedSortToken
+                });
 
-        // 2. Sort
-        result = [...result].sort((a, b) => {
-            const getMembersCount = (board: Board) => board.memberCount ?? board.members.length;
-            const getTasksCount = (board: Board) => board.taskCount ?? 0;
-            
-            let cmp = 0;
-            switch (sortConfig.key) {
-                case 'id':
-                    cmp = a.id.localeCompare(b.id, undefined, { numeric: true });
-                    break;
-                case 'name':
-                    cmp = a.name.localeCompare(b.name);
-                    break;
-                case 'tasks':
-                    cmp = getTasksCount(a) - getTasksCount(b);
-                    break;
-                case 'members':
-                    cmp = getMembersCount(a) - getMembersCount(b);
-                    break;
+                if (active) {
+                    setTableBoards(response.results);
+                    setTotalFiltered(response.count);
+                    setIsLoadingTable(false);
+                }
+            } catch (error) {
+                console.error('Failed to fetch boards page', error);
+                if (active) setIsLoadingTable(false);
             }
-            return sortConfig.dir === 'asc' ? cmp : -cmp;
-        });
+        };
 
-        // 3. Paginate
-        const start = (currentPage - 1) * PAGE_SIZE;
-        return result.slice(start, start + PAGE_SIZE);
-    }, [boards, searchQuery, sortConfig, currentPage]);
+        fetchTableData();
 
-    const totalFiltered = useMemo(() => {
-        if (!searchQuery.trim()) return boards.length;
-        const query = searchQuery.toLowerCase();
-        return boards.filter(b => 
-            b.name.toLowerCase().includes(query) || 
-            b.id.toLowerCase().includes(query)
-        ).length;
-    }, [boards, searchQuery]);
+        return () => { active = false; };
+    }, [service, currentPage, searchQuery, sortConfig]);
 
     const totalPages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
 
@@ -165,6 +121,10 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
             dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc'
         }));
     };
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery]);
 
     useEffect(() => {
         let active = true;
@@ -262,13 +222,27 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
                     <h3 className="text-sm font-medium text-muted-foreground">Boards</h3>
                     <div className="flex items-center gap-2">
                         <div className="relative w-64">
-                            <Search className="absolute left-2 top-2 size-3.5 text-muted-foreground" />
-                            <Input 
-                                placeholder="Search boards..." 
-                                className="h-8 pl-8 text-xs" 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                            />
+                            <form onSubmit={(e) => {
+                                e.preventDefault();
+                                setCurrentPage(1);
+                            }}>
+                                <Search className="absolute left-2 top-2 size-3.5 text-muted-foreground" />
+                                <Input
+                                    placeholder="Search boards by ID or name..."
+                                    className="h-8 pl-8 pr-8 text-xs bg-background"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                />
+                                {searchQuery && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearchQuery('')}
+                                        className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                                    >
+                                        <X className="size-3.5" />
+                                    </button>
+                                )}
+                            </form>
                         </div>
                         <Button variant="outline" size="sm" className="gap-1.5" onClick={onCreateBoard}>
                             <Plus className="size-3.5" />
@@ -302,21 +276,31 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border/50">
-                                {processedBoards.length === 0 ? (
+                                {isLoadingTable ? (
                                     <tr>
-                                        <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">No boards found</td>
+                                        <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground">
+                                            <Layout className="h-8 w-8 text-muted-foreground mx-auto mb-3 animate-pulse" />
+                                            Loading...
+                                        </td>
+                                    </tr>
+                                ) : tableBoards.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground">
+                                            <Layout className="h-8 w-8 text-muted-foreground mx-auto mb-3 opacity-50" />
+                                            No boards found matching your search.
+                                        </td>
                                     </tr>
                                 ) : (
-                                    processedBoards.map(board => {
+                                    tableBoards.map(board => {
                                         const boardMembers = membersByBoard[board.id] || board.members;
                                         const humanMembers = boardMembers.filter(m => !isAgentUser(m));
-                                        const agentConfigs = agentsByBoard[board.id] || [];
+                                        const bAgents = board.agents || [];
                                         const activeAgentMembers = boardMembers.filter(m => isAgentUser(m));
-                                        const hasAgentConfigs = agentConfigs.length > 0;
-                                        const hasAnyMembers = humanMembers.length > 0 || activeAgentMembers.length > 0 || agentConfigs.length > 0;
+                                        const hasAgentConfigs = bAgents.length > 0;
+                                        const hasAnyMembers = humanMembers.length > 0 || activeAgentMembers.length > 0 || bAgents.length > 0;
                                         const isExpanded = expandedBoardId === board.id;
-                                        
-                                        const enabledAgents = hasAgentConfigs ? agentConfigs.filter(a => a.enabled).length : activeAgentMembers.length;
+
+                                        const enabledAgents = hasAgentConfigs ? bAgents.filter(a => a.enabled).length : activeAgentMembers.length;
                                         
                                         return (
                                             <React.Fragment key={board.id}>
@@ -443,7 +427,7 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
                                                                         <div className="font-medium text-xs text-muted-foreground uppercase tracking-wider mt-1">Agents</div>
                                                                         {hasAgentConfigs ? (
                                                                             <div className="flex flex-wrap gap-1.5">
-                                                                                {agentConfigs.map(agent => (
+                                                                                {bAgents.map(agent => (
                                                                                     <div key={agent.name} className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${agent.enabled ? 'bg-blue-500/10 border-blue-300/30' : 'bg-background border-border opacity-50'}`}>
                                                                                         <Bot className={`size-3 ${agent.enabled ? 'text-blue-500' : 'text-muted-foreground/50'}`} />
                                                                                         <span className={`text-xs ${agent.enabled ? '' : 'text-muted-foreground line-through'}`}>{agent.name}</span>
@@ -623,8 +607,6 @@ export function SettingsView({ boards, members, onDataChange, onCreateBoard, onD
                     onClose={() => setManagingBoard(null)}
                     onDataChange={() => {
                         onDataChange();
-                        // Reload agent configs to refresh enabled/disabled status in summary
-                        if (managingBoard.odinInitialized) loadBoardAgents(managingBoard);
                     }}
                 />
             )}

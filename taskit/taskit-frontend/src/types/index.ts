@@ -8,7 +8,7 @@ export interface ModelInfo {
     name: string;
     description: string;
     is_default: boolean;
-    supports_image_input?: boolean;
+    supports_image_input?: boolean | null;
     input_price_per_1m_tokens?: number | null;
     output_price_per_1m_tokens?: number | null;
     cache_read_price_per_1m_tokens?: number | null;
@@ -129,6 +129,7 @@ export interface Board {
     workingDir?: string | null;
     odinInitialized?: boolean;
     memberIds: string[];
+    agents?: AgentConfig[];
     tasks: Task[];
     members: Member[];
     lists: string[];
@@ -175,6 +176,8 @@ export interface Spec {
     comments?: SpecComment[];
     cwd?: string;
     costSummary?: SpecCostSummary;
+    fileName?: string;
+    isManaged?: boolean;
 }
 
 export interface DashboardData {

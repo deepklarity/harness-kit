@@ -1,6 +1,5 @@
 
-
-import { memo, useState, type MouseEvent, type PointerEvent } from 'react';
+import { memo, useState, useMemo, type MouseEvent, type PointerEvent } from 'react';
 
 import type { Task, Member } from '../types';
 import { getStatusIcon, classifyStatus } from '../utils/transformer';
@@ -8,10 +7,20 @@ import { TaskTimeDisplay } from './TaskTimeDisplay';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing } from 'lucide-react';
+import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import { getSeenCommentCount } from '../utils/unseenComments';
 import { hasUnseenExecutionCompletion } from '../utils/unseenStatusTransitions';
@@ -23,8 +32,10 @@ interface TaskCardProps {
     isDragging?: boolean;
     hideStatus?: boolean;
     memberMap?: Map<string, Member>;
+    allTasks?: Task[];
     blockedByFailed?: boolean;
     onRename?: (taskId: string, newName: string) => Promise<void> | void;
+    onDelete?: (taskId: string) => void;
     showInlineEdit?: boolean;
     compact?: boolean;
 }
@@ -56,7 +67,7 @@ const STATUS_STYLES: Record<string, string> = {
     other: 'bg-secondary text-muted-foreground',
 };
 
-export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDragging, hideStatus, memberMap, blockedByFailed, onRename, showInlineEdit = false, compact }: TaskCardProps) {
+export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDragging, hideStatus, memberMap, allTasks = [], blockedByFailed, onRename, onDelete, showInlineEdit = false, compact }: TaskCardProps) {
     const statusCategory = classifyStatus(task.currentStatus);
     const StatusIcon = getStatusIcon(task.currentStatus);
     const priorityStyle = PRIORITY_STYLES[task.priority || 'MEDIUM'] || PRIORITY_STYLES.MEDIUM;
@@ -86,6 +97,12 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [draftTitle, setDraftTitle] = useState(task.title || task.name);
     const [savingTitle, setSavingTitle] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+    const dependents = useMemo(() => {
+        if (!onDelete || isOverlay || !allTasks.length) return [];
+        return allTasks.filter(t => t.dependsOn?.includes(task.id));
+    }, [task.id, allTasks, onDelete, isOverlay]);
 
     const canEditInline = !!showInlineEdit && !!onRename && !isOverlay && !compact;
 
@@ -118,270 +135,342 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
         }
     };
 
+    const handleDelete = (e: MouseEvent | PointerEvent) => {
+        e.stopPropagation();
+        setShowDeleteConfirm(true);
+    };
+
+    const confirmDelete = (e: MouseEvent) => {
+        e.stopPropagation();
+        if (onDelete) {
+            onDelete(task.id);
+        }
+        setShowDeleteConfirm(false);
+    };
+
     return (
-        <Card
-            className={`cursor-pointer group hover:shadow-md transition-all duration-200 hover:ring-1 hover:ring-ring/40 hover:border-ring/40
-            ${compact ? 'py-0.5 gap-0.5' : ''}
-            ${isOverlay ? 'shadow-xl cursor-grabbing ring-2 ring-primary/20 rotate-2 bg-background z-50' : ''}
-            ${isDragging ? 'opacity-30' : ''}
-            ${blockedByFailed ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20' : ''}
-            ${needsExecutionReviewAttention ? 'border-amber-400 dark:border-amber-500 ring-1 ring-amber-300/80 dark:ring-amber-600/70' : ''}`}
-            onClick={() => {
-                if (!isEditingTitle) onClick(task);
-            }}
-        >
-            <CardContent className={compact ? "relative !px-2.5 !py-1.5" : "relative p-2 space-y-1"} title={compact ? task.name : undefined}>
-                {compact ? (
-                    /* ── Compact layout ── */
-                    <div className="space-y-0.5">
-                        {hasPendingQuestion && (
-                            <div
-                                className="absolute top-1 right-1 z-10 inline-flex size-5 items-center justify-center rounded-full border border-amber-300 bg-amber-100 text-amber-600 shadow-sm dark:border-amber-700 dark:bg-amber-950 dark:text-amber-400 animate-pulse-subtle"
-                                title="Pending question — needs reply"
-                            >
-                                <BellRing className="size-2.5" />
-                            </div>
-                        )}
-                        {/* Row 1: ID + priority + complexity + title */}
-                        <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-muted-foreground font-mono font-semibold text-[10px] shrink-0">#{task.idShort}</span>
-                            <span className={`size-1.5 rounded-full shrink-0 ${priorityStyle.dot}`} />
-                            {task.complexity && task.complexity !== task.priority && (
-                                <span className={`text-[9px] font-semibold uppercase shrink-0 px-1 rounded-sm border leading-tight ${COMPLEXITY_COLORS[task.complexity.toLowerCase()] || 'bg-muted text-muted-foreground'}`}>{task.complexity}</span>
-                            )}
-                            {blockedByFailed && <AlertTriangle className="size-2.5 shrink-0 text-red-500" />}
-                            {task.labels && task.labels.length > 0 && (
-                                <div className="flex gap-0.5 shrink-0 ml-auto">
-                                    {task.labels.map(label => (
-                                        <span key={label.id} className="size-1.5 rounded-full" style={{ backgroundColor: label.color }} />
-                                    ))}
+        <>
+            <Card
+                className={`cursor-pointer group hover:shadow-md transition-all duration-200 hover:ring-1 hover:ring-ring/40 hover:border-ring/40
+                ${compact ? 'py-0.5 gap-0.5' : ''}
+                ${isOverlay ? 'shadow-xl cursor-grabbing ring-2 ring-primary/20 rotate-2 bg-background z-50' : ''}
+                ${isDragging ? 'opacity-30' : ''}
+                ${blockedByFailed ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20' : ''}
+                ${needsExecutionReviewAttention ? 'border-amber-400 dark:border-amber-500 ring-1 ring-amber-300/80 dark:ring-amber-600/70' : ''}`}
+                onClick={() => {
+                    if (!isEditingTitle) onClick(task);
+                }}
+            >
+                <CardContent className={compact ? "relative !px-2.5 !py-1.5" : "relative p-2 space-y-1"} title={compact ? task.name : undefined}>
+                    {onDelete && !isOverlay && (
+                        <button
+                            className="absolute right-1.5 top-1.5 opacity-40 hover:opacity-100 transition-opacity p-1 rounded-sm hover:bg-destructive/10 text-muted-foreground hover:text-destructive z-20"
+                            onClick={handleDelete}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            title="Delete task"
+                        >
+                            <Trash2 className="size-3.5" />
+                        </button>
+                    )}
+                    {compact ? (
+                        /* ── Compact layout ── */
+                        <div className="space-y-0.5">
+                            {hasPendingQuestion && (
+                                <div
+                                    className={`absolute top-1 ${onDelete ? 'right-7' : 'right-1'} z-10 inline-flex size-5 items-center justify-center rounded-full border border-amber-300 bg-amber-100 text-amber-600 shadow-sm dark:border-amber-700 dark:bg-amber-950 dark:text-amber-400 animate-pulse-subtle`}
+                                    title="Pending question — needs reply"
+                                >
+                                    <BellRing className="size-2.5" />
                                 </div>
                             )}
-                        </div>
+                            {/* Row 1: ID + priority + complexity + title */}
+                            <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-muted-foreground font-mono font-semibold text-[10px] shrink-0">#{task.idShort}</span>
+                                <span className={`size-1.5 rounded-full shrink-0 ${priorityStyle.dot}`} />
+                                {task.complexity && task.complexity !== task.priority && (
+                                    <span className={`text-[9px] font-semibold uppercase shrink-0 px-1 rounded-sm border leading-tight ${COMPLEXITY_COLORS[task.complexity.toLowerCase()] || 'bg-muted text-muted-foreground'}`}>{task.complexity}</span>
+                                )}
+                                {blockedByFailed && <AlertTriangle className="size-2.5 shrink-0 text-red-500" />}
+                                {task.labels && task.labels.length > 0 && (
+                                    <div className="flex gap-0.5 shrink-0 ml-auto">
+                                        {task.labels.map(label => (
+                                            <span key={label.id} className="size-1.5 rounded-full" style={{ backgroundColor: label.color }} />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
 
-                        {/* Row 2: Title — own row so it reads clearly */}
-                        <div className="font-medium text-[12.5px] leading-snug truncate group-hover:text-primary transition-colors">
-                            {task.name}
-                        </div>
+                            {/* Row 2: Title — own row so it reads clearly */}
+                            <div className="font-medium text-[12.5px] leading-snug truncate group-hover:text-primary transition-colors">
+                                {task.name}
+                            </div>
 
-                        {/* Row 3: spec + model (if present) */}
-                        {(task.specName || model) && (
-                            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground truncate">
-                                {task.specName && (
-                                    <span className="flex items-center gap-0.5 truncate min-w-0">
-                                        <FileText className="size-2.5 shrink-0 opacity-60" />
-                                        <span className="truncate">{task.specName}</span>
-                                    </span>
-                                )}
-                                {model && (
-                                    <span className="flex items-center gap-0.5 shrink-0 font-mono">
-                                        <Package className="size-2.5 shrink-0 opacity-60" />
-                                        {model}
-                                    </span>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Row 4: status + assignee + indicators + time */}
-                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                            {!hideStatus && (
-                                <Badge variant="outline" className={`text-[10px] h-4 px-1 font-medium gap-0.5 border-0 rounded-sm ${statusStyle}`}>
-                                    <StatusIcon className="size-2.5" />
-                                    {task.currentStatus}
-                                </Badge>
-                            )}
-                            <div className="flex items-center gap-1 ml-auto shrink-0">
-                                {hasUnseen && (
-                                    <span className="relative flex size-1.5" title={`${totalComments - seenCount} new`}>
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                        <span className="relative inline-flex rounded-full size-1.5 bg-blue-500" />
-                                    </span>
-                                )}
-                                {assigneeName ? (
-                                    <span className="size-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white"
-                                        style={{ background: assigneeColor || undefined }}>
-                                        {assigneeName.charAt(0)}
-                                    </span>
-                                ) : (
-                                    <User className="size-2.5" />
-                                )}
-                                <TaskTimeDisplay task={task} />
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    /* ── Full layout with inline edit support ── */
-                    <>
-                        {canEditInline && !isEditingTitle && (
-                            <button
-                                className="absolute right-1.5 top-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-sm hover:bg-secondary"
-                                onClick={startEditingTitle}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                title="Rename"
-                            >
-                                <Pencil className="size-3.5 text-muted-foreground" />
-                            </button>
-                        )}
-                        {/* Blocked by failed dependency warning */}
-                        {blockedByFailed && (
-                            <div className="flex items-center gap-1.5 text-[11px] font-medium text-red-600 dark:text-red-400">
-                                <AlertTriangle className="size-3 shrink-0" />
-                                <span>Blocked — dependency failed</span>
-                            </div>
-                        )}
-                        {/* Row 1: ID + Priority + Complexity */}
-                        <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-muted-foreground font-mono font-semibold">#{task.idShort}</span>
-                            <div className="flex items-center gap-1" title={`Priority: ${task.priority || 'MEDIUM'}`}>
-                                <span className={`size-1.5 rounded-full ${priorityStyle.dot}`} />
-                                <span className={`text-[11px] font-semibold uppercase ${priorityStyle.text}`}>{task.priority || 'MEDIUM'}</span>
-                            </div>
-                            {task.complexity && (
-                                <Badge variant="outline" className={`text-[10px] h-4 px-1 rounded-sm border font-semibold uppercase ${COMPLEXITY_COLORS[task.complexity.toLowerCase()] || 'bg-muted text-muted-foreground'}`}>
-                                    {task.complexity}
-                                </Badge>
-                            )}
-                            {task.labels && task.labels.length > 0 && (
-                                <div className="flex gap-0.5 ml-auto">
-                                    {task.labels.map(label => (
-                                        <span
-                                            key={label.id}
-                                            className="size-2 rounded-full"
-                                            style={{ backgroundColor: label.color }}
-                                            title={label.name}
-                                        />
-                                    ))}
+                            {/* Row 3: spec + model (if present) */}
+                            {(task.specName || model) && (
+                                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground truncate">
+                                    {task.specName && (
+                                        <span className="flex items-center gap-0.5 truncate min-w-0">
+                                            <FileText className="size-2.5 shrink-0 opacity-60" />
+                                            <span className="truncate">{task.specName}</span>
+                                        </span>
+                                    )}
+                                    {model && (
+                                        <span className="flex items-center gap-0.5 shrink-0 font-mono">
+                                            <Package className="size-2.5 shrink-0 opacity-60" />
+                                            {model}
+                                        </span>
+                                    )}
                                 </div>
                             )}
-                        </div>
 
-                        {/* Row 2: Task title */}
-                        {isEditingTitle ? (
-                            <div className="space-y-1.5">
-                                <Input
-                                    value={draftTitle}
-                                    onChange={(e) => setDraftTitle(e.target.value)}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Escape') {
-                                            cancelEditingTitle();
-                                        }
-                                    }}
-                                    autoFocus
-                                    className="h-8 text-sm"
-                                    disabled={savingTitle}
-                                />
-                                <div className="flex items-center justify-end gap-1">
-                                    <Button
-                                        size="sm"
-                                        className="h-6 px-2 text-[10px]"
-                                        onClick={saveTitle}
-                                        onPointerDown={(e) => e.stopPropagation()}
-                                        disabled={savingTitle || !draftTitle.trim()}
-                                    >
-                                        {savingTitle ? 'Saving...' : 'Save'}
-                                    </Button>
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-6 px-2 text-[10px]"
-                                        onClick={cancelEditingTitle}
-                                        onPointerDown={(e) => e.stopPropagation()}
-                                        disabled={savingTitle}
-                                    >
-                                        Cancel
-                                    </Button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="text-sm font-medium leading-snug line-clamp-2 group-hover:text-primary transition-colors">
-                                {task.title || task.name}
-                            </div>
-                        )}
-
-                        {/* Row 3: Spec context (if any) */}
-                        {task.specName && (
-                            <div className="flex items-center gap-1 text-muted-foreground text-xs">
-                                <FileText className="size-3 shrink-0" />
-                                <span className="truncate">{task.specName}</span>
-                            </div>
-                        )}
-
-                        {/* Row 4: Model chip (if available from metadata) */}
-                        {model && (
-                            <div className="flex items-center gap-1 text-muted-foreground text-xs">
-                                <Package className="size-3 shrink-0" />
-                                <span className="truncate font-mono">{model}</span>
-                            </div>
-                        )}
-
-                        {/* Row 5: Footer — status, assignee, time */}
-                        <div className="flex items-center justify-between pt-1 border-t border-border">
-                            {/* Left: Status badge */}
-                            <div className="flex items-center gap-1.5">
+                            {/* Row 4: status + assignee + indicators + time */}
+                            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                                 {!hideStatus && (
-                                    <Badge
-                                        variant="outline"
-                                        className={`text-[11px] h-5 px-1.5 font-medium gap-1 border-0 rounded-sm ${statusStyle}`}
-                                    >
-                                        <StatusIcon className="size-3" />
+                                    <Badge variant="outline" className={`text-[10px] h-4 px-1 font-medium gap-0.5 border-0 rounded-sm ${statusStyle}`}>
+                                        <StatusIcon className="size-2.5" />
                                         {task.currentStatus}
                                     </Badge>
                                 )}
-                            </div>
-
-                            {/* Right: Assignee name + indicators + time */}
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
-                                {assigneeName && (
-                                    <div className="flex items-center gap-1 min-w-0" title={assigneeName}>
-                                        <span className="size-4 rounded-full shrink-0 flex items-center justify-center text-[8px] font-bold text-white"
+                                <div className="flex items-center gap-1 ml-auto shrink-0">
+                                    {hasUnseen && (
+                                        <span className="relative flex size-1.5" title={`${totalComments - seenCount} new`}>
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                            <span className="relative inline-flex rounded-full size-1.5 bg-blue-500" />
+                                        </span>
+                                    )}
+                                    {assigneeName ? (
+                                        <span className="size-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white"
                                             style={{ background: assigneeColor || undefined }}>
                                             {assigneeName.charAt(0)}
                                         </span>
-                                        <span className="truncate max-w-[90px] font-medium">{assigneeName}</span>
-                                    </div>
-                                )}
-                                {!assigneeName && (
-                                    <div className="flex items-center gap-1 text-muted-foreground" title="Unassigned">
-                                        <User className="size-3" />
-                                    </div>
-                                )}
-                                {hasPendingQuestion && (
-                                    <div className="flex items-center gap-0.5 shrink-0" title="Pending question — needs reply">
-                                        <span className="relative flex size-2">
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                                            <span className="relative inline-flex rounded-full size-2 bg-amber-500" />
-                                        </span>
-                                        <HelpCircle className="size-3 text-amber-500" />
-                                    </div>
-                                )}
-                                {hasUnseen && (
-                                    <div className="flex items-center gap-0.5 shrink-0" title={`${totalComments - seenCount} new comment${totalComments - seenCount > 1 ? 's' : ''}`}>
-                                        <span className="relative flex size-2">
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                            <span className="relative inline-flex rounded-full size-2 bg-blue-500" />
-                                        </span>
-                                        <MessageCircle className="size-3 text-blue-500" />
-                                    </div>
-                                )}
-                                <TaskTimeDisplay task={task} />
+                                    ) : (
+                                        <User className="size-2.5" />
+                                    )}
+                                    <TaskTimeDisplay task={task} />
+                                </div>
                             </div>
                         </div>
-                    </>
-                )}
-            </CardContent>
-        </Card>
+                    ) : (
+                        /* ── Full layout with inline edit support ── */
+                        <>
+                            {canEditInline && !isEditingTitle && (
+                                <button
+                                    className={`absolute ${onDelete ? 'right-7' : 'right-1.5'} top-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-sm hover:bg-secondary`}
+                                    onClick={startEditingTitle}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    title="Rename"
+                                >
+                                    <Pencil className="size-3.5 text-muted-foreground" />
+                                </button>
+                            )}
+                            {/* Blocked by failed dependency warning */}
+                            {blockedByFailed && (
+                                <div className="flex items-center gap-1.5 text-[11px] font-medium text-red-600 dark:text-red-400">
+                                    <AlertTriangle className="size-3 shrink-0" />
+                                    <span>Blocked — dependency failed</span>
+                                </div>
+                            )}
+                            {/* Row 1: ID + Priority + Complexity */}
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-muted-foreground font-mono font-semibold">#{task.idShort}</span>
+                                <div className="flex items-center gap-1" title={`Priority: ${task.priority || 'MEDIUM'}`}>
+                                    <span className={`size-1.5 rounded-full ${priorityStyle.dot}`} />
+                                    <span className={`text-[11px] font-semibold uppercase ${priorityStyle.text}`}>{task.priority || 'MEDIUM'}</span>
+                                </div>
+                                {task.complexity && (
+                                    <Badge variant="outline" className={`text-[10px] h-4 px-1 rounded-sm border font-semibold uppercase ${COMPLEXITY_COLORS[task.complexity.toLowerCase()] || 'bg-muted text-muted-foreground'}`}>
+                                        {task.complexity}
+                                    </Badge>
+                                )}
+                                {task.labels && task.labels.length > 0 && (
+                                    <div className="flex gap-0.5 ml-auto">
+                                        {task.labels.map(label => (
+                                            <span
+                                                key={label.id}
+                                                className="size-2 rounded-full"
+                                                style={{ backgroundColor: label.color }}
+                                                title={label.name}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Row 2: Task title */}
+                            {isEditingTitle ? (
+                                <div className="space-y-1.5">
+                                    <Input
+                                        value={draftTitle}
+                                        onChange={(e) => setDraftTitle(e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Escape') {
+                                                cancelEditingTitle();
+                                            }
+                                        }}
+                                        autoFocus
+                                        className="h-8 text-sm"
+                                        disabled={savingTitle}
+                                    />
+                                    <div className="flex items-center justify-end gap-1">
+                                        <Button
+                                            size="sm"
+                                            className="h-6 px-2 text-[10px]"
+                                            onClick={saveTitle}
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                            disabled={savingTitle || !draftTitle.trim()}
+                                        >
+                                            {savingTitle ? 'Saving...' : 'Save'}
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-6 px-2 text-[10px]"
+                                            onClick={cancelEditingTitle}
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                            disabled={savingTitle}
+                                        >
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-sm font-medium leading-snug line-clamp-2 group-hover:text-primary transition-colors">
+                                    {task.title || task.name}
+                                </div>
+                            )}
+
+                            {/* Row 3: Spec context (if any) */}
+                            {task.specName && (
+                                <div className="flex items-center gap-1 text-muted-foreground text-xs">
+                                    <FileText className="size-3 shrink-0" />
+                                    <span className="truncate">{task.specName}</span>
+                                </div>
+                            )}
+
+                            {/* Row 4: Model chip (if available from metadata) */}
+                            {model && (
+                                <div className="flex items-center gap-1 text-muted-foreground text-xs">
+                                    <Package className="size-3 shrink-0" />
+                                    <span className="truncate font-mono">{model}</span>
+                                </div>
+                            )}
+
+                            {/* Row 5: Footer — status, assignee, time */}
+                            <div className="flex items-center justify-between pt-1 border-t border-border">
+                                {/* Left: Status badge */}
+                                <div className="flex items-center gap-1.5">
+                                    {!hideStatus && (
+                                        <Badge
+                                            variant="outline"
+                                            className={`text-[11px] h-5 px-1.5 font-medium gap-1 border-0 rounded-sm ${statusStyle}`}
+                                        >
+                                            <StatusIcon className="size-3" />
+                                            {task.currentStatus}
+                                        </Badge>
+                                    )}
+                                </div>
+
+                                {/* Right: Assignee name + indicators + time */}
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+                                    {assigneeName && (
+                                        <div className="flex items-center gap-1 min-w-0" title={assigneeName}>
+                                            <span className="size-4 rounded-full shrink-0 flex items-center justify-center text-[8px] font-bold text-white"
+                                                style={{ background: assigneeColor || undefined }}>
+                                                {assigneeName.charAt(0)}
+                                            </span>
+                                            <span className="truncate max-w-[90px] font-medium">{assigneeName}</span>
+                                        </div>
+                                    )}
+                                    {!assigneeName && (
+                                        <div className="flex items-center gap-1 text-muted-foreground" title="Unassigned">
+                                            <User className="size-3" />
+                                        </div>
+                                    )}
+                                    {hasPendingQuestion && (
+                                        <div className="flex items-center gap-0.5 shrink-0" title="Pending question — needs reply">
+                                            <span className="relative flex size-2">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                                                <span className="relative inline-flex rounded-full size-2 bg-amber-500" />
+                                            </span>
+                                            <HelpCircle className="size-3 text-amber-500" />
+                                        </div>
+                                    )}
+                                    {hasUnseen && (
+                                        <div className="flex items-center gap-0.5 shrink-0" title={`${totalComments - seenCount} new comment${totalComments - seenCount > 1 ? 's' : ''}`}>
+                                            <span className="relative flex size-2">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                                <span className="relative inline-flex rounded-full size-2 bg-blue-500" />
+                                            </span>
+                                            <MessageCircle className="size-3 text-blue-500" />
+                                        </div>
+                                    )}
+                                    <TaskTimeDisplay task={task} />
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </CardContent>
+            </Card>
+
+            <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2">
+                            {dependents.length > 0 && <AlertTriangle className="size-5 text-destructive" />}
+                            Delete Task?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="space-y-3">
+                            <div>
+                                Do you really want to delete this task: <span className="font-bold text-foreground">"{task.title || task.name}"</span>?
+                                This action cannot be undone.
+                            </div>
+
+                            {dependents.length > 0 && (
+                                <div className="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-sm space-y-2">
+                                    <div className="font-semibold flex items-center gap-1.5">
+                                        <AlertTriangle className="size-4" />
+                                        Warning: {dependents.length} {dependents.length === 1 ? 'task depends' : 'tasks depend'} on this
+                                    </div>
+                                    <ul className="list-disc list-inside opacity-90 text-[13px]">
+                                        {dependents.slice(0, 3).map(dep => (
+                                            <li key={dep.id} className="truncate">
+                                                #{dep.idShort}: {dep.title || dep.name}
+                                            </li>
+                                        ))}
+                                        {dependents.length > 3 && (
+                                            <li>...and {dependents.length - 3} more</li>
+                                        )}
+                                    </ul>
+                                    <p className="text-[12px] opacity-80 italic">
+                                        Deleting this task may break the execution flow for these dependents.
+                                    </p>
+                                </div>
+                            )}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(false); }}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDelete} className="bg-destructive hover:bg-destructive/90">
+                            Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+        </>
     );
 });
 
 interface TaskListProps {
     tasks: Task[];
     onTaskClick: (task: Task) => void;
+    onDelete?: (taskId: string) => void;
     memberMap?: Map<string, Member>;
+    allTasks?: Task[];
 }
 
-export function TaskList({ tasks, onTaskClick, memberMap }: TaskListProps) {
+export function TaskList({ tasks, onTaskClick, onDelete, memberMap, allTasks }: TaskListProps) {
     if (tasks.length === 0) {
         return (
             <div className="text-center py-16 text-muted-foreground">
@@ -396,7 +485,7 @@ export function TaskList({ tasks, onTaskClick, memberMap }: TaskListProps) {
         <div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4 mb-4">
                 {tasks.map(task => (
-                    <TaskCard key={task.id} task={task} onClick={onTaskClick} memberMap={memberMap} />
+                    <TaskCard key={task.id} task={task} onClick={onTaskClick} onDelete={onDelete} memberMap={memberMap} allTasks={allTasks} />
                 ))}
             </div>
         </div>

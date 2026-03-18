@@ -8,6 +8,7 @@ interface PaginationControlsProps {
     pageSize: number;
     onPageChange: (page: number) => void;
     onPageSizeChange: (size: number) => void;
+    hideRowsSelector?: boolean;
 }
 
 export function PaginationControls({
@@ -16,6 +17,7 @@ export function PaginationControls({
     pageSize,
     onPageChange,
     onPageSizeChange,
+    hideRowsSelector = false,
 }: PaginationControlsProps) {
     const totalPages = Math.max(1, Math.ceil(count / pageSize));
     const current = Math.min(page, totalPages);
@@ -23,17 +25,21 @@ export function PaginationControls({
     return (
         <div className="flex items-center justify-between gap-3 py-4">
             <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Rows</span>
-                <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
-                    <SelectTrigger className="w-[90px] h-8" aria-label="Page size">
-                        <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {[10, 25, 50, 100].map(size => (
-                            <SelectItem key={size} value={String(size)}>{size}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
+                {!hideRowsSelector && (
+                    <>
+                        <span className="text-xs text-muted-foreground">Rows</span>
+                        <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
+                            <SelectTrigger className="w-[90px] h-8" aria-label="Page size">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {[10, 25, 50, 100].map(size => (
+                                    <SelectItem key={size} value={String(size)}>{size}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </>
+                )}
             </div>
             <div className="flex items-center gap-3">
                 <Button

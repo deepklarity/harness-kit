@@ -743,7 +743,7 @@ export function TaskDetailModal({
                                         </CompactRow>
                                     )}
 
-                                    {task.metadata?.routing_reasoning && (
+                                    {!!task.metadata?.routing_reasoning && (
                                         <CompactRow label="Routing" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />} noBorder>
                                             <span className="text-[10px] font-mono text-muted-foreground/80 leading-snug">{task.metadata.routing_reasoning as string}</span>
                                         </CompactRow>
