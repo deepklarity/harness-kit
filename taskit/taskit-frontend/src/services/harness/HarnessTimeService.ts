@@ -261,6 +261,18 @@ export class HarnessTimeService implements IntegrationService {
         this.baseUrl = import.meta.env.VITE_HARNESS_TIME_API_URL || 'http://localhost:9100';
     }
 
+    private mapAvailableModels(models?: any[]): any[] {
+        return (models || []).map(m => ({
+            name: m.name,
+            description: m.description,
+            is_default: m.is_default,
+            supports_image_input: m.supports_image_input ?? undefined,
+            input_price_per_1m_tokens: m.input_price_per_1m_tokens ?? undefined,
+            output_price_per_1m_tokens: m.output_price_per_1m_tokens ?? undefined,
+            cache_read_price_per_1m_tokens: m.cache_read_price_per_1m_tokens ?? undefined,
+        }));
+    }
+
     setTokenProvider(provider: () => Promise<string | null>): void {
         this.tokenProvider = provider;
     }
@@ -323,7 +335,7 @@ export class HarnessTimeService implements IntegrationService {
                 role: u.role || 'HUMAN',
                 taskCount: 0,
                 totalTimeSpentMs: 0,
-                availableModels: models,
+                availableModels: this.mapAvailableModels(models),
                 cost_tier: u.cost_tier,
                 capabilities: u.capabilities,
             });
@@ -595,7 +607,7 @@ export class HarnessTimeService implements IntegrationService {
             role: u.role || 'HUMAN',
             taskCount: (u as HarnessUser & { task_count?: number }).task_count || 0,
             totalTimeSpentMs: 0,
-            availableModels: u.available_models || [],
+            availableModels: this.mapAvailableModels(u.available_models),
             cost_tier: u.cost_tier,
             capabilities: u.capabilities,
         }));
@@ -633,19 +645,21 @@ export class HarnessTimeService implements IntegrationService {
         const boards = raw.results.map(b => {
             this.cachedBoardNames.set(String(b.id), b.name);
             const boardMemberIds = (b.member_ids || []).map(String);
-            return {
-                id: String(b.id),
-                name: b.name,
-                isTrial: b.is_trial || false,
-                workingDir: b.working_dir || null,
-                odinInitialized: b.odin_initialized || false,
-                memberIds: boardMemberIds,
-                tasks: [],
-                members: [],
-                lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'],
-                totalActions: 0,
-                createdAt: b.created_at || new Date().toISOString(),
-            };
+                return {
+                    id: String(b.id),
+                    name: b.name,
+                    isTrial: b.is_trial || false,
+                    workingDir: b.working_dir || null,
+                    odinInitialized: b.odin_initialized || false,
+                    memberIds: boardMemberIds,
+                    tasks: [],
+                    members: [],
+                    lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'],
+                    totalActions: 0,
+                    createdAt: b.created_at || new Date().toISOString(),
+                    taskCount: (b as any).task_count || 0,
+                    memberCount: (b as any).member_count || 0,
+                };
         });
         return { ...raw, results: boards };
     }
@@ -963,6 +977,25 @@ export class HarnessTimeService implements IntegrationService {
         await this.del(`/reflections/${reportId}/`);
     }
 
+    async fetchBoardMembers(boardId: string): Promise<Member[]> {
+        const raw = await this.get<HarnessUser[]>(`/api/boards/${Number(boardId)}/members/`);
+        return raw.map((u, index) => ({
+            id: String(u.id),
+            fullName: u.name,
+            username: u.email.split('@')[0],
+            initials: u.name.substring(0, 2).toUpperCase(),
+            avatarUrl: null,
+            color: u.color || MEMBER_COLORS[index % MEMBER_COLORS.length],
+            email: u.email,
+            role: u.role || 'HUMAN',
+            taskCount: (u as HarnessUser & { task_count?: number }).task_count || 0,
+            totalTimeSpentMs: 0,
+            availableModels: this.mapAvailableModels(u.available_models),
+            cost_tier: u.cost_tier,
+            capabilities: u.capabilities,
+        }));
+    }
+
     async fetchBoardAgents(boardId: string): Promise<AgentConfig[]> {
         const resp = await this.get<{ agents: AgentConfig[] }>(`/api/boards/${Number(boardId)}/agents/`);
         return resp.agents;
@@ -1081,7 +1114,7 @@ export class HarnessTimeService implements IntegrationService {
                     role: task.assignee.role || 'HUMAN',
                     taskCount: 0,
                     totalTimeSpentMs: 0,
-                    availableModels: task.assignee.available_models || [],
+                    availableModels: this.mapAvailableModels(task.assignee.available_models),
                     cost_tier: task.assignee.cost_tier,
                     capabilities: task.assignee.capabilities,
                 });
@@ -1171,8 +1204,6 @@ export class HarnessTimeService implements IntegrationService {
             costSummary: s.cost_summary || undefined,
             taskCount: s.task_count ?? tasks.length,
             comments,
-            fileName: typeof s.metadata?.managed_file_path === 'string' ? s.metadata.managed_file_path : undefined,
-            isManaged: s.source === 'taskit_ui_file',
             tasks: tasks.map(t => ({
                 id: String(t.id),
                 name: t.title || t.description.substring(0, 50),

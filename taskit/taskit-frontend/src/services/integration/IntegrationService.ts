@@ -68,7 +68,9 @@ export interface IntegrationService {
     searchTasks(query: { q: string; scope: 'board' | 'global'; boardId?: string; limit?: number }): Promise<TaskSearchResult[]>;
     suggestDirectories(query: string, limit?: number): Promise<DirectoryEntry[]>;
     listDirectoryChildren(path: string, limit?: number): Promise<DirectoryEntry[]>;
-    checkDirectory(path: string, options?: { mode?: 'existing' | 'create'; parentDirectory?: string; directoryName?: string }): Promise<DirectoryCheckResult>;
+
+    checkDirectory(path: string,options?: { mode?: 'existing' | 'create'; parentDirectory?: string; directoryName?: string }): Promise<DirectoryCheckResult>;
+    fetchBoardMembers(boardId: string): Promise<Member[]>;
 
     updateTaskAssignees(taskId: string, memberIds: string[]): Promise<void>;
     createBoard(input: {

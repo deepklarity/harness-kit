@@ -134,6 +134,8 @@ export interface Board {
     lists: string[];
     totalActions: number;
     createdAt: string;
+    taskCount?: number;
+    memberCount?: number;
 }
 
 export interface SpecCostSummary {

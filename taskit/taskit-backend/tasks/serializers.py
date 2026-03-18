@@ -238,9 +238,10 @@ class CreateBoardSerializer(serializers.ModelSerializer):
 
 class BoardListSerializer(BoardSerializer):
     member_count = serializers.IntegerField(read_only=True)
+    task_count = serializers.IntegerField(read_only=True)
 
     class Meta(BoardSerializer.Meta):
-        fields = BoardSerializer.Meta.fields + ["member_count"]
+        fields = BoardSerializer.Meta.fields + ["member_count", "task_count"]
 
 
 class BoardDetailSerializer(BoardSerializer):

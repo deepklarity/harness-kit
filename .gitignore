@@ -223,3 +223,6 @@ celery.pidbox.exchange
 celerybeat-schedule.db
 
 tmp/
+
+
+

@@ -591,7 +591,8 @@ class BoardViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = Board.objects.prefetch_related("memberships").annotate(
-            member_count=Count("memberships", distinct=True)
+            member_count=Count("memberships", filter=Q(memberships__user__role__in=["HUMAN", "ADMIN"]), distinct=True),
+            task_count=Count("tasks", distinct=True),
         )
         query_params = self.request.query_params
 
@@ -604,7 +605,7 @@ class BoardViewSet(viewsets.ModelViewSet):
 
         tokens = _parse_sort_tokens(
             query_params.get("sort"),
-            {"name", "created_at", "updated_at", "member_count"},
+            {"name", "created_at", "updated_at", "member_count", "task_count"},
             default_tokens=[("created_at", True)],
         )
         qs = qs.order_by(*_build_order_by(tokens, {
@@ -612,6 +613,7 @@ class BoardViewSet(viewsets.ModelViewSet):
             "created_at": "created_at",
             "updated_at": "updated_at",
             "member_count": "member_count",
+            "task_count": "task_count",
         }))
         return qs
 
@@ -1011,10 +1013,20 @@ class BoardViewSet(viewsets.ModelViewSet):
 
         agents = []
         for agent_user in all_agents:
-            models_dict = {}
+            # Find membership if exists
+            membership = next((m for m in memberships if m.user_id == agent_user.id), None)
+            disabled = set(membership.disabled_models or []) if membership else set()
+
+            models_list = []
             for m in agent_user.available_models:
                 if isinstance(m, dict):
-                    models_dict[m.get("name", "")] = m.get("description", "")
+                    model_name = m.get("name", "")
+                    models_list.append({
+                        "name": model_name,
+                        "enabled": model_name not in disabled,
+                        "is_default": m.get("is_default", False),
+                        "description": m.get("description", ""),
+                    })
             agents.append({
                 "name": agent_user.name,
                 "enabled": agent_user.id in member_user_ids,
@@ -1023,7 +1035,7 @@ class BoardViewSet(viewsets.ModelViewSet):
                 "cost_tier": agent_user.cost_tier or "medium",
                 "default_model": agent_user.default_model,
                 "premium_model": agent_user.premium_model,
-                "models": models_dict,
+                "models": models_list,
             })
 
         return Response({"agents": agents})

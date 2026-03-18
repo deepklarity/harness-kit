@@ -226,6 +226,11 @@ function App() {
         [members],
     );
 
+    const sortedBoardsForSettings = useMemo(
+        () => [...boards].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true })),
+        [boards]
+    );
+
     const contextStats = useMemo((): DashboardStats => {
         const tasks = overviewTasks;
         const completedTasks = tasks.filter(t => t.currentStatus === 'DONE');
@@ -292,7 +297,11 @@ function App() {
     }, []);
 
     const handleBoardChange = (value: string) => {
-        updateSearchParam('board', value === ALL_BOARDS_ID ? null : value);
+        if (value === ALL_BOARDS_ID) {
+            navigate('/settings');
+        } else {
+            updateSearchParam('board', value);
+        }
     };
 
     const handleNavChange = (value: string) => {
@@ -613,7 +622,7 @@ function App() {
                             <>
                                 <SectionHeader title="Settings" />
                                 <SettingsView
-                                    boards={boards}
+                                    boards={sortedBoardsForSettings}
                                     members={members}
                                     onDataChange={() => setRefreshKey(k => k + 1)}
                                     onCreateBoard={() => setShowCreateBoard(true)}

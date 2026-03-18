@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { AgentConfig, Board, Member } from '../types';
 import { useService } from '../contexts/ServiceContext';
 import { useToast } from '@/hooks/use-toast';
@@ -26,12 +26,18 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
 
     // Agents tab state
     const [agents, setAgents] = useState<AgentConfig[]>([]);
+    const [originalAgents, setOriginalAgents] = useState<AgentConfig[]>([]);
     const [agentsLoading, setAgentsLoading] = useState(false);
+    const [savingAgents, setSavingAgents] = useState(false);
     const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
 
     // People tab state
     const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
     const [adding, setAdding] = useState(false);
+    const [boardMembers, setBoardMembers] = useState<Member[]>([]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<Member[]>([]);
+    const [searching, setSearching] = useState(false);
     const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
     const [removing, setRemoving] = useState(false);
 
@@ -42,6 +48,19 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
     const [newColor, setNewColor] = useState(MEMBER_COLORS[0]);
     const [creating, setCreating] = useState(false);
 
+    const hasChanges = useMemo(() => {
+        for (const agent of agents) {
+            const original = originalAgents.find(o => o.name === agent.name);
+            if (!original) continue;
+            if (agent.enabled !== original.enabled) return true;
+            for (const model of agent.models) {
+                const originalModel = original.models.find(m => m.name === model.name);
+                if (originalModel && model.enabled !== originalModel.enabled) return true;
+            }
+        }
+        return false;
+    }, [agents, originalAgents]);
+
     const defaultTab = board.odinInitialized ? 'agents' : 'people';
 
     const loadAgents = useCallback(async () => {
@@ -50,6 +69,7 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
         try {
             const result = await service.fetchBoardAgents(board.id);
             setAgents(result);
+            setOriginalAgents(JSON.parse(JSON.stringify(result)));
         } catch {
             // Silent fail
         } finally {
@@ -57,29 +77,45 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
         }
     }, [board.id, board.odinInitialized, service]);
 
+    const loadBoardMembers = useCallback(async () => {
+        try {
+            const result = await service.fetchBoardMembers(board.id);
+            setBoardMembers(result);
+        } catch {
+            // Silent fail
+        }
+    }, [board.id, service]);
+
+    useEffect(() => {
+        if (!searchQuery.trim()) {
+            setSearchResults([]);
+            return;
+        }
+        setSearching(true);
+        const delayDebounceFn = setTimeout(async () => {
+            try {
+                const res = await service.fetchMembersPage({ q: searchQuery, page_size: 50 });
+                setSearchResults(res.results);
+            } catch {
+                // Silent fail
+            } finally {
+                setSearching(false);
+            }
+        }, 500);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [searchQuery, service]);
+
     useEffect(() => {
         loadAgents();
-    }, [loadAgents]);
+        loadBoardMembers();
+    }, [loadAgents, loadBoardMembers]);
 
-    const handleToggleAgent = async (agentName: string, enabled: boolean) => {
-        // Optimistic update
+    const handleToggleAgent = (agentName: string, enabled: boolean) => {
         setAgents(prev => prev.map(a => a.name === agentName ? { ...a, enabled } : a));
-        try {
-            await service.toggleBoardAgent(board.id, agentName, enabled);
-            onDataChange();
-        } catch (e) {
-            // Revert
-            setAgents(prev => prev.map(a => a.name === agentName ? { ...a, enabled: !enabled } : a));
-            toast({
-                title: 'Failed to toggle agent',
-                description: e instanceof Error ? e.message : 'Unknown error',
-                variant: 'destructive',
-            });
-        }
     };
 
-    const handleToggleModel = async (agentName: string, modelName: string, enabled: boolean) => {
-        // Optimistic update
+    const handleToggleModel = (agentName: string, modelName: string, enabled: boolean) => {
         setAgents(prev => prev.map(a => {
             if (a.name !== agentName) return a;
             return {
@@ -87,23 +123,37 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
                 models: a.models.map(m => m.name === modelName ? { ...m, enabled } : m),
             };
         }));
+    };
+
+    const handleSaveAgents = async () => {
+        setSavingAgents(true);
         try {
-            await service.toggleBoardModel(board.id, agentName, modelName, enabled);
+            for (const agent of agents) {
+                const original = originalAgents.find(o => o.name === agent.name);
+                if (!original) continue;
+
+                if (agent.enabled !== original.enabled) {
+                    await service.toggleBoardAgent(board.id, agent.name, agent.enabled);
+                }
+
+                for (const model of agent.models) {
+                    const originalModel = original.models.find(m => m.name === model.name);
+                    if (originalModel && model.enabled !== originalModel.enabled) {
+                        await service.toggleBoardModel(board.id, agent.name, model.name, model.enabled);
+                    }
+                }
+            }
+            toast({ title: 'Agents updated', description: 'Agent configurations saved successfully.' });
             onDataChange();
+            onClose();
         } catch (e) {
-            // Revert
-            setAgents(prev => prev.map(a => {
-                if (a.name !== agentName) return a;
-                return {
-                    ...a,
-                    models: a.models.map(m => m.name === modelName ? { ...m, enabled: !enabled } : m),
-                };
-            }));
             toast({
-                title: 'Failed to toggle model',
+                title: 'Failed to update agents',
                 description: e instanceof Error ? e.message : 'Unknown error',
                 variant: 'destructive',
             });
+        } finally {
+            setSavingAgents(false);
         }
     };
 
@@ -114,6 +164,7 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
             await service.addBoardMembers(board.id, selectedUserIds);
             toast({ title: 'Members added', description: `Added ${selectedUserIds.length} member(s).` });
             setSelectedUserIds([]);
+            loadBoardMembers();
             onDataChange();
         } catch (e) {
             toast({
@@ -132,6 +183,7 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
         try {
             await service.removeBoardMembers(board.id, [member.id]);
             toast({ title: 'Member removed', description: `"${member.fullName}" removed from board.` });
+            loadBoardMembers();
             onDataChange();
         } catch (e) {
             toast({
@@ -157,8 +209,26 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
             setNewEmail('');
             setNewColor(MEMBER_COLORS[0]);
             setShowCreateForm(false);
+            loadBoardMembers();
             onDataChange();
         } catch {
+            try {
+                const searchRes = await service.fetchMembersPage({ q: newEmail, page_size: 1 });
+                const existingUser = searchRes.results.find(u => u.email.toLowerCase() === newEmail.trim().toLowerCase());
+                if (existingUser) {
+                    await service.addBoardMembers(board.id, [existingUser.id]);
+                    toast({ title: 'Member added', description: `Existing user "${existingUser.fullName}" added to board.` });
+                    setNewName('');
+                    setNewEmail('');
+                    setNewColor(MEMBER_COLORS[0]);
+                    setShowCreateForm(false);
+                    loadBoardMembers();
+                    onDataChange();
+                    return;
+                }
+            } catch {
+                // Ignore fallback fail
+            }
             toast({
                 title: 'Failed to create member',
                 description: 'Email may already exist.',
@@ -179,9 +249,11 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
     };
 
     const isAgentUser = (member: Member) => member.email.endsWith('@odin.agent');
-    const boardMembers = board.members;
     const humanMembers = boardMembers.filter(m => !isAgentUser(m));
-    const availableToAdd = members.filter(m => !board.memberIds.includes(m.id) && !isAgentUser(m));
+    const availableToAdd = useMemo(() => {
+        const listToFilter = searchQuery.trim() ? searchResults : members;
+        return listToFilter.filter(m => !boardMembers.some(bm => bm.id === m.id) && !isAgentUser(m));
+    }, [searchQuery, searchResults, members, boardMembers]);
 
     const getAffectedTaskCount = (memberId: string) => {
         return board.tasks.filter(t => t.assigneeIds.includes(memberId)).length;
@@ -331,11 +403,24 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
                                     })
                                 )}
                             </div>
+                            <div className="flex justify-end gap-2 mt-3 pt-3 border-t">
+                                <Button size="sm" onClick={handleSaveAgents} disabled={savingAgents || !hasChanges}>
+                                    {savingAgents ? 'Saving...' : 'Done'}
+                                </Button>
+                            </div>
                         </TabsContent>
                     )}
 
                     {/* ─── People Tab ─── */}
                     <TabsContent value="people">
+                        <div className="mb-2 px-1">
+                            <Input
+                                placeholder="Search users by name or email..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="h-8"
+                            />
+                        </div>
                         <div className="max-h-[400px] overflow-y-auto space-y-4 py-2">
                             {/* Current human members */}
                             {humanMembers.length > 0 && (
