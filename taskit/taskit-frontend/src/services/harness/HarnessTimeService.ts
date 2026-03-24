@@ -23,6 +23,7 @@ import type {
     ReflectionRequest,
     ProcessMonitorResponse,
     ForcedProviderStatus,
+    AnalyticsCostSummary,
 } from '../../types';
 
 export interface ParsedActor {
@@ -977,6 +978,21 @@ export class HarnessTimeService implements IntegrationService {
 
     async deleteReflection(reportId: number): Promise<void> {
         await this.del(`/reflections/${reportId}/`);
+    }
+
+    async fetchAnalytics(params?: {
+        board?: string;
+        date_from?: string;
+        date_to?: string;
+        granularity?: string;
+    }): Promise<AnalyticsCostSummary> {
+        const sp = new URLSearchParams();
+        if (params?.board) sp.set('board', params.board);
+        if (params?.date_from) sp.set('date_from', params.date_from);
+        if (params?.date_to) sp.set('date_to', params.date_to);
+        if (params?.granularity) sp.set('granularity', params.granularity);
+        const qs = sp.toString();
+        return this.get<AnalyticsCostSummary>(`/api/analytics/cost-summary/${qs ? `?${qs}` : ''}`);
     }
 
     async fetchBoardMembers(boardId: string): Promise<Member[]> {

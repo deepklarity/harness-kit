@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from . import views
+from . import analytics, views
 from . import notification_views
 
 router = DefaultRouter(trailing_slash=True)
@@ -25,4 +25,5 @@ urlpatterns = [
     path("runtime/odin-status/", views.runtime_odin_status),
     path("runtime/process-monitor/", views.runtime_process_monitor),
     path("runtime/stop/", views.runtime_stop),
+    path("analytics/cost-summary/", analytics.cost_summary),
 ] + router.urls

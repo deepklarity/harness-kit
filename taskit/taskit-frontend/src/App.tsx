@@ -28,6 +28,7 @@ import { BoardPage, SpecsPage } from './components/pages';
 import { NotificationsPage } from './components/NotificationsPage';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { AnalyticsPage } from './components/analytics';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 
 function pathToViewMode(pathname: string): ViewMode {
@@ -38,6 +39,7 @@ function pathToViewMode(pathname: string): ViewMode {
     if (pathname.startsWith('/reflections')) return 'reflections';
     if (pathname === '/settings') return 'settings';
     if (pathname === '/notifications') return 'notifications';
+    if (pathname === '/analytics') return 'analytics';
     return 'board';
 }
 
@@ -651,6 +653,12 @@ function App() {
                         } />
                         <Route path="/reflections/:reportId" element={
                             <ReflectionDetailRoute onTaskClick={handleTaskSelect} />
+                        } />
+                        <Route path="/analytics" element={
+                            <>
+                                <SectionHeader title="Analytics" />
+                                <AnalyticsPage boards={boards} onTaskClick={handleTaskSelect} />
+                            </>
                         } />
                         <Route path="/notifications" element={<NotificationsPage />} />
                         <Route path="/settings" element={

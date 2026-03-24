@@ -397,7 +397,86 @@ export interface PresetsResponse {
     presets: TaskPreset[];
 }
 
-export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications';
+export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications' | 'analytics';
+
+// ─── Analytics Types ─────────────────────────────────────────
+
+export interface AnalyticsSummaryKPIs {
+    total_spend: number;
+    total_tokens: number;
+    task_count: number;
+    avg_cost_per_task: number;
+    reflection_cost: number;
+}
+
+export interface AnalyticsTimeSeries {
+    date: string;
+    total: number;
+    by_model: Record<string, number>;
+}
+
+export interface AnalyticsCostByModel {
+    model: string;
+    cost: number;
+    tokens: number;
+    task_count: number;
+}
+
+export interface AnalyticsCostByBoard {
+    board_id: number;
+    board_name: string;
+    cost: number;
+    task_count: number;
+}
+
+export interface AnalyticsCostByAgent {
+    agent: string;
+    cost: number;
+    tokens: number;
+    task_count: number;
+}
+
+export interface AnalyticsEfficiencyMetrics {
+    cache_hit_rate: number;
+    failure_cost: number;
+    avg_cost_per_task: number;
+    reflection_cost: number;
+    avg_tokens_per_task: number;
+    avg_duration_ms: number;
+    failed_task_count: number;
+    total_task_count: number;
+}
+
+export interface AnalyticsModelComparison {
+    model: string;
+    avg_cost: number;
+    total_cost: number;
+    avg_duration_ms: number;
+    avg_tokens: number;
+    success_rate: number;
+    task_count: number;
+}
+
+export interface AnalyticsTopExpensiveTask {
+    task_id: number;
+    title: string;
+    model: string;
+    status: string;
+    cost: number;
+    total_tokens: number;
+}
+
+export interface AnalyticsCostSummary {
+    summary_kpis: AnalyticsSummaryKPIs;
+    time_series: AnalyticsTimeSeries[];
+    cost_by_model: AnalyticsCostByModel[];
+    cost_by_board: AnalyticsCostByBoard[];
+    cost_by_agent: AnalyticsCostByAgent[];
+    efficiency_metrics: AnalyticsEfficiencyMetrics;
+    model_comparison: AnalyticsModelComparison[];
+    top_expensive_tasks: AnalyticsTopExpensiveTask[];
+    meta: { task_count: number; granularity: string };
+}
 
 // ─── Notification Types ───────────────────────────────────────
 

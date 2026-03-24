@@ -16,6 +16,7 @@ import type {
     OdinStatusResponse,
     ProcessMonitorResponse,
     ForcedProviderStatus,
+    AnalyticsCostSummary,
 } from '../../types';
 
 export interface AuthState {
@@ -130,6 +131,9 @@ export interface IntegrationService {
     fetchBoardAgents(boardId: string): Promise<AgentConfig[]>;
     toggleBoardAgent(boardId: string, agentName: string, enabled: boolean): Promise<{ name: string; enabled: boolean; board?: Record<string, unknown> }>;
     toggleBoardModel(boardId: string, agentName: string, modelName: string, enabled: boolean): Promise<void>;
+
+    // Analytics
+    fetchAnalytics(params?: { board?: string; date_from?: string; date_to?: string; granularity?: string }): Promise<AnalyticsCostSummary>;
 
     // Presets
     fetchPresets(): Promise<PresetsResponse>;

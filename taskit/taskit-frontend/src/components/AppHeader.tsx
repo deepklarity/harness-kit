@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import {
-    BarChart3, LayoutDashboard, FileText,
+    BarChart3, LayoutDashboard, FileText, TrendingUp,
     Plus, LogOut, Moon, Sun, Settings,
     Activity, Search, Keyboard,
 } from 'lucide-react';
@@ -134,6 +134,11 @@ export function AppHeader({
                     <Button size="sm" className="gap-1.5 h-8 px-2 sm:px-3" onClick={onCreateTask}>
                         <Plus className="size-3.5" />
                         <span className="hidden md:inline">Task</span>
+                    </Button>
+                    <Button variant="ghost" size="sm" className="size-8 p-0" asChild>
+                        <Link to="/analytics">
+                            <TrendingUp className="size-4" />
+                        </Link>
                     </Button>
                     <Button variant="ghost" size="sm" className="size-8 p-0" asChild>
                         <Link to={selectedBoard && selectedBoard !== ALL_BOARDS_ID ? `/settings?board=${selectedBoard}` : '/settings'}>
