@@ -284,18 +284,20 @@ class TestTaskCRUD(APITestCase):
 
     def test_create_task_with_odin_fields(self):
         spec = self.make_spec(self.board)
+        dep_a = self.make_task(self.board, title="Dep A", status="TODO")
+        dep_b = self.make_task(self.board, title="Dep B", status="IN_PROGRESS")
         resp = self.client.post("/tasks/", {
             "board_id": self.board.id,
             "title": "Odin task",
             "created_by": "alice@test.com",
             "spec_id": spec.id,
-            "depends_on": ["task_1", "task_2"],
+            "depends_on": [str(dep_a.id), str(dep_b.id)],
             "complexity": "HIGH",
             "metadata": {"agent": "claude"},
         }, format="json")
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.data["spec_id"], spec.id)
-        self.assertEqual(resp.data["depends_on"], ["task_1", "task_2"])
+        self.assertEqual(resp.data["depends_on"], [str(dep_a.id), str(dep_b.id)])
         self.assertEqual(resp.data["complexity"], "HIGH")
         self.assertEqual(resp.data["metadata"], {"agent": "claude"})
 
@@ -320,6 +322,50 @@ class TestTaskCRUD(APITestCase):
             "priority": "ULTRA",
         }, format="json")
         self.assertEqual(resp.status_code, 400)
+
+    def test_create_task_with_multiple_active_dependencies(self):
+        dep_todo = self.make_task(self.board, title="Dep Todo", status="TODO")
+        dep_wip = self.make_task(self.board, title="Dep WIP", status="IN_PROGRESS")
+        resp = self.client.post("/tasks/", {
+            "board_id": self.board.id,
+            "title": "Blocked task",
+            "created_by": "alice@test.com",
+            "depends_on": [str(dep_todo.id), str(dep_wip.id)],
+        }, format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["depends_on"], [str(dep_todo.id), str(dep_wip.id)])
+
+    def test_create_task_rejects_inactive_new_dependency(self):
+        dep_done = self.make_task(self.board, title="Dep Done", status="DONE")
+        resp = self.client.post("/tasks/", {
+            "board_id": self.board.id,
+            "title": "Blocked task",
+            "created_by": "alice@test.com",
+            "depends_on": [str(dep_done.id)],
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("depends_on", resp.data)
+
+    def test_create_task_rejects_dependency_from_another_board(self):
+        board2 = self.make_board(name="Other Board")
+        foreign = self.make_task(board2, title="Foreign dep", status="TODO")
+        resp = self.client.post("/tasks/", {
+            "board_id": self.board.id,
+            "title": "Blocked task",
+            "created_by": "alice@test.com",
+            "depends_on": [str(foreign.id)],
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("depends_on", resp.data)
+
+    def test_update_task_rejects_self_dependency(self):
+        task = self.make_task(self.board, title="Self blocker", status="TODO")
+        resp = self.client.put(f"/tasks/{task.id}/", {
+            "depends_on": [str(task.id)],
+            "updated_by": "alice@test.com",
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("depends_on", resp.data)
 
 
 class TestRuntimeDirectoryEndpoints(APITestCase):

@@ -1,5 +1,4 @@
-
-import { memo, useState, useMemo, type MouseEvent, type PointerEvent } from 'react';
+import { memo, useState, useMemo, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 
 import type { Task, Member } from '../types';
 import { getStatusIcon, classifyStatus } from '../utils/transformer';
@@ -7,7 +6,7 @@ import { TaskTimeDisplay } from './TaskTimeDisplay';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2 } from 'lucide-react';
+import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2, GitBranch } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +20,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 import { getSeenCommentCount } from '../utils/unseenComments';
 import { hasUnseenExecutionCompletion } from '../utils/unseenStatusTransitions';
@@ -33,6 +33,7 @@ interface TaskCardProps {
     hideStatus?: boolean;
     memberMap?: Map<string, Member>;
     allTasks?: Task[];
+    taskMap?: Map<string, Task>;
     blockedByFailed?: boolean;
     onRename?: (taskId: string, newName: string) => Promise<void> | void;
     onDelete?: (taskId: string) => void;
@@ -67,32 +68,50 @@ const STATUS_STYLES: Record<string, string> = {
     other: 'bg-secondary text-muted-foreground',
 };
 
-export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDragging, hideStatus, memberMap, allTasks = [], blockedByFailed, onRename, onDelete, showInlineEdit = false, compact }: TaskCardProps) {
+export const TaskCard = memo(function TaskCard({
+    task,
+    onClick,
+    isOverlay,
+    isDragging,
+    hideStatus,
+    memberMap,
+    allTasks = [],
+    taskMap,
+    blockedByFailed,
+    onRename,
+    onDelete,
+    showInlineEdit = false,
+    compact,
+}: TaskCardProps) {
     const statusCategory = classifyStatus(task.currentStatus);
     const StatusIcon = getStatusIcon(task.currentStatus);
     const priorityStyle = PRIORITY_STYLES[task.priority || 'MEDIUM'] || PRIORITY_STYLES.MEDIUM;
     const statusStyle = STATUS_STYLES[statusCategory] || STATUS_STYLES.other;
 
-    // Unseen comments indicator — use list payload commentCount when available
-    // (comments array is only populated on detail fetch, not in list views)
     const seenCount = getSeenCommentCount(task.id);
     const totalComments = task.commentCount ?? task.comments?.length ?? 0;
     const hasUnseen = totalComments > seenCount;
     const needsExecutionReviewAttention = hasUnseenExecutionCompletion(task);
-
-    // Pending question indicator
     const hasPendingQuestion = !!(task.metadata?.has_pending_question);
-
-    // Prefer canonical field, then metadata fallback for older data.
     const model = task.modelName || (task.metadata?.model ?? task.metadata?.selected_model) as string | undefined;
 
-    // Resolve assignee full name
     const assigneeName = task.assignees.length > 0
         ? (memberMap?.get(task.assigneeIds[0])?.fullName || task.assignees[0])
         : null;
     const assigneeColor = task.assignees.length > 0
         ? (memberMap?.get(task.assigneeIds[0])?.color || 'hsl(240, 60%, 50%)')
         : null;
+
+    const resolvedTaskMap = useMemo(
+        () => taskMap || new Map(allTasks.map(item => [item.id, item] as const)),
+        [allTasks, taskMap],
+    );
+    const dependencyItems = (task.dependsOn || []).map(depId => ({ id: depId, task: resolvedTaskMap.get(depId) }));
+    const dependencyLabel = dependencyItems
+        .slice(0, compact ? 2 : 3)
+        .map(({ id, task: depTask }) => `#${depTask?.idShort || id}`)
+        .join(', ');
+    const hiddenDependencyCount = Math.max(0, dependencyItems.length - (compact ? 2 : 3));
 
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [draftTitle, setDraftTitle] = useState(task.title || task.name);
@@ -101,7 +120,7 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
 
     const dependents = useMemo(() => {
         if (!onDelete || isOverlay || !allTasks.length) return [];
-        return allTasks.filter(t => t.dependsOn?.includes(task.id));
+        return allTasks.filter(item => item.dependsOn?.includes(task.id));
     }, [task.id, allTasks, onDelete, isOverlay]);
 
     const canEditInline = !!showInlineEdit && !!onRename && !isOverlay && !compact;
@@ -173,7 +192,6 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                         </button>
                     )}
                     {compact ? (
-                        /* ── Compact layout ── */
                         <div className="space-y-0.5">
                             {hasPendingQuestion && (
                                 <div
@@ -183,7 +201,6 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                     <BellRing className="size-2.5" />
                                 </div>
                             )}
-                            {/* Row 1: ID + priority + complexity + title */}
                             <div className="flex items-center gap-1.5 min-w-0">
                                 <span className="text-muted-foreground font-mono font-semibold text-[10px] shrink-0">#{task.idShort}</span>
                                 <span className={`size-1.5 rounded-full shrink-0 ${priorityStyle.dot}`} />
@@ -200,12 +217,10 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                 )}
                             </div>
 
-                            {/* Row 2: Title — own row so it reads clearly */}
                             <div className="font-medium text-[12.5px] leading-snug truncate group-hover:text-primary transition-colors">
                                 {task.name}
                             </div>
 
-                            {/* Row 3: spec + model (if present) */}
                             {(task.specName || model) && (
                                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground truncate">
                                     {task.specName && (
@@ -223,13 +238,20 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                 </div>
                             )}
 
-                            {/* Row 4: status + assignee + indicators + time */}
                             <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                                 {!hideStatus && (
                                     <Badge variant="outline" className={`text-[10px] h-4 px-1 font-medium gap-0.5 border-0 rounded-sm ${statusStyle}`}>
                                         <StatusIcon className="size-2.5" />
                                         {task.currentStatus}
                                     </Badge>
+                                )}
+                                {dependencyItems.length > 0 && (
+                                    <DependencyPreview dependencyItems={dependencyItems}>
+                                        <span className="inline-flex max-w-[120px] items-center gap-1 rounded-sm border border-amber-300/60 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300">
+                                            <GitBranch className="size-2.5 shrink-0" />
+                                            <span className="truncate">Deps: {dependencyLabel}{hiddenDependencyCount > 0 ? ` +${hiddenDependencyCount}` : ''}</span>
+                                        </span>
+                                    </DependencyPreview>
                                 )}
                                 <div className="flex items-center gap-1 ml-auto shrink-0">
                                     {hasUnseen && (
@@ -239,8 +261,7 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                         </span>
                                     )}
                                     {assigneeName ? (
-                                        <span className="size-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white"
-                                            style={{ background: assigneeColor || undefined }}>
+                                        <span className="size-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white" style={{ background: assigneeColor || undefined }}>
                                             {assigneeName.charAt(0)}
                                         </span>
                                     ) : (
@@ -251,7 +272,6 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                             </div>
                         </div>
                     ) : (
-                        /* ── Full layout with inline edit support ── */
                         <>
                             {canEditInline && !isEditingTitle && (
                                 <button
@@ -263,14 +283,12 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                     <Pencil className="size-3.5 text-muted-foreground" />
                                 </button>
                             )}
-                            {/* Blocked by failed dependency warning */}
                             {blockedByFailed && (
                                 <div className="flex items-center gap-1.5 text-[11px] font-medium text-red-600 dark:text-red-400">
                                     <AlertTriangle className="size-3 shrink-0" />
                                     <span>Blocked — dependency failed</span>
                                 </div>
                             )}
-                            {/* Row 1: ID + Priority + Complexity */}
                             <div className="flex items-center gap-1.5">
                                 <span className="text-xs text-muted-foreground font-mono font-semibold">#{task.idShort}</span>
                                 <div className="flex items-center gap-1" title={`Priority: ${task.priority || 'MEDIUM'}`}>
@@ -296,7 +314,6 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                 )}
                             </div>
 
-                            {/* Row 2: Task title */}
                             {isEditingTitle ? (
                                 <div className="space-y-1.5">
                                     <Input
@@ -341,7 +358,6 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                 </div>
                             )}
 
-                            {/* Row 3: Spec context (if any) */}
                             {task.specName && (
                                 <div className="flex items-center gap-1 text-muted-foreground text-xs">
                                     <FileText className="size-3 shrink-0" />
@@ -349,7 +365,6 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                 </div>
                             )}
 
-                            {/* Row 4: Model chip (if available from metadata) */}
                             {model && (
                                 <div className="flex items-center gap-1 text-muted-foreground text-xs">
                                     <Package className="size-3 shrink-0" />
@@ -357,27 +372,28 @@ export const TaskCard = memo(function TaskCard({ task, onClick, isOverlay, isDra
                                 </div>
                             )}
 
-                            {/* Row 5: Footer — status, assignee, time */}
                             <div className="flex items-center justify-between pt-1 border-t border-border">
-                                {/* Left: Status badge */}
                                 <div className="flex items-center gap-1.5">
                                     {!hideStatus && (
-                                        <Badge
-                                            variant="outline"
-                                            className={`text-[11px] h-5 px-1.5 font-medium gap-1 border-0 rounded-sm ${statusStyle}`}
-                                        >
+                                        <Badge variant="outline" className={`text-[11px] h-5 px-1.5 font-medium gap-1 border-0 rounded-sm ${statusStyle}`}>
                                             <StatusIcon className="size-3" />
                                             {task.currentStatus}
                                         </Badge>
                                     )}
+                                    {dependencyItems.length > 0 && (
+                                        <DependencyPreview dependencyItems={dependencyItems}>
+                                            <span className="inline-flex max-w-[170px] items-center gap-1 rounded-sm border border-amber-300/60 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300">
+                                                <GitBranch className="size-3 shrink-0" />
+                                                <span className="truncate">Deps: {dependencyLabel}{hiddenDependencyCount > 0 ? ` +${hiddenDependencyCount}` : ''}</span>
+                                            </span>
+                                        </DependencyPreview>
+                                    )}
                                 </div>
 
-                                {/* Right: Assignee name + indicators + time */}
                                 <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
                                     {assigneeName && (
                                         <div className="flex items-center gap-1 min-w-0" title={assigneeName}>
-                                            <span className="size-4 rounded-full shrink-0 flex items-center justify-center text-[8px] font-bold text-white"
-                                                style={{ background: assigneeColor || undefined }}>
+                                            <span className="size-4 rounded-full shrink-0 flex items-center justify-center text-[8px] font-bold text-white" style={{ background: assigneeColor || undefined }}>
                                                 {assigneeName.charAt(0)}
                                             </span>
                                             <span className="truncate max-w-[90px] font-medium">{assigneeName}</span>
@@ -471,6 +487,10 @@ interface TaskListProps {
 }
 
 export function TaskList({ tasks, onTaskClick, onDelete, memberMap, allTasks }: TaskListProps) {
+    const taskMap = useMemo(
+        () => new Map((allTasks || tasks).map(task => [task.id, task] as const)),
+        [allTasks, tasks],
+    );
     if (tasks.length === 0) {
         return (
             <div className="text-center py-16 text-muted-foreground">
@@ -485,9 +505,66 @@ export function TaskList({ tasks, onTaskClick, onDelete, memberMap, allTasks }: 
         <div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4 mb-4">
                 {tasks.map(task => (
-                    <TaskCard key={task.id} task={task} onClick={onTaskClick} onDelete={onDelete} memberMap={memberMap} allTasks={allTasks} />
+                    <TaskCard
+                        key={task.id}
+                        task={task}
+                        onClick={onTaskClick}
+                        onDelete={onDelete}
+                        memberMap={memberMap}
+                        allTasks={allTasks}
+                        taskMap={taskMap}
+                    />
                 ))}
             </div>
         </div>
+    );
+}
+
+function DependencyPreview({
+    dependencyItems,
+    children,
+}: {
+    dependencyItems: Array<{ id: string; task?: Task }>;
+    children: ReactNode;
+}) {
+    return (
+        <Popover>
+            <PopoverTrigger asChild>
+                <button
+                    type="button"
+                    className="inline-flex"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    title="View dependencies"
+                >
+                    {children}
+                </button>
+            </PopoverTrigger>
+            <PopoverContent
+                align="start"
+                className="w-80"
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+            >
+                <div className="space-y-2">
+                    <div className="text-sm font-medium">Dependencies</div>
+                    {dependencyItems.map(({ id, task: depTask }) => (
+                        <div key={id} className="rounded-md border px-3 py-2">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span className="font-mono">#{depTask?.idShort || id}</span>
+                                {depTask?.currentStatus && (
+                                    <Badge variant="outline" className="h-5 text-[10px]">
+                                        {depTask.currentStatus}
+                                    </Badge>
+                                )}
+                            </div>
+                            <div className="mt-1 text-sm font-medium">
+                                {depTask?.title || depTask?.name || `Task ${id}`}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </PopoverContent>
+        </Popover>
     );
 }

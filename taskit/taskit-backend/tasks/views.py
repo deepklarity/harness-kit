@@ -3,6 +3,7 @@ import os
 import subprocess
 from datetime import datetime, time
 from pathlib import Path
+from collections import deque
 
 import yaml
 
@@ -21,8 +22,17 @@ from rest_framework.response import Response
 from .kanban_ordering import move_task
 from .models import (
     Board, BoardMembership, CommentAttachment, CommentType, Label,
-    ReflectionReport, ReflectionStatus, Spec, SpecComment, Task, TaskComment,
-    TaskHistory, TaskStatus, User,
+    ReflectionReport, ReflectionStatus, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
+    TaskComment, TaskHistory, TaskSchedule, TaskScheduleRun, TaskStatus, User,
+)
+from .scheduling import (
+    compute_schedule_next_run,
+    create_schedule,
+    maybe_finalize_schedule_run,
+    parse_local_datetime,
+    local_to_utc,
+    rebind_local_datetime,
+    ScheduleValidationError,
 )
 from .utils.logger import logger
 from .permissions import IsAdmin
@@ -38,6 +48,7 @@ from .serializers import (
     BoardMemberIdsSerializer,
     BoardSerializer,
     CreateBoardSerializer,
+    CreateScheduleSerializer,
     CommentAttachmentSerializer,
     CreateSpecSerializer,
     CreateTaskCommentSerializer,
@@ -53,6 +64,7 @@ from .serializers import (
     ReflectionReportUpdateSerializer,
     ReflectionRequestSerializer,
     RuntimeStopSerializer,
+    ScheduleStatusMutationSerializer,
     SpecDiagnosticSerializer,
     SpecListSerializer,
     SpecSerializer,
@@ -61,11 +73,13 @@ from .serializers import (
     TaskDashboardSerializer,
     TaskDetailSerializer,
     TaskHistorySerializer,
+    TaskScheduleSerializer,
     TaskListSerializer,
     TaskSearchResultSerializer,
     TaskSerializer,
     TaskWithHistorySerializer,
     UnassignTaskSerializer,
+    UpdateScheduleSerializer,
     UpdateTaskSerializer,
     UserSerializer,
 )
@@ -79,6 +93,7 @@ EXECUTING_LOCKED_MUTATION_FIELDS = {
     "assignee_id": "assignee",
     "model_name": "model",
 }
+WEEKDAY_KEYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 
 
@@ -437,7 +452,7 @@ def _record_change(histories, task, field_name, old_value, new_value, changed_by
     new_str = str(new_value) if new_value is not None else ""
     if old_str != new_str:
         histories.append(TaskHistory(
-            task=task, field_name=field_name,
+            task=task, schedule_run=task.current_schedule_run, field_name=field_name,
             old_value=old_str, new_value=new_str,
             changed_by=changed_by,
         ))
@@ -445,6 +460,92 @@ def _record_change(histories, task, field_name, old_value, new_value, changed_by
     return False
 
 
+def _normalize_dependency_ids(depends_on):
+    normalized = []
+    seen = set()
+    for raw in depends_on or []:
+        value = str(raw).strip()
+        if not value:
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _build_dependency_graph(board, pending_task_id=None, pending_depends_on=None):
+    graph = {
+        str(task.id): _normalize_dependency_ids(task.depends_on)
+        for task in Task.objects.filter(board=board).only("id", "depends_on")
+    }
+    if pending_task_id is not None:
+        graph[str(pending_task_id)] = _normalize_dependency_ids(pending_depends_on)
+    return graph
+
+
+def _would_create_dependency_cycle(board, task_id, depends_on):
+    task_key = str(task_id)
+    target_deps = set(_normalize_dependency_ids(depends_on))
+    if task_key in target_deps:
+        return True
+
+    graph = _build_dependency_graph(board, pending_task_id=task_key, pending_depends_on=depends_on)
+    queue = deque(target_deps)
+    visited = set()
+
+    while queue:
+        current = queue.popleft()
+        if current == task_key:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        queue.extend(graph.get(current, []))
+    return False
+
+
+def _validate_dependency_selection(board, depends_on, task=None):
+    normalized = _normalize_dependency_ids(depends_on)
+    if task and str(task.id) in normalized:
+        raise ValidationError({"depends_on": "Task cannot depend on itself."})
+
+    if not normalized:
+        return normalized
+
+    existing_ids = set(_normalize_dependency_ids(task.depends_on if task else []))
+    dep_map = {
+        str(dep.id): dep
+        for dep in Task.objects.filter(id__in=normalized).only("id", "board_id", "status")
+    }
+
+    missing = [dep_id for dep_id in normalized if dep_id not in dep_map]
+    if missing:
+        raise ValidationError({"depends_on": f"Dependency task(s) not found: {', '.join(missing)}"})
+
+    invalid_board = [dep_id for dep_id, dep in dep_map.items() if dep.board_id != board.id]
+    if invalid_board:
+        raise ValidationError({"depends_on": "Dependencies must belong to the same board."})
+
+    invalid_statuses = []
+    for dep_id in normalized:
+        if dep_id in existing_ids:
+            continue
+        dep = dep_map[dep_id]
+        if dep.status not in {TaskStatus.TODO, TaskStatus.IN_PROGRESS}:
+            invalid_statuses.append(f"{dep_id}:{dep.status}")
+    if invalid_statuses:
+        raise ValidationError({
+            "depends_on": (
+                "New dependencies must be in TODO or IN_PROGRESS. "
+                f"Invalid: {', '.join(invalid_statuses)}"
+            )
+        })
+
+    if task and _would_create_dependency_cycle(board, task.id, normalized):
+        raise ValidationError({"depends_on": "Dependency update would create a cycle."})
+
+    return normalized
 
 class StandardPagination(PageNumberPagination):
     page_size = 25
@@ -497,6 +598,14 @@ def _apply_date_range(qs, query_params, field_name, from_key, to_key):
     if to_raw:
         qs = qs.filter(**{f"{field_name}__lte": _parse_iso_datetime(to_raw, end_of_day=True)})
     return qs
+
+
+def _exclude_hidden_scheduled_tasks(qs):
+    return qs.exclude(
+        schedule_id__isnull=False,
+        schedule__status__in=[ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED],
+        status__in=[TaskStatus.BACKLOG, TaskStatus.TODO, TaskStatus.REVIEW, TaskStatus.TESTING, TaskStatus.DONE, TaskStatus.FAILED],
+    )
 
 
 def _parse_sort_tokens(sort_raw, allowed_fields, default_tokens):
@@ -952,6 +1061,182 @@ class BoardViewSet(viewsets.ModelViewSet):
         board.save(update_fields=["working_dir", "odin_initialized", "updated_at"])
         return Response(BoardSerializer(board).data)
 
+
+class ScheduleViewSet(viewsets.ModelViewSet):
+    serializer_class = TaskScheduleSerializer
+    pagination_class = StandardPagination
+
+    def get_queryset(self):
+        qs = TaskSchedule.objects.select_related(
+            "board", "template_assignee", "materialized_task", "last_released_run"
+        ).prefetch_related("runs")
+        query_params = self.request.query_params
+
+        board_ids = _parse_multi_values(query_params, "board_id", aliases=("board",))
+        if board_ids:
+            qs = qs.filter(board_id__in=board_ids)
+
+        statuses = _parse_multi_values(query_params, "status")
+        if statuses:
+            qs = qs.filter(status__in=statuses)
+
+        kinds = _parse_multi_values(query_params, "kind")
+        if kinds:
+            qs = qs.filter(kind__in=kinds)
+
+        history_mode = str(query_params.get("history") or "").lower() in ("1", "true", "yes")
+        if history_mode:
+            qs = qs.filter(
+                Q(status__in=[ScheduleStatus.COMPLETED, ScheduleStatus.CANCELED])
+                | Q(runs__finished_at_utc__isnull=False)
+            ).distinct()
+        else:
+            qs = qs.exclude(status__in=[ScheduleStatus.COMPLETED, ScheduleStatus.CANCELED])
+
+        return qs.order_by("next_run_at_utc", "id")
+
+    def create(self, request, *args, **kwargs):
+        ser = CreateScheduleSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        board = get_object_or_404(Board, pk=data["board_id"])
+        created_by = data.get("created_by", "")
+        if data.get("created_by_user_id"):
+            created_by = get_object_or_404(User, pk=data["created_by_user_id"]).email
+        try:
+            starts_at_local = parse_local_datetime(data["starts_at_local"], data["timezone"])
+        except ScheduleValidationError as exc:
+            raise ValidationError({exc.field: exc.message}) from exc
+        schedule = create_schedule(
+            board=board,
+            kind=data["kind"],
+            timezone_name=data["timezone"],
+            starts_at_local=starts_at_local,
+            template=data["template"],
+            recurrence_rule=data.get("recurrence_rule") or {},
+            created_by=created_by,
+        )
+        return Response(TaskScheduleSerializer(schedule).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, *args, **kwargs):
+        schedule = self.get_object()
+        ser = UpdateScheduleSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        effective_timezone = data.get("timezone", schedule.timezone)
+        try:
+            if "starts_at_local" in data:
+                effective_starts_at_local = parse_local_datetime(data["starts_at_local"], effective_timezone)
+            elif "timezone" in data:
+                effective_starts_at_local = rebind_local_datetime(
+                    schedule.starts_at_local,
+                    schedule.timezone,
+                    effective_timezone,
+                )
+            else:
+                effective_starts_at_local = schedule.starts_at_local
+        except ScheduleValidationError as exc:
+            raise ValidationError({exc.field: exc.message}) from exc
+        effective_recurrence = data.get("recurrence_rule", schedule.recurrence_rule or {})
+        if "starts_at_local" in data and effective_starts_at_local <= timezone.now().astimezone(effective_starts_at_local.tzinfo):
+            raise ValidationError({
+                "starts_at_local": "Scheduled start time must be in the future.",
+            })
+        if schedule.kind == ScheduleKind.RECURRING:
+            if effective_recurrence.get("freq") == "WEEKLY":
+                weekdays = effective_recurrence.get("by_weekday") or []
+                expected = WEEKDAY_KEYS[effective_starts_at_local.weekday()]
+                if weekdays and expected not in weekdays:
+                    raise ValidationError({
+                        "recurrence_rule": f"Weekly recurrence must include the first scheduled weekday: {expected}."
+                    })
+            if effective_recurrence.get("freq") == "MONTHLY":
+                monthdays = effective_recurrence.get("by_monthday") or []
+                if monthdays and effective_starts_at_local.day not in monthdays:
+                    raise ValidationError({
+                        "recurrence_rule": f"Monthly recurrence must include the first scheduled day: {effective_starts_at_local.day}."
+                    })
+        if "timezone" in data:
+            schedule.timezone = effective_timezone
+        if any(key in data for key in ("starts_at_local", "timezone")):
+            schedule.starts_at_local = effective_starts_at_local
+            schedule.starts_at_utc = local_to_utc(schedule.starts_at_local, effective_timezone)
+        if "template" in data:
+            template = data["template"]
+            schedule.template_title = template["title"]
+            schedule.template_description = template.get("description", "")
+            schedule.template_priority = template.get("priority", schedule.template_priority)
+            schedule.template_assignee_id = template.get("assignee_id")
+            schedule.template_model_name = template.get("model_name")
+            schedule.template_label_ids = template.get("label_ids", [])
+            schedule.template_depends_on = template.get("depends_on", [])
+            schedule.template_dev_eta_seconds = template.get("dev_eta_seconds")
+            schedule.template_spec_id = template.get("spec_id")
+            schedule.template_metadata = template.get("metadata", {})
+        if "recurrence_rule" in data:
+            schedule.recurrence_rule = data["recurrence_rule"]
+        if (
+            schedule.status in (ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED)
+            and any(key in data for key in ("starts_at_local", "timezone", "recurrence_rule"))
+        ):
+            now = timezone.now()
+            schedule.next_run_at_utc = compute_schedule_next_run(schedule, reference_utc=now)
+            if schedule.kind == ScheduleKind.ONE_TIME and schedule.next_run_at_utc is None:
+                raise ValidationError({
+                    "starts_at_local": "Scheduled start time must be in the future.",
+                })
+            if schedule.status == ScheduleStatus.PAUSED and schedule.next_run_at_utc is None:
+                schedule.status = ScheduleStatus.COMPLETED
+                schedule.completed_at = now
+        schedule.save()
+        return Response(TaskScheduleSerializer(schedule).data)
+
+    @action(detail=True, methods=["post"])
+    def pause(self, request, pk=None):
+        schedule = self.get_object()
+        ser = ScheduleStatusMutationSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        schedule.status = ScheduleStatus.PAUSED
+        schedule.paused_at = timezone.now()
+        schedule.save(update_fields=["status", "paused_at", "updated_at"])
+        return Response(TaskScheduleSerializer(schedule).data)
+
+    @action(detail=True, methods=["post"])
+    def resume(self, request, pk=None):
+        schedule = self.get_object()
+        ser = ScheduleStatusMutationSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        now = timezone.now()
+        schedule.status = ScheduleStatus.ACTIVE
+        schedule.paused_at = None
+        schedule.next_run_at_utc = compute_schedule_next_run(schedule, reference_utc=now)
+        if schedule.next_run_at_utc is None:
+            schedule.status = ScheduleStatus.COMPLETED
+            schedule.completed_at = now
+            schedule.save(update_fields=["status", "paused_at", "next_run_at_utc", "completed_at", "updated_at"])
+            return Response(TaskScheduleSerializer(schedule).data)
+        schedule.save(update_fields=["status", "paused_at", "next_run_at_utc", "updated_at"])
+        return Response(TaskScheduleSerializer(schedule).data)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        schedule = self.get_object()
+        ser = ScheduleStatusMutationSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        schedule.status = ScheduleStatus.CANCELED
+        schedule.canceled_at = timezone.now()
+        schedule.next_run_at_utc = None
+        schedule.save(update_fields=["status", "canceled_at", "next_run_at_utc", "updated_at"])
+        return Response(TaskScheduleSerializer(schedule).data)
+
+    def destroy(self, request, *args, **kwargs):
+        schedule = self.get_object()
+        schedule.status = ScheduleStatus.CANCELED
+        schedule.canceled_at = timezone.now()
+        schedule.next_run_at_utc = None
+        schedule.save(update_fields=["status", "canceled_at", "next_run_at_utc", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(detail=True, methods=["get"], url_path="members", url_name="members-list")
     def members(self, request, *args, **kwargs):
         """List board members."""
@@ -1269,6 +1554,7 @@ def _apply_stop_transition(task, target_status, updated_by, reason, stop_result)
 
     TaskHistory.objects.create(
         task=task,
+        schedule_run=task.current_schedule_run,
         field_name="status",
         old_value=TaskStatus.EXECUTING,
         new_value=target_status,
@@ -1277,11 +1563,13 @@ def _apply_stop_transition(task, target_status, updated_by, reason, stop_result)
 
     TaskComment.objects.create(
         task=task,
+        schedule_run=task.current_schedule_run,
         author_email=updated_by,
         author_label="taskit-ui",
         content=f"Execution stopped by user. Status changed to {target_status}.",
         comment_type=CommentType.STATUS_UPDATE,
     )
+    maybe_finalize_schedule_run(task, target_status)
 
     return {"task": _task_response(task.id), "stop": stop_result}
 
@@ -1297,6 +1585,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             .prefetch_related("labels")
             .annotate(comment_count=Count("comments"))
         )
+        qs = _exclude_hidden_scheduled_tasks(qs)
 
         board_ids = _parse_multi_values(query_params, "board_id", aliases=("board",))
         if board_ids:
@@ -1353,6 +1642,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         d = ser.validated_data
 
         board = get_object_or_404(Board, pk=d["board_id"])
+        normalized_depends_on = _validate_dependency_selection(board, d.get("depends_on", []))
 
         # Resolve created_by email from user ID if provided
         created_by = d.get("created_by", "")
@@ -1390,7 +1680,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             assignee=assignee,
             spec=spec,
             dev_eta_seconds=d.get("dev_eta_seconds"),
-            depends_on=d.get("depends_on", []),
+            depends_on=normalized_depends_on,
             complexity=d.get("complexity"),
             metadata=d.get("metadata", {}),
             model_name=model_name,
@@ -1432,6 +1722,19 @@ class TaskViewSet(viewsets.ModelViewSet):
         ser = UpdateTaskSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
+        if (
+            task.schedule_id
+            and task.schedule
+            and task.schedule.status in [ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED]
+            and task.schedule.next_run_at_utc
+            and task.schedule.next_run_at_utc > timezone.now()
+            and d.get("status") == TaskStatus.IN_PROGRESS
+            and task.status not in [TaskStatus.IN_PROGRESS, TaskStatus.EXECUTING]
+        ):
+            return Response(
+                {"detail": "This task is controlled by a schedule and cannot be started before its due time."},
+                status=status.HTTP_409_CONFLICT,
+            )
         lock_response = _check_executing_mutation_lock(task, d)
         if lock_response is not None:
             return lock_response
@@ -1442,6 +1745,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 raise ValidationError({"kanban_target_status": "Cannot differ from current status without status update."})
         updated_by = d["updated_by"]
         histories = []
+        normalized_depends_on = None
 
         old_status = task.status
         target_status = d.get("kanban_target_status") or d.get("status") or old_status
@@ -1474,10 +1778,11 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         # JSON fields — compare via json.dumps for stable comparison
         if "depends_on" in d:
-            old_json = json.dumps(task.depends_on)
-            new_json = json.dumps(d["depends_on"])
+            normalized_depends_on = _validate_dependency_selection(task.board, d["depends_on"], task=task)
+            old_json = json.dumps(_normalize_dependency_ids(task.depends_on))
+            new_json = json.dumps(normalized_depends_on)
             if _record_change(histories, task, "depends_on", old_json, new_json, updated_by):
-                task.depends_on = d["depends_on"]
+                task.depends_on = normalized_depends_on
 
         if "metadata" in d:
             old_json = json.dumps(task.metadata, sort_keys=True)
@@ -1543,6 +1848,9 @@ class TaskViewSet(viewsets.ModelViewSet):
         if "status" in d and d["status"] == TaskStatus.REVIEW and old_status != TaskStatus.REVIEW:
             _trigger_auto_reflection(task)
 
+        if "status" in d and d["status"] != old_status:
+            maybe_finalize_schedule_run(task, d["status"])
+
         return Response(_task_response(task.id))
 
     @action(detail=True, methods=["post"], url_path="stop_execution")
@@ -1593,7 +1901,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         if old_assignee != str(assignee.id):
             TaskHistory.objects.create(
-                task=task, field_name="assignee_id",
+                task=task, schedule_run=task.current_schedule_run, field_name="assignee_id",
                 old_value=old_assignee, new_value=str(assignee.id),
                 changed_by=ser.validated_data["updated_by"],
             )
@@ -1629,7 +1937,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         if old_assignee:
             TaskHistory.objects.create(
-                task=task, field_name="assignee_id",
+                task=task, schedule_run=task.current_schedule_run, field_name="assignee_id",
                 old_value=old_assignee, new_value="",
                 changed_by=ser.validated_data["updated_by"],
             )
@@ -1652,7 +1960,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         if old_labels != new_labels:
             TaskHistory.objects.create(
-                task=task, field_name="labels",
+                task=task, schedule_run=task.current_schedule_run, field_name="labels",
                 old_value=old_labels, new_value=new_labels,
                 changed_by=ser.validated_data["updated_by"],
             )
@@ -1672,7 +1980,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         if old_labels != new_labels:
             TaskHistory.objects.create(
-                task=task, field_name="labels",
+                task=task, schedule_run=task.current_schedule_run, field_name="labels",
                 old_value=old_labels, new_value=new_labels,
                 changed_by=ser.validated_data["updated_by"],
             )
@@ -1711,7 +2019,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         attachment_ids = data.pop("attachment_ids", [])
-        comment = TaskComment.objects.create(task=task, **data)
+        comment = TaskComment.objects.create(task=task, schedule_run=task.current_schedule_run, **data)
         # Link uploaded file attachments (screenshots) to this comment
         if attachment_ids:
             CommentAttachment.objects.filter(
@@ -1795,6 +2103,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         comment = TaskComment.objects.create(
             task=task,
+            schedule_run=task.current_schedule_run,
             author_email=ser.validated_data["author_email"],
             author_label=ser.validated_data.get("author_label", ""),
             content=ser.validated_data["content"],
@@ -1843,6 +2152,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         reply_comment = TaskComment.objects.create(
             task=task,
+            schedule_run=task.current_schedule_run,
             author_email=ser.validated_data["author_email"],
             author_label=ser.validated_data.get("author_label", ""),
             content=ser.validated_data["content"],
@@ -2038,7 +2348,21 @@ class TaskViewSet(viewsets.ModelViewSet):
             .prefetch_related("labels", "history", "comments"),
             pk=pk,
         )
-        return Response(TaskDetailSerializer(task, context={"request": request}).data)
+        data = TaskDetailSerializer(task, context={"request": request}).data
+        schedule_run_id = request.query_params.get("schedule_run_id")
+        if not schedule_run_id and task.schedule_id:
+            schedule_run_id = str(task.current_schedule_run_id or task.schedule.last_released_run_id or "")
+        if schedule_run_id:
+            comments = task.comments.filter(schedule_run_id=schedule_run_id)
+            histories = task.history.filter(schedule_run_id=schedule_run_id)
+            data["comments"] = TaskCommentSerializer(comments, many=True, context={"request": request}).data
+            data["history"] = TaskHistorySerializer(histories, many=True).data
+        if task.schedule_id:
+            data["schedule_runs"] = list(TaskScheduleRun.objects.filter(task=task).order_by("-scheduled_for_utc").values(
+                "id", "run_number", "scheduled_for_utc", "released_at_utc", "finished_at_utc",
+                "status", "terminal_task_status", "result_summary",
+            ))
+        return Response(data)
 
     @action(detail=True, methods=["post"], url_path="reflect")
     def reflect(self, request, pk=None):
@@ -2134,6 +2458,7 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
             comment_content = f"**Reflection: {verdict_label}**\n\n{report.verdict_summary}"
             TaskComment.objects.create(
                 task=report.task,
+                schedule_run=report.task.current_schedule_run,
                 author_email=report.requested_by or "system@odin.agent",
                 author_label=f"{report.reviewer_agent}/{report.reviewer_model}",
                 content=comment_content,
@@ -2160,11 +2485,13 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                 task.save(update_fields=["status"])
                 TaskHistory.objects.create(
                     task=task,
+                    schedule_run=task.current_schedule_run,
                     field_name="status",
                     old_value=old_status,
                     new_value=TaskStatus.TESTING,
                     changed_by="system@taskit",
                 )
+                maybe_finalize_schedule_run(task, TaskStatus.TESTING)
                 logger.info(
                     "Auto-advanced task %s from REVIEW → TESTING after reflection PASS",
                     task.id,
@@ -2190,6 +2517,7 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                     task.save(update_fields=["status"])
                     TaskHistory.objects.create(
                         task=task,
+                        schedule_run=task.current_schedule_run,
                         field_name="status",
                         old_value=old_status,
                         new_value=TaskStatus.FAILED,
@@ -2197,11 +2525,13 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                     )
                     TaskComment.objects.create(
                         task=task,
+                        schedule_run=task.current_schedule_run,
                         author_email="system@taskit",
                         author_label="system",
                         content="Task failed after 3 reflection attempts without passing.",
                         comment_type=CommentType.STATUS_UPDATE,
                     )
+                    maybe_finalize_schedule_run(task, TaskStatus.FAILED)
                     logger.info(
                         "Task %s FAILED after %d reflection attempts without passing",
                         task.id, completed_count,
@@ -2217,6 +2547,7 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                     task.save(update_fields=["status"])
                     TaskHistory.objects.create(
                         task=task,
+                        schedule_run=task.current_schedule_run,
                         field_name="status",
                         old_value=old_status,
                         new_value=TaskStatus.IN_PROGRESS,
@@ -2552,6 +2883,7 @@ def dashboard(request):
         .prefetch_related("labels", "history")
         .annotate(comment_count=Count("comments"))
     )
+    tasks_qs = _exclude_hidden_scheduled_tasks(tasks_qs)
 
     if board_id:
         specs_qs = specs_qs.filter(board_id=board_id)
@@ -2575,6 +2907,7 @@ def timeline(request):
         .prefetch_related("labels", "history")
         .annotate(comment_count=Count("comments"))
     )
+    qs = _exclude_hidden_scheduled_tasks(qs)
 
     board_ids = _parse_multi_values(query_params, "board_id", aliases=("board",))
     if board_ids:
@@ -2624,6 +2957,7 @@ def kanban(request):
         .annotate(comment_count=Count("comments"))
         .order_by("kanban_position", "id")
     )
+    qs = _exclude_hidden_scheduled_tasks(qs)
     if board_id:
         qs = qs.filter(board_id=board_id)
     qs = _apply_date_range(qs, query_params, "created_at", "date_from", "date_to")

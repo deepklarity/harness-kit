@@ -120,6 +120,25 @@ export interface Task {
         cache_read_input_tokens?: number;
         cache_creation_input_tokens?: number;
     } | null;
+    scheduleSummary?: {
+        id: number;
+        kind: 'ONE_TIME' | 'RECURRING';
+        status: 'ACTIVE' | 'PAUSED' | 'CANCELED' | 'COMPLETED';
+        timezone: string;
+        next_run_at_utc?: string | null;
+        materialized_task_id?: number | null;
+        current_run_id?: number | null;
+    } | null;
+    scheduleRuns?: Array<{
+        id: number;
+        run_number: number;
+        scheduled_for_utc: string;
+        released_at_utc?: string | null;
+        finished_at_utc?: string | null;
+        status: string;
+        terminal_task_status?: string | null;
+        result_summary?: string;
+    }>;
 }
 
 export interface Board {
@@ -127,6 +146,7 @@ export interface Board {
     name: string;
     isTrial?: boolean;
     workingDir?: string | null;
+    timezone?: string;
     odinInitialized?: boolean;
     memberIds: string[];
     agents?: AgentConfig[];
@@ -208,6 +228,49 @@ export interface PaginatedResponse<T> {
     next: string | null;
     previous: string | null;
     results: T[];
+}
+
+export interface TaskSchedule {
+    id: number;
+    board_id: number;
+    kind: 'ONE_TIME' | 'RECURRING';
+    status: 'ACTIVE' | 'PAUSED' | 'CANCELED' | 'COMPLETED';
+    timezone: string;
+    starts_at_local: string;
+    starts_at_utc: string;
+    next_run_at_utc?: string | null;
+    recurrence_rule?: Record<string, unknown>;
+    materialized_task_id?: number | null;
+    last_released_run_id?: number | null;
+    paused_at?: string | null;
+    canceled_at?: string | null;
+    completed_at?: string | null;
+    created_by: string;
+    created_at: string;
+    updated_at: string;
+    template: {
+        title: string;
+        description?: string;
+        priority?: string;
+        assignee_id?: number | null;
+        model_name?: string | null;
+        label_ids?: number[];
+        depends_on?: string[];
+        dev_eta_seconds?: number | null;
+        spec_id?: number | null;
+        metadata?: Record<string, unknown>;
+    };
+    runs?: Array<{
+        id: number;
+        run_number: number;
+        task_id?: number | null;
+        scheduled_for_utc: string;
+        released_at_utc?: string | null;
+        finished_at_utc?: string | null;
+        status: string;
+        terminal_task_status?: string | null;
+        result_summary?: string;
+    }>;
 }
 
 export interface TaskListQuery {
@@ -397,7 +460,7 @@ export interface PresetsResponse {
     presets: TaskPreset[];
 }
 
-export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications' | 'analytics';
+export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications' | 'analytics' | 'scheduling';
 
 // ─── Analytics Types ─────────────────────────────────────────
 

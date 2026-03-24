@@ -4,6 +4,7 @@ import { format, subDays } from 'date-fns';
 import type { Board, Label, Member, Task } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
 import { usePolling } from '@/hooks/usePolling';
+import { DependencyBoardView } from '@/components/DependencyBoardView';
 import { KanbanBoard } from '@/components/KanbanBoard';
 import { KanbanTaskSearch } from '@/components/KanbanTaskSearch';
 import { TimelineView } from '@/components/TimelineView';
@@ -14,13 +15,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ClipboardList, Columns3, Calendar, Plus, Terminal } from 'lucide-react';
+import { ClipboardList, Columns3, Calendar, GitBranch, Plus, Terminal } from 'lucide-react';
 import type { TaskSearchResult } from '@/services/integration/IntegrationService';
 import { didLeaveProgressStatus, markExecutionTransitionUnseen } from '@/utils/unseenStatusTransitions';
 
 // ─── Types ──────────────────────────────────────────────────
 
-type BoardView = 'list' | 'kanban' | 'timeline';
+type BoardView = 'list' | 'kanban' | 'timeline' | 'dependencies';
 
 interface BoardPageProps {
     selectedBoard?: string;
@@ -30,6 +31,10 @@ interface BoardPageProps {
     members: Member[];
     labels: Label[];
     currentBoard?: Board | null;
+    dependencyTasks?: Task[];
+    dependencyTasksLoading?: boolean;
+    onEnsureDependencyTasks?: (boardId: string, force?: boolean) => Promise<void> | void;
+    onDependenciesSaved?: (taskIds: string[]) => Promise<void> | void;
     onTaskClick: (task: Task) => void;
     onTaskMove: (taskId: string, move: { status: string; targetIndex?: number }) => Promise<boolean>;
     onStopExecution: (taskId: string, targetStatus: string) => Promise<boolean>;
@@ -42,6 +47,7 @@ const VIEW_OPTIONS: { value: BoardView; label: string; icon: typeof ClipboardLis
     { value: 'list', label: 'List', icon: ClipboardList },
     { value: 'kanban', label: 'Kanban', icon: Columns3 },
     { value: 'timeline', label: 'Timeline', icon: Calendar },
+    { value: 'dependencies', label: 'DAG', icon: GitBranch },
 ];
 
 function ViewToggle({ value, onChange }: { value: BoardView; onChange: (v: BoardView) => void }) {
@@ -582,6 +588,10 @@ export function BoardPage({
     members,
     labels,
     currentBoard,
+    dependencyTasks,
+    dependencyTasksLoading,
+    onEnsureDependencyTasks,
+    onDependenciesSaved,
     onTaskClick,
     onTaskMove,
     onStopExecution,
@@ -589,7 +599,7 @@ export function BoardPage({
 }: BoardPageProps) {
     const [searchParams, setSearchParams] = useSearchParams();
     const rawView = searchParams.get('view');
-    const view: BoardView = rawView === 'list' || rawView === 'timeline' ? rawView : 'kanban';
+    const view: BoardView = rawView === 'list' || rawView === 'timeline' || rawView === 'dependencies' ? rawView : 'kanban';
 
     const setView = useCallback((v: BoardView) => {
         setSearchParams(prev => {
@@ -644,6 +654,15 @@ export function BoardPage({
                     members={members}
                     onTaskClick={onTaskClick}
                     onDeleteTask={onDeleteTask}
+                />
+            )}
+            {view === 'dependencies' && (
+                <DependencyBoardView
+                    boardId={selectedBoard}
+                    allTasks={dependencyTasks || []}
+                    loading={dependencyTasksLoading}
+                    onEnsureTasks={onEnsureDependencyTasks}
+                    onSaved={onDependenciesSaved}
                 />
             )}
         </div>

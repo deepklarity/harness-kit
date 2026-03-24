@@ -71,6 +71,7 @@ class Board(models.Model):
     description = models.TextField(default="", blank=True)
     is_trial = models.BooleanField(default=False)
     working_dir = models.CharField(max_length=1024, null=True, blank=True, unique=True)
+    timezone = models.CharField(max_length=64, default="UTC")
     odin_initialized = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -157,12 +158,115 @@ class Task(models.Model):
     complexity = models.CharField(max_length=20, null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     model_name = models.CharField(max_length=255, null=True, blank=True)
+    schedule = models.ForeignKey(
+        "TaskSchedule", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="materialized_tasks",
+    )
+    current_schedule_run = models.ForeignKey(
+        "TaskScheduleRun", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="active_tasks",
+    )
 
     class Meta:
         db_table = "tasks"
 
     def __str__(self):
         return self.title
+
+
+class ScheduleKind(models.TextChoices):
+    ONE_TIME = "ONE_TIME"
+    RECURRING = "RECURRING"
+
+
+class ScheduleStatus(models.TextChoices):
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    CANCELED = "CANCELED"
+    COMPLETED = "COMPLETED"
+
+
+class ScheduleRunStatus(models.TextChoices):
+    PENDING_RELEASE = "PENDING_RELEASE"
+    RELEASED = "RELEASED"
+    SKIPPED_OVERLAP = "SKIPPED_OVERLAP"
+    COMPLETED_SUCCESS = "COMPLETED_SUCCESS"
+    COMPLETED_FAILED = "COMPLETED_FAILED"
+    CANCELED = "CANCELED"
+
+
+class TaskSchedule(models.Model):
+    board = models.ForeignKey(Board, on_delete=models.CASCADE, related_name="schedules")
+    kind = models.CharField(max_length=20, choices=ScheduleKind.choices)
+    status = models.CharField(max_length=20, choices=ScheduleStatus.choices, default=ScheduleStatus.ACTIVE)
+    timezone = models.CharField(max_length=64)
+    template_title = models.CharField(max_length=255)
+    template_description = models.TextField(default="", blank=True)
+    template_priority = models.CharField(
+        max_length=20, choices=TaskPriority.choices, default=TaskPriority.MEDIUM,
+    )
+    template_assignee = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="scheduled_tasks",
+    )
+    template_model_name = models.CharField(max_length=255, null=True, blank=True)
+    template_label_ids = models.JSONField(default=list, blank=True)
+    template_depends_on = models.JSONField(default=list, blank=True)
+    template_dev_eta_seconds = models.BigIntegerField(null=True, blank=True)
+    template_spec = models.ForeignKey(
+        Spec, on_delete=models.SET_NULL, null=True, blank=True, related_name="schedules",
+    )
+    template_metadata = models.JSONField(default=dict, blank=True)
+    starts_at_local = models.DateTimeField()
+    starts_at_utc = models.DateTimeField()
+    next_run_at_utc = models.DateTimeField(null=True, blank=True, db_index=True)
+    recurrence_rule = models.JSONField(default=dict, blank=True)
+    materialized_task = models.ForeignKey(
+        Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="origin_schedule",
+    )
+    last_released_run = models.ForeignKey(
+        "TaskScheduleRun", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+    paused_at = models.DateTimeField(null=True, blank=True)
+    canceled_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "task_schedules"
+        ordering = ["next_run_at_utc", "id"]
+
+    def __str__(self):
+        return f"Schedule {self.id} ({self.kind})"
+
+
+class TaskScheduleRun(models.Model):
+    schedule = models.ForeignKey(TaskSchedule, on_delete=models.CASCADE, related_name="runs")
+    run_number = models.IntegerField(default=1)
+    task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True, related_name="schedule_runs")
+    scheduled_for_utc = models.DateTimeField(db_index=True)
+    released_at_utc = models.DateTimeField(null=True, blank=True)
+    finished_at_utc = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=32, choices=ScheduleRunStatus.choices, default=ScheduleRunStatus.PENDING_RELEASE)
+    terminal_task_status = models.CharField(max_length=20, choices=TaskStatus.choices, null=True, blank=True)
+    release_reason = models.TextField(blank=True, default="")
+    result_summary = models.TextField(blank=True, default="")
+    template_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "task_schedule_runs"
+        ordering = ["-scheduled_for_utc", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["schedule", "scheduled_for_utc"],
+                name="uniq_schedule_occurrence",
+            ),
+        ]
+
+    def __str__(self):
+        return f"ScheduleRun {self.id} for schedule {self.schedule_id}"
 
 
 class BoardMembership(models.Model):
@@ -193,6 +297,9 @@ class TaskComment(models.Model):
     """Deliberate message attached to a task by an agent or human."""
 
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="comments")
+    schedule_run = models.ForeignKey(
+        "TaskScheduleRun", on_delete=models.SET_NULL, null=True, blank=True, related_name="comments",
+    )
     author_email = models.EmailField()
     author_label = models.CharField(max_length=255, blank=True)
     content = models.TextField()
@@ -307,6 +414,9 @@ class ReflectionReport(models.Model):
 
 class TaskHistory(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="history")
+    schedule_run = models.ForeignKey(
+        "TaskScheduleRun", on_delete=models.SET_NULL, null=True, blank=True, related_name="history_entries",
+    )
     field_name = models.CharField(max_length=255)
     old_value = models.TextField(default="", blank=True)
     new_value = models.TextField(default="", blank=True)

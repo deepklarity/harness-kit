@@ -17,6 +17,7 @@ import type {
     ProcessMonitorResponse,
     ForcedProviderStatus,
     AnalyticsCostSummary,
+    TaskSchedule,
 } from '../../types';
 
 export interface AuthState {
@@ -67,6 +68,13 @@ export interface IntegrationService {
     fetchTimelinePage(query: TimelineQuery): Promise<PaginatedResponse<Task>>;
     fetchKanban(boardId?: string, query?: { date_from?: string; date_to?: string }): Promise<Task[]>;
     searchTasks(query: { q: string; scope: 'board' | 'global'; boardId?: string; limit?: number }): Promise<TaskSearchResult[]>;
+    fetchSchedules(query?: { board?: string; status?: string[]; kind?: string[]; history?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<TaskSchedule>>;
+    createSchedule(payload: Record<string, unknown>): Promise<TaskSchedule>;
+    updateSchedule(scheduleId: string, payload: Record<string, unknown>): Promise<TaskSchedule>;
+    pauseSchedule(scheduleId: string): Promise<TaskSchedule>;
+    resumeSchedule(scheduleId: string): Promise<TaskSchedule>;
+    cancelSchedule(scheduleId: string): Promise<TaskSchedule>;
+    deleteSchedule(scheduleId: string): Promise<void>;
     suggestDirectories(query: string, limit?: number): Promise<DirectoryEntry[]>;
     listDirectoryChildren(path: string, limit?: number): Promise<DirectoryEntry[]>;
 
@@ -93,11 +101,13 @@ export interface IntegrationService {
             assigneeId?: number;
             modelName?: string;
             labelIds?: number[];
+            dependsOn?: string[];
             workingDir?: string;
         }
     ): Promise<unknown>;
     updateTask(taskId: string, updates: {
         title?: string; description?: string; priority?: string; devEta?: number; status?: string;
+        labelIds?: number[]; modelName?: string; dependsOn?: string[];
         kanbanTargetIndex?: number; kanbanTargetStatus?: string;
     }): Promise<void>;
     stopExecution(taskId: string, targetStatus: string): Promise<void>;

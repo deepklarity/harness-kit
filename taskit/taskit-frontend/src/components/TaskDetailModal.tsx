@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Task, Member, Label, TaskComment } from '../types';
+import { collectDownstreamTaskIds } from '../utils/dagUtils';
 import { formatDate, formatDuration, getStatusColor } from '../utils/transformer';
 import { parseActor } from '../services/harness/HarnessTimeService';
 import { CountdownTimer } from './CountdownTimer';
@@ -30,7 +31,6 @@ import {
     Pencil, Search, Trash2, Eye, Code, FileText, FolderOpen,
     GitBranch, Package, Terminal, User, ChevronRight,
     HelpCircle, CornerDownRight, Send, ShieldCheck, Sparkles, Loader2,
-    Copy, Check,
 } from 'lucide-react';
 import { useService } from '../contexts/ServiceContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -49,7 +49,7 @@ interface TaskDetailModalProps {
     allTasks?: Task[];
     memberMap?: Map<string, Member>;
     onUpdateAssignees: (taskId: string, memberIds: string[]) => void;
-    onUpdateTask: (taskId: string, updates: Record<string, unknown>) => void;
+    onUpdateTask: (taskId: string, updates: Record<string, unknown>) => Promise<void> | void;
     onSelectTask?: (taskId: string) => void;
     availableStatuses: string[];
     onDeleteTask?: (taskId: string) => void;
@@ -86,6 +86,9 @@ export function TaskDetailModal({
     const [selectedAssignee, setSelectedAssignee] = useState<string | null>(null);
     const [assigneeSearch, setAssigneeSearch] = useState('');
     const [showRawJson, setShowRawJson] = useState(false);
+    const [showDependencyPicker, setShowDependencyPicker] = useState(false);
+    const [dependencyDraft, setDependencyDraft] = useState<string[]>([]);
+    const [savingDependencies, setSavingDependencies] = useState(false);
 
     const [showAllHistory, setShowAllHistory] = useState(false);
     const [showAllComments, setShowAllComments] = useState(false);
@@ -202,6 +205,24 @@ export function TaskDetailModal({
         });
         return map;
     }, [allTasks]);
+
+    const boardTasks = useMemo(
+        () => (allTasks || []).filter(t => t.boardId === task.boardId),
+        [allTasks, task.boardId],
+    );
+    const downstreamTaskIds = useMemo(
+        () => collectDownstreamTaskIds(boardTasks, task.id),
+        [boardTasks, task.id],
+    );
+    const activeDependencyCandidates = useMemo(
+        () => boardTasks.filter(t =>
+            t.id !== task.id
+            && !downstreamTaskIds.has(t.id)
+            && (t.currentStatus === 'TODO' || t.currentStatus === 'IN_PROGRESS')
+        ),
+        [boardTasks, downstreamTaskIds, task.id],
+    );
+    const currentDependencyIds = useMemo(() => task.dependsOn || [], [task.dependsOn]);
 
     // Filter mutations for the activity feed
     const VISIBLE_FIELDS = new Set(['created', 'status', 'assignee_id']);
@@ -401,6 +422,22 @@ export function TaskDetailModal({
             onUpdateTask(task.id, { [updateKey]: finalValue });
         }
         setEditingField(null);
+    };
+
+    const openDependencyPicker = () => {
+        setDependencyDraft(currentDependencyIds);
+        setShowDependencyPicker(true);
+    };
+
+    const handleSaveDependencies = async () => {
+        setSavingDependencies(true);
+        try {
+            await onUpdateTask(task.id, { dependsOn: dependencyDraft });
+            setShowDependencyPicker(false);
+            await onRefresh?.(task.id);
+        } finally {
+            setSavingDependencies(false);
+        }
     };
 
     const filteredMembers = allMembers.filter(m =>
@@ -679,6 +716,43 @@ export function TaskDetailModal({
                                 <span className="text-xs font-mono text-muted-foreground">{task.createdAt ? formatDate(task.createdAt) : '\u2014'}</span>
                             </CompactRow>
 
+                            {task.scheduleSummary ? (
+                                <div className="py-2 border-b border-border/30">
+                                    <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-semibold mb-2">Scheduling</div>
+                                    <div className="space-y-1 text-xs">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="text-muted-foreground">Mode</span>
+                                            <span className="font-mono">{task.scheduleSummary.kind}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="text-muted-foreground">Schedule Status</span>
+                                            <span className="font-mono">{task.scheduleSummary.status}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="text-muted-foreground">Timezone</span>
+                                            <span className="font-mono">{task.scheduleSummary.timezone}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="text-muted-foreground">Next Run</span>
+                                            <span className="font-mono">{task.scheduleSummary.next_run_at_utc ? formatDate(task.scheduleSummary.next_run_at_utc) : '\u2014'}</span>
+                                        </div>
+                                        {task.scheduleRuns && task.scheduleRuns.length > 0 ? (
+                                            <div className="pt-2 border-t border-border/30">
+                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">Recent Schedule Runs</div>
+                                                <div className="space-y-1">
+                                                    {task.scheduleRuns.slice(0, 4).map(run => (
+                                                        <div key={run.id} className="flex items-center justify-between gap-3">
+                                                            <span className="text-muted-foreground">#{run.run_number}</span>
+                                                            <span className="font-mono text-[11px]">{run.status}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            ) : null}
+
                             {/* Cost & Tokens — show for any executed task, with placeholders when data is missing */}
                             {(execMetrics.usage?.total_tokens || execMetrics.durationMs || ['REVIEW', 'DONE', 'FAILED', 'TESTING'].includes(task.currentStatus)) && (
                                 <div className="py-2 border-b border-border/30">
@@ -743,7 +817,7 @@ export function TaskDetailModal({
                                         </CompactRow>
                                     )}
 
-                                    {!!task.metadata?.routing_reasoning && (
+                                    {typeof task.metadata?.routing_reasoning === 'string' && (
                                         <CompactRow label="Routing" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />} noBorder>
                                             <span className="text-[10px] font-mono text-muted-foreground/80 leading-snug">{task.metadata.routing_reasoning as string}</span>
                                         </CompactRow>
@@ -773,29 +847,62 @@ export function TaskDetailModal({
                                         </CompactRow>
                                     )}
 
-                                    {task.dependsOn && task.dependsOn.length > 0 && (
-                                        <CompactRow label="Depends On" noBorder>
-                                            <div className="space-y-1">
-                                                {task.dependsOn.map(dep => {
-                                                    const depTask = taskMap.get(dep);
-                                                    const isClickable = !!(depTask && onSelectTask);
-                                                    return (
-                                                        <div key={dep}
-                                                            className={`flex items-center gap-1.5 text-xs bg-secondary/50 rounded px-2 py-1 ${isClickable ? 'cursor-pointer hover:bg-secondary/80 transition-colors' : ''}`}
-                                                            onClick={isClickable ? () => onSelectTask!(depTask!.id) : undefined}>
-                                                            <span className="text-muted-foreground font-mono text-[10px] shrink-0">#{dep}</span>
-                                                            <span className={`font-medium truncate ${isClickable ? 'text-primary hover:underline' : ''}`}>{depTask?.title || depTask?.name || `Task ${dep}`}</span>
-                                                            {depTask && (
-                                                                <Badge className="ml-auto shrink-0 text-[9px] px-1 py-0 border-0" style={{ background: `${getStatusColor(depTask.currentStatus)}20`, color: getStatusColor(depTask.currentStatus) }}>
-                                                                    {depTask.currentStatus}
-                                                                </Badge>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })}
+                                    <CompactRow label="Dependencies" noBorder>
+                                        <div className="w-full space-y-2">
+                                            <div className="flex justify-end">
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-6 px-2 text-[10px]"
+                                                    onClick={openDependencyPicker}
+                                                >
+                                                    Manage Dependencies
+                                                </Button>
                                             </div>
-                                        </CompactRow>
-                                    )}
+                                            {currentDependencyIds.length > 0 ? (
+                                                <div className="space-y-1.5">
+                                                    {currentDependencyIds.map(dep => {
+                                                        const depTask = taskMap.get(dep);
+                                                        const isClickable = !!(depTask && onSelectTask);
+                                                        return (
+                                                            <div
+                                                                key={dep}
+                                                                className={`flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-2.5 py-2 ${isClickable ? 'cursor-pointer hover:bg-muted/60 transition-colors' : ''}`}
+                                                                onClick={isClickable ? () => onSelectTask!(depTask!.id) : undefined}
+                                                            >
+                                                                <span className="shrink-0 rounded bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                                                    #{depTask?.idShort || dep}
+                                                                </span>
+                                                                <span className={`min-w-0 truncate text-xs font-medium ${isClickable ? 'text-primary hover:underline' : ''}`}>
+                                                                    {depTask?.title || depTask?.name || `Task ${dep}`}
+                                                                </span>
+                                                                {depTask && (
+                                                                    <Badge
+                                                                        className="ml-auto shrink-0 border-0 px-1.5 py-0 text-[9px]"
+                                                                        style={{ background: `${getStatusColor(depTask.currentStatus)}20`, color: getStatusColor(depTask.currentStatus) }}
+                                                                    >
+                                                                        {depTask.currentStatus}
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center justify-between rounded-md border border-dashed border-border/70 px-2.5 py-2">
+                                                    <span className="text-xs text-muted-foreground">No dependencies</span>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-6 px-2 text-[10px]"
+                                                        onClick={openDependencyPicker}
+                                                    >
+                                                        Add
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </CompactRow>
 
                                 </CollapsibleSection>
                             )}
@@ -1187,6 +1294,78 @@ export function TaskDetailModal({
                     onSubmit={handleTriggerReflection}
                 />
             )}
+
+            <Dialog open={showDependencyPicker} onOpenChange={setShowDependencyPicker}>
+                <DialogContent className="sm:max-w-[640px]">
+                    <DialogHeader>
+                        <DialogTitle>Edit Dependencies</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm text-muted-foreground">
+                            Select active tasks from this board. Tasks that already depend on this one are hidden to prevent cycles.
+                        </p>
+                        <ScrollArea className="h-[360px] rounded-md border">
+                            <div className="p-3 space-y-2">
+                                {currentDependencyIds
+                                    .filter(depId => !activeDependencyCandidates.some(taskItem => taskItem.id === depId))
+                                    .map(depId => {
+                                        const depTask = taskMap.get(depId) || boardTasks.find(taskItem => taskItem.id === depId);
+                                        return (
+                                            <label key={`existing-${depId}`} className="flex items-start gap-3 rounded-md border p-3">
+                                                <Checkbox
+                                                    checked={dependencyDraft.includes(depId)}
+                                                    onCheckedChange={(next) => {
+                                                        setDependencyDraft(prev => next ? [...prev, depId] : prev.filter(id => id !== depId));
+                                                    }}
+                                                />
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                        <span className="font-mono">#{depTask?.idShort || depId}</span>
+                                                        <Badge variant="outline" className="h-5 text-[10px]">
+                                                            {depTask?.currentStatus || 'UNKNOWN'}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="mt-1 text-sm font-medium">{depTask?.title || depTask?.name || `Task ${depId}`}</div>
+                                                    <div className="mt-1 text-xs text-muted-foreground">Existing inactive dependency</div>
+                                                </div>
+                                            </label>
+                                        );
+                                    })}
+                                {activeDependencyCandidates.map(depTask => (
+                                    <label key={depTask.id} className="flex items-start gap-3 rounded-md border p-3">
+                                        <Checkbox
+                                            checked={dependencyDraft.includes(depTask.id)}
+                                            onCheckedChange={(next) => {
+                                                setDependencyDraft(prev => next ? [...prev, depTask.id] : prev.filter(id => id !== depTask.id));
+                                            }}
+                                        />
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                <span className="font-mono">#{depTask.idShort}</span>
+                                                <Badge variant="outline" className="h-5 text-[10px]">{depTask.currentStatus}</Badge>
+                                            </div>
+                                            <div className="mt-1 text-sm font-medium">{depTask.title || depTask.name}</div>
+                                        </div>
+                                    </label>
+                                ))}
+                                {currentDependencyIds.filter(depId => !activeDependencyCandidates.some(taskItem => taskItem.id === depId)).length === 0
+                                    && activeDependencyCandidates.length === 0 && (
+                                    <p className="text-sm text-muted-foreground">
+                                        No current-board tasks in To Do or In Progress are available to add as dependencies.
+                                    </p>
+                                )}
+                            </div>
+                        </ScrollArea>
+                        <div className="flex justify-end gap-2">
+                            <Button variant="outline" onClick={() => setShowDependencyPicker(false)} disabled={savingDependencies}>Cancel</Button>
+                            <Button onClick={handleSaveDependencies} disabled={savingDependencies}>
+                                {savingDependencies ? 'Saving...' : 'Save'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
         </Dialog>
     );
 }

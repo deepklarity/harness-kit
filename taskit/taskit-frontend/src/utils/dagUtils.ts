@@ -41,6 +41,17 @@ function matchesKeywords(status: string, keywords: string[]): boolean {
   return keywords.some(k => lower.includes(k))
 }
 
+function compareTaskIds(a: Task, b: Task): number {
+  const aNum = Number(a.idShort ?? a.id)
+  const bNum = Number(b.idShort ?? b.id)
+  const aValid = Number.isFinite(aNum)
+  const bValid = Number.isFinite(bNum)
+  if (aValid && bValid) return aNum - bNum
+  if (aValid) return -1
+  if (bValid) return 1
+  return String(a.id).localeCompare(String(b.id))
+}
+
 // ─── Exported functions ───
 
 /**
@@ -124,6 +135,30 @@ export function classifyEdge(sourceTask: Task): 'satisfied' | 'active' | 'blocke
   return 'pending'
 }
 
+export function collectDownstreamTaskIds(tasks: Task[], rootTaskId: string): Set<string> {
+  const dependentsById = new Map<string, string[]>()
+
+  tasks.forEach(task => {
+    for (const depId of task.dependsOn ?? []) {
+      const next = dependentsById.get(depId) || []
+      next.push(task.id)
+      dependentsById.set(depId, next)
+    }
+  })
+
+  const downstreamIds = new Set<string>()
+  const stack = [...(dependentsById.get(rootTaskId) || [])]
+
+  while (stack.length > 0) {
+    const taskId = stack.pop()!
+    if (downstreamIds.has(taskId)) continue
+    downstreamIds.add(taskId)
+    stack.push(...(dependentsById.get(taskId) || []))
+  }
+
+  return downstreamIds
+}
+
 /**
  * Compute DAG layout using dagre's Sugiyama algorithm.
  * Returns positioned nodes and edge paths. Skips edges to nonexistent tasks.
@@ -133,6 +168,8 @@ export function computeDagLayout(tasks: Task[]): DagLayout {
   if (tasks.length === 0) {
     return { nodes: [], edges: [], width: 0, height: 0 }
   }
+
+  const orderedTasks = [...tasks].sort(compareTaskIds)
 
   const g = new dagre.graphlib.Graph()
   g.setGraph({
@@ -144,14 +181,14 @@ export function computeDagLayout(tasks: Task[]): DagLayout {
   })
   g.setDefaultEdgeLabel(() => ({}))
 
-  const taskIds = new Set(tasks.map(t => t.id))
-  for (const task of tasks) {
+  const taskIds = new Set(orderedTasks.map(t => t.id))
+  for (const task of orderedTasks) {
     g.setNode(task.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
   }
 
   // Collect valid edges, skipping nonexistent targets
   const validEdges: { source: string; target: string }[] = []
-  for (const task of tasks) {
+  for (const task of orderedTasks) {
     for (const dep of task.dependsOn ?? []) {
       if (taskIds.has(dep)) {
         validEdges.push({ source: dep, target: task.id })

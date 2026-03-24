@@ -24,6 +24,7 @@ import type {
     ProcessMonitorResponse,
     ForcedProviderStatus,
     AnalyticsCostSummary,
+    TaskSchedule,
 } from '../../types';
 
 export interface ParsedActor {
@@ -55,6 +56,7 @@ interface HarnessBoard {
     description?: string;
     is_trial?: boolean;
     working_dir?: string | null;
+    timezone?: string;
     odin_initialized?: boolean;
     member_ids?: number[];
     agents?: AgentConfig[];
@@ -120,6 +122,15 @@ interface HarnessTask {
     comments?: HarnessTaskComment[];
     comment_count?: number;
     reference_images?: Array<Record<string, unknown>>;
+    schedule_summary?: {
+        id: number;
+        kind: 'ONE_TIME' | 'RECURRING';
+        status: 'ACTIVE' | 'PAUSED' | 'CANCELED' | 'COMPLETED';
+        timezone: string;
+        next_run_at_utc?: string | null;
+        materialized_task_id?: number | null;
+        current_run_id?: number | null;
+    } | null;
 }
 
 interface HarnessTaskSearchResult {
@@ -197,6 +208,16 @@ interface HarnessSpec {
 
 interface HarnessTaskDetail extends HarnessTask {
     spec_title?: string;
+    schedule_runs?: Array<{
+        id: number;
+        run_number: number;
+        scheduled_for_utc: string;
+        released_at_utc?: string | null;
+        finished_at_utc?: string | null;
+        status: string;
+        terminal_task_status?: string | null;
+        result_summary?: string;
+    }>;
 }
 
 interface PaginatedResponseBody<T> {
@@ -560,6 +581,8 @@ export class HarnessTimeService implements IntegrationService {
                 uploadedBy: a.uploaded_by as string,
                 createdAt: a.created_at as string,
             })),
+            scheduleSummary: raw.schedule_summary ?? undefined,
+            scheduleRuns: raw.schedule_runs ?? undefined,
         };
     }
 
@@ -647,22 +670,23 @@ export class HarnessTimeService implements IntegrationService {
         const boards = raw.results.map(b => {
             this.cachedBoardNames.set(String(b.id), b.name);
             const boardMemberIds = (b.member_ids || []).map(String);
-                return {
-                    id: String(b.id),
-                    name: b.name,
-                    isTrial: b.is_trial || false,
-                    workingDir: b.working_dir || null,
-                    odinInitialized: b.odin_initialized || false,
-                    memberIds: boardMemberIds,
-                    agents: (b as any).agents,
-                    tasks: [],
-                    members: [],
-                    lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'],
-                    totalActions: 0,
-                    createdAt: b.created_at || new Date().toISOString(),
-                    taskCount: (b as any).task_count || 0,
-                    memberCount: (b as any).member_count || 0,
-                };
+            return {
+                id: String(b.id),
+                name: b.name,
+                isTrial: b.is_trial || false,
+                workingDir: b.working_dir || null,
+                timezone: b.timezone || 'UTC',
+                odinInitialized: b.odin_initialized || false,
+                memberIds: boardMemberIds,
+                agents: (b as { agents?: AgentConfig[] }).agents,
+                tasks: [],
+                members: [],
+                lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'],
+                totalActions: 0,
+                createdAt: b.created_at || new Date().toISOString(),
+                taskCount: (b as HarnessBoard & { task_count?: number }).task_count || 0,
+                memberCount: (b as HarnessBoard & { member_count?: number }).member_count || 0,
+            };
         });
         return { ...raw, results: boards };
     }
@@ -720,6 +744,42 @@ export class HarnessTimeService implements IntegrationService {
             specId: result.spec_id != null ? String(result.spec_id) : undefined,
             specTitle: result.spec_title || undefined,
         }));
+    }
+
+    async fetchSchedules(query?: { board?: string; status?: string[]; kind?: string[]; history?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<TaskSchedule>> {
+        const qs = this.buildQuery({
+            board_id: query?.board,
+            status: query?.status,
+            kind: query?.kind,
+            history: query?.history ? 'true' : undefined,
+            page: query?.page,
+            page_size: query?.page_size,
+        });
+        return this.get<PaginatedResponse<TaskSchedule>>(`/api/schedules/${qs}`);
+    }
+
+    async createSchedule(payload: Record<string, unknown>): Promise<TaskSchedule> {
+        return this.post<TaskSchedule>('/api/schedules/', payload);
+    }
+
+    async updateSchedule(scheduleId: string, payload: Record<string, unknown>): Promise<TaskSchedule> {
+        return this.post<TaskSchedule>(`/api/schedules/${Number(scheduleId)}/`, payload, 'PATCH');
+    }
+
+    async pauseSchedule(scheduleId: string): Promise<TaskSchedule> {
+        return this.post<TaskSchedule>(`/api/schedules/${Number(scheduleId)}/pause/`, {});
+    }
+
+    async resumeSchedule(scheduleId: string): Promise<TaskSchedule> {
+        return this.post<TaskSchedule>(`/api/schedules/${Number(scheduleId)}/resume/`, {});
+    }
+
+    async cancelSchedule(scheduleId: string): Promise<TaskSchedule> {
+        return this.post<TaskSchedule>(`/api/schedules/${Number(scheduleId)}/cancel/`, {});
+    }
+
+    async deleteSchedule(scheduleId: string): Promise<void> {
+        await this.del(`/api/schedules/${Number(scheduleId)}/`);
     }
 
     async suggestDirectories(query: string, limit: number = 20): Promise<DirectoryEntry[]> {
@@ -815,6 +875,7 @@ export class HarnessTimeService implements IntegrationService {
             assigneeId?: number;
             modelName?: string;
             labelIds?: number[];
+            dependsOn?: string[];
             workingDir?: string;
         }
     ): Promise<unknown> {
@@ -827,6 +888,7 @@ export class HarnessTimeService implements IntegrationService {
         if (options?.assigneeId) body.assignee_id = options.assigneeId;
         if (options?.modelName) body.model_name = options.modelName;
         if (options?.labelIds && options.labelIds.length > 0) body.label_ids = options.labelIds;
+        if (options?.dependsOn && options.dependsOn.length > 0) body.depends_on = options.dependsOn;
         if (options?.workingDir) body.metadata = { working_dir: options.workingDir };
 
         return this.post<HarnessTask>('/api/tasks/', body);
@@ -851,7 +913,8 @@ export class HarnessTimeService implements IntegrationService {
 
     async updateTask(taskId: string, updates: {
         title?: string; description?: string; priority?: string; devEta?: number; status?: string;
-        labelIds?: number[]; modelName?: string; kanbanTargetIndex?: number; kanbanTargetStatus?: string;
+        labelIds?: number[]; modelName?: string; dependsOn?: string[];
+        kanbanTargetIndex?: number; kanbanTargetStatus?: string;
     }): Promise<void> {
         const email = this.baseUrl.includes('localhost') ? 'admin@example.com' : 'unknown@example.com';
         const body: Record<string, unknown> = { ...updates, updated_by: email };
@@ -866,6 +929,10 @@ export class HarnessTimeService implements IntegrationService {
         if (updates.modelName !== undefined) {
             body.model_name = updates.modelName;
             delete body.modelName;
+        }
+        if (updates.dependsOn !== undefined) {
+            body.depends_on = updates.dependsOn;
+            delete body.dependsOn;
         }
         if (updates.kanbanTargetIndex !== undefined) {
             body.kanban_target_index = updates.kanbanTargetIndex;
@@ -1201,6 +1268,7 @@ export class HarnessTimeService implements IntegrationService {
             estimatedCostUsd: task.estimated_cost_usd ?? undefined,
             reflectionCostUsd: task.reflection_cost_usd ?? undefined,
             usage: task.usage ?? undefined,
+            scheduleSummary: task.schedule_summary ?? undefined,
         };
     }
 

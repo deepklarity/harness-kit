@@ -6,6 +6,7 @@ from . import views
 router = DefaultRouter(trailing_slash=True)
 router.register(r"users", views.UserViewSet, basename="user")
 router.register(r"boards", views.BoardViewSet, basename="board")
+router.register(r"schedules", views.ScheduleViewSet, basename="schedule")
 router.register(r"labels", views.LabelViewSet, basename="label")
 router.register(r"tasks", views.TaskViewSet, basename="task")
 router.register(r"specs", views.SpecViewSet, basename="spec")

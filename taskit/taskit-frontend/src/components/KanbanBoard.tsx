@@ -164,6 +164,7 @@ const SortableTask = memo(function SortableTask({
     onClick,
     suppressClickUntil,
     memberMap,
+    taskMap,
     blockedByFailed,
     onRename,
     onDelete,
@@ -173,6 +174,7 @@ const SortableTask = memo(function SortableTask({
     onClick: (task: Task) => void;
     suppressClickUntil: number;
     memberMap?: Map<string, Member>;
+    taskMap?: Map<string, Task>;
     blockedByFailed?: boolean;
     onRename?: (taskId: string, newTitle: string) => Promise<void> | void;
     onDelete?: (taskId: string) => void;
@@ -203,6 +205,7 @@ const SortableTask = memo(function SortableTask({
                 isDragging={isDragging}
                 hideStatus={task.currentStatus !== 'EXECUTING'}
                 memberMap={memberMap}
+                taskMap={taskMap}
                 blockedByFailed={blockedByFailed}
                 onRename={onRename}
                 onDelete={onDelete}
@@ -226,6 +229,7 @@ function DroppableColumn({
     setFailedCollapsed,
     isOver,
     memberMap,
+    taskMap,
     failedTaskIds,
     maxColumnHeight,
     onTaskRename,
@@ -241,6 +245,7 @@ function DroppableColumn({
     setFailedCollapsed: (v: boolean) => void;
     isOver: boolean;
     memberMap?: Map<string, Member>;
+    taskMap?: Map<string, Task>;
     failedTaskIds?: Set<string>;
     maxColumnHeight: number;
     onTaskRename?: (taskId: string, newTitle: string) => Promise<void> | void;
@@ -297,7 +302,7 @@ function DroppableColumn({
                                 )}
                                 {displayTasks.map(task => (
                                     <SortableTask key={task.id} task={task} onClick={onTaskClick} suppressClickUntil={suppressClickUntil} memberMap={memberMap}
-                                        blockedByFailed={!!(failedTaskIds && task.dependsOn?.some(dep => failedTaskIds.has(dep)))} onRename={onTaskRename} onDelete={onDeleteTask} allTasks={allTasks} />
+                                        blockedByFailed={!!(failedTaskIds && task.dependsOn?.some(dep => failedTaskIds.has(dep)))} onRename={onTaskRename} onDelete={onDeleteTask} allTasks={allTasks} taskMap={taskMap} />
                                 ))}
                             </SortableContext>
                             {hiddenTaskCount > 0 && (
@@ -619,6 +624,7 @@ export function KanbanBoard({ tasks, allTasks = [], onTaskClick, onTaskMove, onS
                                 setFailedCollapsed={setFailedCollapsed}
                                 isOver={overColumnId === col.status}
                                 memberMap={memberMap}
+                                taskMap={taskById}
                                 failedTaskIds={failedTaskIds}
                                 maxColumnHeight={columnMaxHeight}
                                 onTaskRename={onTaskRename}
@@ -639,7 +645,7 @@ export function KanbanBoard({ tasks, allTasks = [], onTaskClick, onTaskMove, onS
                     },
                 }),
             }}>
-                {activeTask ? <TaskCard task={activeTask} isOverlay onClick={() => { }} hideStatus memberMap={memberMap} compact /> : null}
+                {activeTask ? <TaskCard task={activeTask} isOverlay onClick={() => { }} hideStatus memberMap={memberMap} taskMap={taskById} compact /> : null}
             </DragOverlay>
 
             <AlertDialog open={!!pendingStopMove} onOpenChange={(open) => { if (!open) handleCancelStopMove(); }}>

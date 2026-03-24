@@ -48,6 +48,7 @@ def auto_comment_on_status_transition(sender, instance, created, **kwargs):
     cutoff = timezone.now() - datetime.timedelta(seconds=5)
     existing = TaskComment.objects.filter(
         task_id=instance.task_id,
+        schedule_run_id=instance.schedule_run_id,
         author_email="system@taskit",
         created_at__gte=cutoff,
         content__contains=new_status,
@@ -59,6 +60,7 @@ def auto_comment_on_status_transition(sender, instance, created, **kwargs):
     if new_status == "FAILED":
         rich_failure_exists = TaskComment.objects.filter(
             task_id=instance.task_id,
+            schedule_run_id=instance.schedule_run_id,
             created_at__gte=cutoff,
         ).exclude(author_email="system@taskit").filter(
             content__contains="Failure type:"
@@ -71,6 +73,7 @@ def auto_comment_on_status_transition(sender, instance, created, **kwargs):
 
     TaskComment.objects.create(
         task_id=instance.task_id,
+        schedule_run=instance.schedule_run,
         author_email="system@taskit",
         author_label="system",
         content=content,

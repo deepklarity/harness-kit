@@ -765,14 +765,55 @@ class TestJSONFieldTracking(APITestCase):
         self.board = self.make_board()
 
     def test_depends_on_change_tracked(self):
-        task = self.make_task(self.board, depends_on=["task_1"])
+        dep_1 = self.make_task(self.board, title="Dep 1", status="TODO")
+        dep_2 = self.make_task(self.board, title="Dep 2", status="IN_PROGRESS")
+        task = self.make_task(self.board, depends_on=[str(dep_1.id)])
         self.client.put(f"/tasks/{task.id}/", {
-            "depends_on": ["task_1", "task_2"],
+            "depends_on": [str(dep_1.id), str(dep_2.id)],
             "updated_by": "alice@test.com",
         }, format="json")
 
         history = TaskHistory.objects.filter(task=task, field_name="depends_on").first()
         self.assertIsNotNone(history)
+
+    def test_existing_inactive_dependency_can_be_preserved(self):
+        dep = self.make_task(self.board, title="Dep", status="TODO")
+        task = self.make_task(self.board, depends_on=[str(dep.id)])
+        dep.status = "DONE"
+        dep.save(update_fields=["status"])
+
+        resp = self.client.put(f"/tasks/{task.id}/", {
+            "depends_on": [str(dep.id)],
+            "updated_by": "alice@test.com",
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["depends_on"], [str(dep.id)])
+
+    def test_update_rejects_new_inactive_dependency(self):
+        dep_active = self.make_task(self.board, title="Active dep", status="TODO")
+        dep_done = self.make_task(self.board, title="Done dep", status="DONE")
+        task = self.make_task(self.board, depends_on=[str(dep_active.id)])
+
+        resp = self.client.put(f"/tasks/{task.id}/", {
+            "depends_on": [str(dep_active.id), str(dep_done.id)],
+            "updated_by": "alice@test.com",
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("depends_on", resp.data)
+
+    def test_update_rejects_dependency_cycle(self):
+        task_a = self.make_task(self.board, title="A")
+        task_b = self.make_task(self.board, title="B", depends_on=[str(task_a.id)])
+
+        resp = self.client.put(f"/tasks/{task_a.id}/", {
+            "depends_on": [str(task_b.id)],
+            "updated_by": "alice@test.com",
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("depends_on", resp.data)
 
     def test_metadata_change_tracked(self):
         task = self.make_task(self.board, metadata={"v": 1})

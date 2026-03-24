@@ -1,18 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import type { Task, TaskMutation, Member } from '../types';
 import { getStatusColor, formatDuration } from '../utils/transformer';
 import { CountdownTimer } from './CountdownTimer';
-import { DagView } from './DagView';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
     Search, ZoomIn, ZoomOut, Eye, EyeOff, Users, BarChart3, Clock, Timer,
-    CheckCircle2, CircleAlert, ListFilter, GitBranch, GanttChart,
+    CheckCircle2, CircleAlert, ListFilter,
 } from 'lucide-react';
-
-type TimelineMode = 'timeline' | 'dag';
 
 interface TimelineViewProps {
     tasks: Task[];
@@ -66,17 +62,6 @@ function formatFullDate(dateStr: string): string {
 
 export function TimelineView({ tasks, allTasks, members, onTaskClick, onDelete }: TimelineViewProps) {
     // ─── ALL hooks must be called unconditionally, before any returns ───
-    const [searchParams, setSearchParams] = useSearchParams();
-    const viewMode: TimelineMode = searchParams.get('mode') === 'dag' ? 'dag' : 'timeline';
-    const setViewMode = useCallback((mode: TimelineMode) => {
-        setSearchParams(prev => {
-            const next = new URLSearchParams(prev);
-            if (mode === 'dag') next.set('mode', 'dag');
-            else next.delete('mode');
-            return next;
-        }, { replace: true });
-    }, [setSearchParams]);
-
     const [hoveredMutation, setHoveredMutation] = useState<{
         mutation: TaskMutation; taskName: string; trackColor: string; x: number; y: number;
     } | null>(null);
@@ -284,23 +269,7 @@ export function TimelineView({ tasks, allTasks, members, onTaskClick, onDelete }
         onToggleMember: toggleMember, onToggleStatus: toggleStatus,
         onToggleTrivial: () => setHideTrivial(!hideTrivial),
         onZoomChange: setZoom, onZoomPreset: handleZoomPreset,
-        viewMode, onViewModeChange: setViewMode,
     };
-
-    // ─── DAG mode ───
-    if (viewMode === 'dag') {
-        return (
-            <div>
-                <TimelineFilterBar {...filterBarProps} />
-                <DagView
-                    tasks={sortedTasks}
-                    allTasks={allTasks || tasks}
-                    members={members || []}
-                    onTaskClick={(task) => onTaskClick?.(task)}
-                />
-            </div>
-        );
-    }
 
     // ─── Timeline mode: empty state ───
     if (allTimestamps.length === 0) {
@@ -655,42 +624,15 @@ interface TimelineFilterBarProps {
     onToggleMember: (m: string) => void; onToggleStatus: (s: string) => void;
     onToggleTrivial: () => void; onZoomChange: (z: number) => void;
     onZoomPreset: (preset: 'hours' | 'days' | 'all') => void;
-    viewMode?: TimelineMode; onViewModeChange?: (mode: TimelineMode) => void;
 }
 
 function TimelineFilterBar({
     searchTerm, onSearchChange, members, statuses, selectedMembers, selectedStatuses,
     completionFilter, onCompletionFilter,
     hideTrivial, zoom, onToggleMember, onToggleStatus, onToggleTrivial, onZoomChange, onZoomPreset,
-    viewMode = 'timeline', onViewModeChange,
 }: TimelineFilterBarProps) {
     return (
         <Card className="flex flex-row flex-wrap items-center gap-4 mb-4 p-3 border-border">
-            {/* View mode toggle */}
-            {onViewModeChange && (
-                <>
-                    <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
-                        <Button
-                            variant={viewMode === 'timeline' ? 'default' : 'ghost'}
-                            size="sm"
-                            className="h-6 text-[10px] px-2 gap-1"
-                            onClick={() => onViewModeChange('timeline')}
-                        >
-                            <GanttChart className="size-3" /> Timeline
-                        </Button>
-                        <Button
-                            variant={viewMode === 'dag' ? 'default' : 'ghost'}
-                            size="sm"
-                            className="h-6 text-[10px] px-2 gap-1"
-                            onClick={() => onViewModeChange('dag')}
-                        >
-                            <GitBranch className="size-3" /> DAG
-                        </Button>
-                    </div>
-                    <div className="w-px h-5 bg-border" />
-                </>
-            )}
-
             <div className="relative w-[200px]">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                 <Input placeholder="Search tasks..." value={searchTerm} onChange={e => onSearchChange(e.target.value)} className="pl-8 h-8 text-sm" />
@@ -711,37 +653,32 @@ function TimelineFilterBar({
                 </Button>
             </div>
 
-            {/* Zoom controls — only show in timeline mode */}
-            {viewMode === 'timeline' && (
-                <>
-                    <div className="w-px h-5 bg-border" />
+            <div className="w-px h-5 bg-border" />
 
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground flex items-center gap-1"><ZoomIn className="size-3" /> Zoom</span>
-                        <Button variant="outline" size="icon" className="size-7" onClick={() => onZoomChange(Math.max(zoom / ZOOM_STEP, MIN_ZOOM))} disabled={zoom <= MIN_ZOOM}>
-                            <ZoomOut className="size-3" />
-                        </Button>
-                        <span className="text-xs text-muted-foreground min-w-[36px] text-center font-mono">
-                            {zoom < 10 ? Math.round(zoom * 100) + '%' : Math.round(zoom) + 'x'}
-                        </span>
-                        <Button variant="outline" size="icon" className="size-7" onClick={() => onZoomChange(Math.min(zoom * ZOOM_STEP, MAX_ZOOM))} disabled={zoom >= MAX_ZOOM}>
-                            <ZoomIn className="size-3" />
-                        </Button>
+            <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground flex items-center gap-1"><ZoomIn className="size-3" /> Zoom</span>
+                <Button variant="outline" size="icon" className="size-7" onClick={() => onZoomChange(Math.max(zoom / ZOOM_STEP, MIN_ZOOM))} disabled={zoom <= MIN_ZOOM}>
+                    <ZoomOut className="size-3" />
+                </Button>
+                <span className="text-xs text-muted-foreground min-w-[36px] text-center font-mono">
+                    {zoom < 10 ? Math.round(zoom * 100) + '%' : Math.round(zoom) + 'x'}
+                </span>
+                <Button variant="outline" size="icon" className="size-7" onClick={() => onZoomChange(Math.min(zoom * ZOOM_STEP, MAX_ZOOM))} disabled={zoom >= MAX_ZOOM}>
+                    <ZoomIn className="size-3" />
+                </Button>
 
-                        <div className="w-px h-4 bg-border mx-1" />
+                <div className="w-px h-4 bg-border mx-1" />
 
-                        <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => onZoomPreset('hours')}>
-                            <Clock className="size-3 mr-0.5" /> Hours
-                        </Button>
-                        <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => onZoomPreset('days')}>
-                            <Timer className="size-3 mr-0.5" /> Days
-                        </Button>
-                        <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => onZoomPreset('all')}>
-                            All
-                        </Button>
-                    </div>
-                </>
-            )}
+                <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => onZoomPreset('hours')}>
+                    <Clock className="size-3 mr-0.5" /> Hours
+                </Button>
+                <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => onZoomPreset('days')}>
+                    <Timer className="size-3 mr-0.5" /> Days
+                </Button>
+                <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => onZoomPreset('all')}>
+                    All
+                </Button>
+            </div>
 
             {members.length > 0 && (
                 <>

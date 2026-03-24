@@ -1,10 +1,32 @@
+from datetime import datetime
+
 from rest_framework import serializers
+from django.utils import timezone
 
 from .models import (
     Board, CommentAttachment, CommentType, Label, Notification, NotificationPreference,
-    ReflectionReport, Spec, SpecComment, Task, TaskComment,
-    TaskHistory, TaskPriority, TaskStatus, User,
+    ReflectionReport, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
+    TaskComment, TaskHistory, TaskPriority, TaskSchedule, TaskScheduleRun,
+    TaskStatus, User,
 )
+from .scheduling import ScheduleValidationError, parse_local_datetime
+
+WEEKDAY_KEYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
+
+
+def _visible_scheduled_tasks(qs):
+    return qs.exclude(
+        schedule_id__isnull=False,
+        schedule__status__in=[ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED],
+        status__in=[
+            TaskStatus.BACKLOG,
+            TaskStatus.TODO,
+            TaskStatus.REVIEW,
+            TaskStatus.TESTING,
+            TaskStatus.DONE,
+            TaskStatus.FAILED,
+        ],
+    )
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -41,6 +63,7 @@ class TaskSerializer(serializers.ModelSerializer):
     usage = serializers.SerializerMethodField()
     time_in_statuses = serializers.SerializerMethodField()
     reference_images = serializers.SerializerMethodField()
+    schedule_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -51,6 +74,8 @@ class TaskSerializer(serializers.ModelSerializer):
             "spec_id", "depends_on",
             "complexity", "metadata", "model_name",
             "estimated_cost_usd", "reflection_cost_usd", "usage", "time_in_statuses",
+            "reference_images",
+            "schedule_summary",
             "reference_images",
         ]
         read_only_fields = ["id", "created_at", "last_updated_at", "kanban_position"]
@@ -105,6 +130,20 @@ class TaskSerializer(serializers.ModelSerializer):
             ms = (timezone.now() - prev_time).total_seconds() * 1000
             result[prev_status] = result.get(prev_status, 0) + ms
         return result
+
+    def get_schedule_summary(self, obj):
+        schedule = getattr(obj, "schedule", None)
+        if not schedule:
+            return None
+        return {
+            "id": schedule.id,
+            "kind": schedule.kind,
+            "status": schedule.status,
+            "timezone": schedule.timezone,
+            "next_run_at_utc": schedule.next_run_at_utc,
+            "materialized_task_id": schedule.materialized_task_id,
+            "current_run_id": obj.current_schedule_run_id,
+        }
 
 
 class CreateTaskSerializer(serializers.Serializer):
@@ -177,7 +216,7 @@ class BoardSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Board
-        fields = ["id", "name", "description", "is_trial", "working_dir", "odin_initialized", "created_at", "updated_at", "member_ids", "agents"]
+        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "created_at", "updated_at", "member_ids", "agents"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_member_ids(self, obj):
@@ -230,13 +269,14 @@ class CreateBoardSerializer(serializers.ModelSerializer):
     class Meta:
         model = Board
         fields = [
-            "name", "description", "is_trial", "working_dir", "auto_init", "disabled_agents",
+            "name", "description", "is_trial", "working_dir", "timezone", "auto_init", "disabled_agents",
             "directory_mode", "parent_directory", "directory_name",
         ]
         extra_kwargs = {
             "description": {"required": False, "default": ""},
             "is_trial": {"required": False, "default": False},
             "working_dir": {"required": False, "allow_null": True, "allow_blank": True},
+            "timezone": {"required": False, "default": "UTC"},
         }
 
     def validate_working_dir(self, value):
@@ -278,10 +318,14 @@ class BoardListSerializer(BoardSerializer):
 
 
 class BoardDetailSerializer(BoardSerializer):
-    tasks = TaskSerializer(many=True, read_only=True)
+    tasks = serializers.SerializerMethodField()
 
     class Meta(BoardSerializer.Meta):
         fields = BoardSerializer.Meta.fields + ["tasks"]
+
+    def get_tasks(self, obj):
+        qs = _visible_scheduled_tasks(obj.tasks.all().select_related("assignee").prefetch_related("labels"))
+        return TaskSerializer(qs, many=True, context=self.context).data
 
 
 class SpecCommentSerializer(serializers.ModelSerializer):
@@ -295,7 +339,7 @@ class SpecCommentSerializer(serializers.ModelSerializer):
 
 
 class SpecSerializer(serializers.ModelSerializer):
-    tasks = TaskSerializer(many=True, read_only=True)
+    tasks = serializers.SerializerMethodField()
     comments = SpecCommentSerializer(many=True, read_only=True)
     board_id = serializers.PrimaryKeyRelatedField(
         queryset=Board.objects.all(), source="board",
@@ -310,6 +354,10 @@ class SpecSerializer(serializers.ModelSerializer):
             "comments", "cost_summary",
         ]
         read_only_fields = ["id", "created_at"]
+
+    def get_tasks(self, obj):
+        qs = _visible_scheduled_tasks(obj.tasks.all().select_related("assignee").prefetch_related("labels"))
+        return TaskSerializer(qs, many=True, context=self.context).data
 
     def get_cost_summary(self, obj):
         from .pricing import compute_spec_cost_summary
@@ -580,6 +628,153 @@ class RuntimeStopSerializer(serializers.Serializer):
     target_status = serializers.ChoiceField(choices=TaskStatus.choices, required=False, default=TaskStatus.TODO)
     reason = serializers.CharField(required=False, allow_blank=True, default="")
     force = serializers.BooleanField(required=False, default=False)
+
+
+class ScheduleTemplateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, default="")
+    priority = serializers.ChoiceField(
+        choices=TaskPriority.choices, required=False, default=TaskPriority.MEDIUM,
+    )
+    assignee_id = serializers.IntegerField(required=False, allow_null=True)
+    model_name = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
+    label_ids = serializers.ListField(child=serializers.IntegerField(), required=False, default=list)
+    depends_on = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    dev_eta_seconds = serializers.IntegerField(required=False, allow_null=True)
+    spec_id = serializers.IntegerField(required=False, allow_null=True)
+    metadata = serializers.JSONField(required=False, default=dict)
+
+
+class ScheduleRuleSerializer(serializers.Serializer):
+    freq = serializers.ChoiceField(choices=["DAILY", "WEEKLY", "MONTHLY"])
+    interval = serializers.IntegerField(min_value=1, required=False, default=1)
+    by_weekday = serializers.ListField(
+        child=serializers.ChoiceField(choices=["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]),
+        required=False, default=list,
+    )
+    by_monthday = serializers.ListField(
+        child=serializers.IntegerField(min_value=1, max_value=31),
+        required=False, default=list,
+    )
+    end_mode = serializers.ChoiceField(choices=["NEVER", "ON_DATE", "AFTER_COUNT"], required=False, default="NEVER")
+    until_local = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    occurrence_count = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+
+
+class CreateScheduleSerializer(serializers.Serializer):
+    board_id = serializers.IntegerField()
+    kind = serializers.ChoiceField(choices=ScheduleKind.choices)
+    timezone = serializers.CharField(max_length=64)
+    starts_at_local = serializers.CharField()
+    template = ScheduleTemplateSerializer()
+    recurrence_rule = ScheduleRuleSerializer(required=False)
+    created_by = serializers.EmailField(required=False)
+    created_by_user_id = serializers.IntegerField(required=False)
+
+    def validate(self, data):
+        if not data.get("created_by") and not data.get("created_by_user_id"):
+            raise serializers.ValidationError(
+                "Either created_by (email) or created_by_user_id is required."
+            )
+        try:
+            starts_at_local = parse_local_datetime(data["starts_at_local"], data["timezone"])
+        except ScheduleValidationError as exc:
+            raise serializers.ValidationError({exc.field: exc.message}) from exc
+        if starts_at_local <= timezone.now().astimezone(starts_at_local.tzinfo):
+            raise serializers.ValidationError({
+                "starts_at_local": "Scheduled start time must be in the future.",
+            })
+        if data["kind"] == ScheduleKind.RECURRING and not data.get("recurrence_rule"):
+            raise serializers.ValidationError({"recurrence_rule": "Required for recurring schedules."})
+        if data["kind"] == ScheduleKind.RECURRING:
+            recurrence = data.get("recurrence_rule") or {}
+            if recurrence.get("freq") == "WEEKLY":
+                weekdays = recurrence.get("by_weekday") or []
+                expected = WEEKDAY_KEYS[starts_at_local.weekday()]
+                if weekdays and expected not in weekdays:
+                    raise serializers.ValidationError({
+                        "recurrence_rule": f"Weekly recurrence must include the first scheduled weekday: {expected}.",
+                    })
+            if recurrence.get("freq") == "MONTHLY":
+                monthdays = recurrence.get("by_monthday") or []
+                if monthdays and starts_at_local.day not in monthdays:
+                    raise serializers.ValidationError({
+                        "recurrence_rule": f"Monthly recurrence must include the first scheduled day: {starts_at_local.day}.",
+                    })
+        return data
+
+
+class UpdateScheduleSerializer(serializers.Serializer):
+    timezone = serializers.CharField(max_length=64, required=False)
+    starts_at_local = serializers.CharField(required=False)
+    template = ScheduleTemplateSerializer(required=False)
+    recurrence_rule = ScheduleRuleSerializer(required=False)
+
+    def validate(self, data):
+        tz_name = data.get("timezone")
+        starts_at_local = data.get("starts_at_local")
+        if tz_name:
+            try:
+                if starts_at_local:
+                    parsed = parse_local_datetime(starts_at_local, tz_name)
+                    if parsed <= timezone.now().astimezone(parsed.tzinfo):
+                        raise serializers.ValidationError({
+                            "starts_at_local": "Scheduled start time must be in the future.",
+                        })
+                else:
+                    parse_local_datetime(timezone.now(), tz_name)
+            except ScheduleValidationError as exc:
+                raise serializers.ValidationError({exc.field: exc.message}) from exc
+        elif starts_at_local:
+            try:
+                datetime.fromisoformat(str(starts_at_local).strip())
+            except ValueError as exc:
+                raise serializers.ValidationError({
+                    "starts_at_local": "Invalid datetime format. Use ISO 8601.",
+                }) from exc
+        return data
+
+
+class TaskScheduleRunSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TaskScheduleRun
+        fields = [
+            "id", "run_number", "task_id", "scheduled_for_utc", "released_at_utc",
+            "finished_at_utc", "status", "terminal_task_status", "release_reason",
+            "result_summary", "template_snapshot", "created_at",
+        ]
+
+
+class TaskScheduleSerializer(serializers.ModelSerializer):
+    template = serializers.SerializerMethodField()
+    runs = TaskScheduleRunSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = TaskSchedule
+        fields = [
+            "id", "board_id", "kind", "status", "timezone", "starts_at_local",
+            "starts_at_utc", "next_run_at_utc", "recurrence_rule", "materialized_task_id",
+            "last_released_run_id", "paused_at", "canceled_at", "completed_at",
+            "created_by", "created_at", "updated_at", "template", "runs",
+        ]
+
+    def get_template(self, obj):
+        return {
+            "title": obj.template_title,
+            "description": obj.template_description,
+            "priority": obj.template_priority,
+            "assignee_id": obj.template_assignee_id,
+            "model_name": obj.template_model_name,
+            "label_ids": obj.template_label_ids or [],
+            "depends_on": obj.template_depends_on or [],
+            "dev_eta_seconds": obj.template_dev_eta_seconds,
+            "spec_id": obj.template_spec_id,
+            "metadata": obj.template_metadata or {},
+        }
+
+
+class ScheduleStatusMutationSerializer(serializers.Serializer):
+    updated_by = serializers.EmailField(required=False, default="")
 
 
 class RoutingModelSerializer(serializers.Serializer):

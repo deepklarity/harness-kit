@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import {
     BarChart3, LayoutDashboard, FileText, TrendingUp,
     Plus, LogOut, Moon, Sun, Settings,
-    Activity, Search, Keyboard,
+    Activity, Search, Keyboard, Clock3,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import type { LucideIcon } from 'lucide-react';
@@ -19,6 +19,7 @@ const CREATE_BOARD_ID = '__CREATE__';
 
 const VIEW_ROUTES: { id: ViewMode; path: string; label: string; icon: LucideIcon }[] = [
     { id: 'board', path: '/board', label: 'Board', icon: LayoutDashboard },
+    { id: 'scheduling', path: '/scheduling', label: 'Scheduling', icon: Clock3 },
     { id: 'specs', path: '/specs', label: 'Specs', icon: FileText },
     { id: 'overview', path: '/stats', label: 'Stats', icon: BarChart3 },
 ];

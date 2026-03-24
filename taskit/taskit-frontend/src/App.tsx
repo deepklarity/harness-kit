@@ -24,7 +24,7 @@ import { Button } from '@/components/ui/button';
 import { markCommentsSeen } from './utils/unseenComments';
 import { getLatestExecutionTransitionTimestamp, markExecutionTransitionSeen } from './utils/unseenStatusTransitions';
 import { EditUserModal } from './components/EditUserModal';
-import { BoardPage, SpecsPage } from './components/pages';
+import { BoardPage, SchedulingPage, SpecsPage } from './components/pages';
 import { NotificationsPage } from './components/NotificationsPage';
 import { CommandPalette } from './components/CommandPalette';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
@@ -35,6 +35,7 @@ function pathToViewMode(pathname: string): ViewMode {
     const match = VIEW_ROUTES.find(r => r.path === pathname);
     if (match) return match.id;
     if (pathname.startsWith('/specs/')) return 'specs';
+    if (pathname.startsWith('/scheduling')) return 'scheduling';
     if (pathname.includes('/debug')) return 'specs';
     if (pathname.startsWith('/reflections')) return 'reflections';
     if (pathname === '/settings') return 'settings';
@@ -110,6 +111,8 @@ function App() {
     const [overviewReflections, setOverviewReflections] = useState<ReflectionReport[]>([]);
     const [overviewLoading, setOverviewLoading] = useState(false);
     const [overviewError, setOverviewError] = useState<string | null>(null);
+    const [dependencyTasksByBoardId, setDependencyTasksByBoardId] = useState<Record<string, Task[]>>({});
+    const [dependencyTasksLoadingByBoardId, setDependencyTasksLoadingByBoardId] = useState<Record<string, boolean>>({});
     const [processModalOpen, setProcessModalOpen] = useState(false);
     const [selectedUser, setSelectedUser] = useState<Member | null>(null);
     const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -258,6 +261,49 @@ function App() {
         () => new Map(members.map(member => [member.id, member])),
         [members],
     );
+    const ensureDependencyTasksForBoard = useCallback(async (boardId: string, force = false) => {
+        if (!boardId) return;
+        if (!force && Object.prototype.hasOwnProperty.call(dependencyTasksByBoardId, boardId)) return;
+        if (dependencyTasksLoadingByBoardId[boardId]) return;
+
+        setDependencyTasksLoadingByBoardId(prev => ({ ...prev, [boardId]: true }));
+        try {
+            const pageSize = 200;
+            let page = 1;
+            let total = 0;
+            let allTasks: Task[] = [];
+
+            while (page <= 1000) {
+                const resp = await service.fetchTasksPage({
+                    board: boardId,
+                    page,
+                    page_size: pageSize,
+                    sort: '-created_at',
+                });
+                allTasks = allTasks.concat(resp.results);
+                total = resp.count;
+                if (!resp.next || allTasks.length >= total) break;
+                page += 1;
+            }
+
+            setDependencyTasksByBoardId(prev => ({ ...prev, [boardId]: allTasks }));
+        } catch (err) {
+            console.error(`Failed to load dependency candidates for board ${boardId}:`, err);
+        } finally {
+            setDependencyTasksLoadingByBoardId(prev => ({ ...prev, [boardId]: false }));
+        }
+    }, [dependencyTasksByBoardId, dependencyTasksLoadingByBoardId, service]);
+
+    const refreshDependencyTasksForBoard = useCallback(async (boardId: string) => {
+        if (!boardId) return;
+        await ensureDependencyTasksForBoard(boardId, true);
+    }, [ensureDependencyTasksForBoard]);
+
+    const handleDependenciesChanged = useCallback(async () => {
+        if (!selectedTask?.boardId) return;
+        await refreshDependencyTasksForBoard(selectedTask.boardId);
+        setRefreshKey(k => k + 1);
+    }, [refreshDependencyTasksForBoard, selectedTask?.boardId]);
 
 
     /*
@@ -302,6 +348,16 @@ function App() {
         };
     }, [overviewTasks, members, boards, currentBoard, selectedBoard]);
     */
+
+    useEffect(() => {
+        if (!selectedTask?.boardId) return;
+        void ensureDependencyTasksForBoard(selectedTask.boardId);
+    }, [selectedTask?.boardId, ensureDependencyTasksForBoard]);
+
+    useEffect(() => {
+        if (!showCreateTask || !boardFilter) return;
+        void ensureDependencyTasksForBoard(boardFilter);
+    }, [showCreateTask, boardFilter, ensureDependencyTasksForBoard]);
 
     const updateSearchParam = useCallback((key: string, value?: string | null) => {
         setSearchParams(prev => {
@@ -411,7 +467,8 @@ function App() {
     };
     const handleCreateTask = async (
         boardId: string, title: string, description: string, priority: string,
-        assigneeId: number, modelName: string | undefined, devEta?: number, labelIds?: number[], workingDir?: string
+        assigneeId: number, modelName: string | undefined, devEta?: number,
+        labelIds?: number[], dependsOn?: string[], workingDir?: string
     ): Promise<string> => {
         const result = await service.createTask(
             boardId,
@@ -424,11 +481,17 @@ function App() {
                 assigneeId,
                 modelName,
                 labelIds,
+                dependsOn,
                 workingDir,
             },
         ) as { id: number };
+        await refreshDependencyTasksForBoard(boardId);
         setRefreshKey(k => k + 1);
         return String(result.id);
+    };
+    const handleCreateSchedule = async (payload: Record<string, unknown>) => {
+        await service.createSchedule(payload);
+        setRefreshKey(k => k + 1);
     };
     const handleUpdateAssignees = async (taskId: string, memberIds: string[]) => {
         try {
@@ -450,6 +513,10 @@ function App() {
     const handleUpdateTask = async (taskId: string, updates: Record<string, unknown>) => {
         try {
             await service.updateTask(taskId, updates as Parameters<typeof service.updateTask>[1]);
+            const boardId = selectedTask?.id === taskId ? selectedTask.boardId : null;
+            if (boardId) {
+                await refreshDependencyTasksForBoard(boardId);
+            }
             setRefreshKey(k => k + 1);
             if (selectedTask?.id === taskId) {
                 const detail = await service.fetchTaskDetail(taskId);
@@ -504,7 +571,11 @@ function App() {
     };
     const handleDeleteTask = async (taskId: string) => {
         try {
+            const boardId = selectedTask?.id === taskId ? selectedTask.boardId : null;
             await service.deleteTask(taskId);
+            if (boardId) {
+                await refreshDependencyTasksForBoard(boardId);
+            }
             setSelectedTask(null);
             updateSearchParam('taskId', null);
             setRefreshKey(k => k + 1);
@@ -622,6 +693,10 @@ function App() {
                                 members={members}
                                 labels={labels}
                                 currentBoard={currentBoard}
+                                dependencyTasks={boardFilter ? (dependencyTasksByBoardId[boardFilter] || []) : []}
+                                dependencyTasksLoading={boardFilter ? dependencyTasksLoadingByBoardId[boardFilter] : false}
+                                onEnsureDependencyTasks={ensureDependencyTasksForBoard}
+                                onDependenciesSaved={handleDependenciesChanged}
                                 onTaskClick={handleTaskSelect}
                                 onTaskMove={handleKanbanTaskMove}
                                 onStopExecution={handleStopExecution}
@@ -633,6 +708,9 @@ function App() {
                         <Route path="/kanban" element={<Navigate to="/board?view=kanban" replace />} />
                         <Route path="/timeline" element={<Navigate to="/board?view=timeline" replace />} />
                         <Route path="/members" element={<Navigate to="/settings" replace />} />
+                        <Route path="/scheduling" element={
+                            <SchedulingPage selectedBoard={boardFilter} refreshKey={refreshKey} onTaskClick={(taskId) => handleTaskSelect(taskId)} />
+                        } />
                         <Route path="/specs" element={
                             <>
                                 <SectionHeader title="Specs" />
@@ -682,7 +760,7 @@ function App() {
                         task={selectedTask}
                         onClose={handleTaskClose}
                         allMembers={members}
-                        allTasks={[]}
+                        allTasks={dependencyTasksByBoardId[selectedTask.boardId] || []}
                         memberMap={memberMap}
                         onUpdateAssignees={handleUpdateAssignees}
                         onUpdateTask={handleUpdateTask}
@@ -700,6 +778,9 @@ function App() {
                 {showCreateTask && (
                     <CreateTaskModal
                         boards={boards}
+                        dependencyTasksByBoard={dependencyTasksByBoardId}
+                        dependencyTasksLoadingByBoard={dependencyTasksLoadingByBoardId}
+                        onEnsureDependencyTasks={ensureDependencyTasksForBoard}
                         defaultBoardId={selectedBoard === ALL_BOARDS_ID ? undefined : selectedBoard}
                         users={members.map(m => ({
                             id: Number(m.id),
@@ -710,6 +791,7 @@ function App() {
                         }))}
                         onClose={() => setShowCreateTask(false)}
                         onCreate={handleCreateTask}
+                        onCreateSchedule={handleCreateSchedule}
                         availableLabels={labels}
                     />
                 )}

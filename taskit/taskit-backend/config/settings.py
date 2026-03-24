@@ -170,6 +170,10 @@ if ODIN_EXECUTION_STRATEGY == "celery_dag":
         "task": "tasks.dag_executor.poll_and_execute",
         "schedule": int(os.environ.get("DAG_EXECUTOR_POLL_INTERVAL", "5")),
     }
+CELERY_BEAT_SCHEDULE["schedule-release-poll"] = {
+    "task": "tasks.schedule_executor.release_due_schedules",
+    "schedule": int(os.environ.get("SCHEDULE_RELEASE_POLL_INTERVAL", "30")),
+}
 DAG_EXECUTOR_MAX_CONCURRENCY = int(os.environ.get("DAG_EXECUTOR_MAX_CONCURRENCY", "3"))
 ODIN_SPEC_PLAN_TIMEOUT_SECONDS = int(os.environ.get("ODIN_SPEC_PLAN_TIMEOUT_SECONDS", "1800"))
 

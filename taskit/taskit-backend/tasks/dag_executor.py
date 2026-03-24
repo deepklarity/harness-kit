@@ -41,6 +41,7 @@ from .dependencies import DepStatus, check_deps
 from .execution.utils import resolve_working_dir
 from .kanban_ordering import move_task
 from .models import Task, TaskComment, TaskHistory, TaskStatus
+from .scheduling import maybe_finalize_schedule_run
 from .utils.logger import setup_logger
 
 logger = setup_logger("taskit.dag_executor")
@@ -118,6 +119,7 @@ def poll_and_execute():
 
             TaskHistory.objects.create(
                 task=locked_task,
+                schedule_run=locked_task.current_schedule_run,
                 field_name="status",
                 old_value=TaskStatus.IN_PROGRESS,
                 new_value=TaskStatus.EXECUTING,
@@ -234,6 +236,7 @@ def execute_single_task(task_id, run_token=None):
 
     TaskHistory.objects.create(
         task=task,
+        schedule_run=task.current_schedule_run,
         field_name="status",
         old_value=TaskStatus.EXECUTING,
         new_value=new_status,
@@ -257,10 +260,12 @@ def execute_single_task(task_id, run_token=None):
             body.append(f"Debug: {excerpt}")
         TaskComment.objects.create(
             task=task,
+            schedule_run=task.current_schedule_run,
             author_email="odin+dag-executor@system",
             author_label="odin-dag-executor",
             content="\n".join(body),
         )
+    maybe_finalize_schedule_run(task, new_status)
 
     task.refresh_from_db()
     _append_summary(log_file, task, exit_code)

@@ -12,3 +12,4 @@ class TasksConfig(AppConfig):
         import tasks.signals  # noqa: F401
         import tasks.notification_signals  # noqa: F401
         import tasks.dag_executor  # noqa: F401 — register Celery tasks
+        import tasks.schedule_executor  # noqa: F401 — register schedule release task
