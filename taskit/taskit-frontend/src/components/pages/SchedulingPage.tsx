@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import type { TaskSchedule } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CalendarClock, History, Repeat } from 'lucide-react';
+import { FilterBar, SearchBar, MultiSelectFilter, SortControl, PaginationControls } from '@/components/filters';
 
 interface SchedulingPageProps {
     selectedBoard?: string;
@@ -13,8 +15,13 @@ interface SchedulingPageProps {
     onTaskClick: (taskId: string) => void;
 }
 
+function splitParam(value: string | null): string[] {
+    if (!value) return [];
+    return value.split(',').map(v => v.trim()).filter(Boolean);
+}
+
 function fmt(ts?: string | null) {
-    if (!ts) return '—';
+    if (!ts) return '\u2014';
     return format(new Date(ts), 'PPpp');
 }
 
@@ -69,55 +76,122 @@ function scheduleStateLabel(schedule: TaskSchedule) {
     return schedule.kind === 'ONE_TIME' ? 'Waiting for release' : 'Tracking future runs';
 }
 
+const UPCOMING_STATUS_OPTIONS = [
+    { label: 'Active', value: 'ACTIVE' },
+    { label: 'Paused', value: 'PAUSED' },
+];
+const HISTORY_STATUS_OPTIONS = [
+    { label: 'Completed', value: 'COMPLETED' },
+    { label: 'Canceled', value: 'CANCELED' },
+];
+const KIND_OPTIONS = [
+    { label: 'One-time', value: 'ONE_TIME' },
+    { label: 'Recurring', value: 'RECURRING' },
+];
+const SORT_OPTIONS = [
+    { label: 'Next run', value: 'next_run_at_utc' },
+    { label: 'Created date', value: 'created_at' },
+    { label: 'Title', value: 'template_title' },
+    { label: 'Kind', value: 'kind' },
+    { label: 'Status', value: 'status' },
+    { label: 'Start time', value: 'starts_at_utc' },
+];
+
 export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: SchedulingPageProps) {
     const service = useService();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [schedules, setSchedules] = useState<TaskSchedule[]>([]);
-    const [historyMode, setHistoryMode] = useState(false);
+    const [count, setCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    const query = useMemo(() => {
+        const page = Number(searchParams.get('page') || '1');
+        const pageSize = Number(searchParams.get('page_size') || '20');
+        return {
+            q: searchParams.get('q') || '',
+            status: splitParam(searchParams.get('status')),
+            kind: splitParam(searchParams.get('kind')),
+            history: searchParams.get('history') === 'true',
+            sort: searchParams.get('sort') || undefined,
+            created_from: searchParams.get('created_from') || undefined,
+            created_to: searchParams.get('created_to') || undefined,
+            page: Number.isNaN(page) ? 1 : page,
+            page_size: Number.isNaN(pageSize) ? 20 : pageSize,
+        };
+    }, [searchParams]);
+
+    const setParam = useCallback((key: string, value?: string) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            const current = next.get(key) || '';
+            const nextValue = value || '';
+            const changed = current !== nextValue;
+            if (!value) next.delete(key);
+            else next.set(key, value);
+            if (key !== 'page' && changed) next.set('page', '1');
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    const fetchQuery = useMemo(() => ({
+        board: selectedBoard,
+        status: query.status.length ? query.status : undefined,
+        kind: query.kind.length ? query.kind : undefined,
+        history: query.history,
+        q: query.q || undefined,
+        sort: query.sort,
+        created_from: query.created_from,
+        created_to: query.created_to,
+        page: query.page,
+        page_size: query.page_size,
+    }), [selectedBoard, query]);
+
     useEffect(() => {
         let cancelled = false;
-        const load = async () => {
-            setLoading(true);
-            setError(null);
+        setLoading(true);
+        setError(null);
+        void (async () => {
             try {
-                const resp = await service.fetchSchedules({
-                    board: selectedBoard,
-                    history: historyMode,
-                    page: 1,
-                    page_size: 200,
-                });
-                if (!cancelled) setSchedules(resp.results);
+                const resp = await service.fetchSchedules(fetchQuery);
+                if (!cancelled) {
+                    setSchedules(resp.results);
+                    setCount(resp.count);
+                }
             } catch (e) {
                 if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load schedules');
             } finally {
                 if (!cancelled) setLoading(false);
             }
-        };
-        void load();
-        return () => {
-            cancelled = true;
-        };
-    }, [service, selectedBoard, historyMode, refreshKey]);
+        })();
+        return () => { cancelled = true; };
+    }, [service, fetchQuery, refreshKey]);
 
     const emptyLabel = useMemo(
-        () => historyMode ? 'No schedule history yet.' : 'No upcoming scheduled work.',
-        [historyMode],
+        () => query.history ? 'No schedule history yet.' : 'No upcoming scheduled work.',
+        [query.history],
     );
+
+    const refetch = useCallback(async () => {
+        const resp = await service.fetchSchedules(fetchQuery);
+        setSchedules(resp.results);
+        setCount(resp.count);
+    }, [service, fetchQuery]);
 
     const handlePauseResume = async (schedule: TaskSchedule) => {
         if (schedule.status === 'PAUSED') await service.resumeSchedule(String(schedule.id));
         else await service.pauseSchedule(String(schedule.id));
-        const resp = await service.fetchSchedules({ board: selectedBoard, history: historyMode, page: 1, page_size: 200 });
-        setSchedules(resp.results);
+        await refetch();
     };
 
     const handleCancel = async (schedule: TaskSchedule) => {
         await service.cancelSchedule(String(schedule.id));
-        const resp = await service.fetchSchedules({ board: selectedBoard, history: historyMode, page: 1, page_size: 200 });
-        setSchedules(resp.results);
+        await refetch();
     };
+
+    const statusOptions = query.history ? HISTORY_STATUS_OPTIONS : UPCOMING_STATUS_OPTIONS;
+
+    const hasFilters = !!(query.q || query.status.length || query.kind.length || query.sort || query.created_from || query.created_to);
 
     return (
         <div className="space-y-5">
@@ -127,10 +201,46 @@ export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: S
                     <p className="text-sm text-muted-foreground">Upcoming releases and schedule history live here before work reaches the board.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Button variant={historyMode ? 'outline' : 'default'} size="sm" onClick={() => setHistoryMode(false)}>Upcoming</Button>
-                    <Button variant={historyMode ? 'default' : 'outline'} size="sm" onClick={() => setHistoryMode(true)}>History</Button>
+                    <Button variant={query.history ? 'outline' : 'default'} size="sm" onClick={() => setParam('history', undefined)}>Upcoming</Button>
+                    <Button variant={query.history ? 'default' : 'outline'} size="sm" onClick={() => setParam('history', 'true')}>History</Button>
                 </div>
             </div>
+
+            <FilterBar
+                onClearAll={() => {
+                    setSearchParams(prev => {
+                        const next = new URLSearchParams();
+                        const history = prev.get('history');
+                        if (history) next.set('history', history);
+                        return next;
+                    }, { replace: true });
+                }}
+                showClearAll={hasFilters}
+            >
+                <SearchBar
+                    value={query.q}
+                    onSearchChange={(value) => setParam('q', value || undefined)}
+                    placeholder="Search schedule title or description..."
+                    ariaLabel="Search schedules"
+                />
+                <MultiSelectFilter
+                    label="Status"
+                    options={statusOptions}
+                    selected={query.status}
+                    onChange={(next) => setParam('status', next.length ? next.join(',') : undefined)}
+                />
+                <MultiSelectFilter
+                    label="Kind"
+                    options={KIND_OPTIONS}
+                    selected={query.kind}
+                    onChange={(next) => setParam('kind', next.length ? next.join(',') : undefined)}
+                />
+                <SortControl
+                    value={query.sort}
+                    onChange={(value) => setParam('sort', value)}
+                    options={SORT_OPTIONS}
+                />
+            </FilterBar>
 
             {error && <div className="text-sm text-destructive">{error}</div>}
             {loading ? <div className="text-sm text-muted-foreground">Loading schedules...</div> : null}
@@ -159,7 +269,7 @@ export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: S
                                             Task Details
                                         </Button>
                                     ) : null}
-                                    {!historyMode && schedule.status !== 'CANCELED' && schedule.status !== 'COMPLETED' ? (
+                                    {!query.history && schedule.status !== 'CANCELED' && schedule.status !== 'COMPLETED' ? (
                                         <>
                                             <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void handlePauseResume(schedule)}>
                                                 {schedule.status === 'PAUSED' ? 'Resume' : 'Pause'}
@@ -237,6 +347,16 @@ export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: S
                     </Card>
                 ))}
             </div>
+
+            {!loading && count > 0 && (
+                <PaginationControls
+                    count={count}
+                    page={query.page}
+                    pageSize={query.page_size}
+                    onPageChange={(page) => setParam('page', String(page))}
+                    onPageSizeChange={(size) => setParam('page_size', String(size))}
+                />
+            )}
         </div>
     );
 }

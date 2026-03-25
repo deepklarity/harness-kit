@@ -68,7 +68,7 @@ export interface IntegrationService {
     fetchTimelinePage(query: TimelineQuery): Promise<PaginatedResponse<Task>>;
     fetchKanban(boardId?: string, query?: { date_from?: string; date_to?: string }): Promise<Task[]>;
     searchTasks(query: { q: string; scope: 'board' | 'global'; boardId?: string; limit?: number }): Promise<TaskSearchResult[]>;
-    fetchSchedules(query?: { board?: string; status?: string[]; kind?: string[]; history?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<TaskSchedule>>;
+    fetchSchedules(query?: { board?: string; status?: string[]; kind?: string[]; history?: boolean; q?: string; sort?: string; created_from?: string; created_to?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<TaskSchedule>>;
     createSchedule(payload: Record<string, unknown>): Promise<TaskSchedule>;
     updateSchedule(scheduleId: string, payload: Record<string, unknown>): Promise<TaskSchedule>;
     pauseSchedule(scheduleId: string): Promise<TaskSchedule>;

@@ -757,12 +757,16 @@ export class HarnessTimeService implements IntegrationService {
         }));
     }
 
-    async fetchSchedules(query?: { board?: string; status?: string[]; kind?: string[]; history?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<TaskSchedule>> {
+    async fetchSchedules(query?: { board?: string; status?: string[]; kind?: string[]; history?: boolean; q?: string; sort?: string; created_from?: string; created_to?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<TaskSchedule>> {
         const qs = this.buildQuery({
             board_id: query?.board,
             status: query?.status,
             kind: query?.kind,
             history: query?.history ? 'true' : undefined,
+            search: query?.q,
+            sort: query?.sort,
+            created_from: query?.created_from,
+            created_to: query?.created_to,
             page: query?.page,
             page_size: query?.page_size,
         });

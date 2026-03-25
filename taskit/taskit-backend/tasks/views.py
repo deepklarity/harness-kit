@@ -1102,7 +1102,31 @@ class ScheduleViewSet(viewsets.ModelViewSet):
         else:
             qs = qs.exclude(status__in=[ScheduleStatus.COMPLETED, ScheduleStatus.CANCELED])
 
-        return qs.order_by("next_run_at_utc", "id")
+        # Search by template title or description
+        search_term = query_params.get("search") or query_params.get("q")
+        if search_term:
+            qs = qs.filter(
+                Q(template_title__icontains=search_term)
+                | Q(template_description__icontains=search_term)
+            )
+
+        # Date range filters
+        qs = _apply_date_range(qs, query_params, "created_at", "created_from", "created_to")
+        qs = _apply_date_range(qs, query_params, "next_run_at_utc", "next_run_from", "next_run_to")
+
+        # Configurable sort
+        SCHEDULE_SORT_FIELDS = {
+            "next_run_at_utc", "created_at", "template_title", "kind", "status", "starts_at_utc",
+        }
+        SCHEDULE_SORT_MAP = {f: f for f in SCHEDULE_SORT_FIELDS}
+        DEFAULT_SCHEDULE_SORT = [("next_run_at_utc", False)]
+        sort_tokens = _parse_sort_tokens(query_params.get("sort"), SCHEDULE_SORT_FIELDS, DEFAULT_SCHEDULE_SORT)
+        order_by = _build_order_by(sort_tokens, SCHEDULE_SORT_MAP)
+        # Always append "id" as tiebreaker
+        if "id" not in order_by and "-id" not in order_by:
+            order_by.append("id")
+
+        return qs.order_by(*order_by)
 
     def create(self, request, *args, **kwargs):
         ser = CreateScheduleSerializer(data=request.data)
