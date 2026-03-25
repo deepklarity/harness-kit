@@ -209,6 +209,13 @@ def extract_text_from_line(line: str) -> str:
             return item.get("text", "")
         return ""
 
+    # Codex --json wrapper: {"id":"0","msg":{"type":"agent_message","message":"..."}}
+    msg = obj.get("msg")
+    if isinstance(msg, dict) and "id" in obj and "type" not in obj:
+        if msg.get("type") == "agent_message":
+            return msg.get("message", "")
+        return ""
+
     return ""
 
 

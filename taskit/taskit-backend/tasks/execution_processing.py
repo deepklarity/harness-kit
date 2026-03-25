@@ -61,6 +61,32 @@ def extract_agent_text(raw_output: str) -> Tuple[str, dict]:
             continue
 
         json_line_count += 1
+
+        # Codex --json wraps events as {"id":"0","msg":{"type":"agent_message",...}}
+        # Unwrap the envelope so the same extraction logic handles all formats.
+        msg = obj.get("msg")
+        if isinstance(msg, dict) and "id" in obj and "type" not in obj:
+            # Codex agent_message: {"id":"0","msg":{"type":"agent_message","message":"..."}}
+            msg_type = msg.get("type")
+            if msg_type == "agent_message":
+                text = msg.get("message", "")
+                if text:
+                    text_parts.append(text)
+                continue
+            # Codex token_count: {"id":"0","msg":{"type":"token_count","input_tokens":...}}
+            if msg_type == "token_count":
+                input_t = msg.get("input_tokens", 0) or 0
+                output_t = msg.get("output_tokens", 0) or 0
+                if input_t or output_t:
+                    extracted_usage = {
+                        "input_tokens": input_t,
+                        "output_tokens": output_t,
+                        "total_tokens": input_t + output_t,
+                    }
+                continue
+            # All other Codex events (exec_command_*, turn_diff, etc.) — skip
+            continue
+
         event_type = obj.get("type")
 
         # Claude Code: last line has "modelUsage":{"model-name":{"inputTokens":...}}
