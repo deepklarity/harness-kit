@@ -25,6 +25,9 @@ import type {
     ForcedProviderStatus,
     AnalyticsCostSummary,
     TaskSchedule,
+    IdeOptions,
+    IdeSettings,
+    TaskIdeOptions,
 } from '../../types';
 
 export interface ParsedActor {
@@ -234,6 +237,24 @@ interface PaginatedResponseBody<T> {
 interface DirectoryEntriesResponse {
     base_path: string;
     entries: DirectoryEntry[];
+}
+
+interface HarnessIdeOption {
+    id: string;
+    label: string;
+    icon_key: string;
+}
+
+interface HarnessTaskIdeOptions {
+    project_root: string | null;
+    preferred_ide_id: string | null;
+    detected_ides: HarnessIdeOption[];
+    has_configured_ide: boolean;
+}
+
+interface HarnessIdeOptions {
+    preferred_ide_id: string | null;
+    detected_ides: HarnessIdeOption[];
 }
 
 export class ApiError extends Error {
@@ -1003,6 +1024,36 @@ export class HarnessTimeService implements IntegrationService {
         if (params?.specId) qs.set('spec_id', params.specId);
         if (params?.runningOnly !== undefined) qs.set('running_only', String(params.runningOnly));
         return this.get<ProcessMonitorResponse>(`/api/runtime/process-monitor/${qs.toString() ? `?${qs}` : ''}`);
+    }
+
+    async fetchIdeOptions(): Promise<IdeOptions> {
+        const raw = await this.get<HarnessIdeOptions>('/api/user-settings/ide/options/');
+        return {
+            preferred_ide_id: raw.preferred_ide_id,
+            detected_ides: raw.detected_ides || [],
+        };
+    }
+
+    async fetchIdeSettings(): Promise<IdeSettings> {
+        return this.get<IdeSettings>('/api/user-settings/ide/');
+    }
+
+    async saveIdeSettings(preferredIdeId: string | null): Promise<IdeSettings> {
+        return this.post<IdeSettings>('/api/user-settings/ide/', { preferred_ide_id: preferredIdeId }, 'PATCH');
+    }
+
+    async fetchTaskIdeOptions(taskId: string): Promise<TaskIdeOptions> {
+        const raw = await this.get<HarnessTaskIdeOptions>(`/api/tasks/${Number(taskId)}/ide-options/`);
+        return {
+            project_root: raw.project_root,
+            preferred_ide_id: raw.preferred_ide_id,
+            detected_ides: raw.detected_ides || [],
+            has_configured_ide: raw.has_configured_ide,
+        };
+    }
+
+    async openTaskProject(taskId: string): Promise<void> {
+        await this.post(`/api/tasks/${Number(taskId)}/open-project/`, {});
     }
 
     async getLabels(boardId?: string): Promise<Label[]> {

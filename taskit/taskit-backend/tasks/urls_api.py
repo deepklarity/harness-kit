@@ -17,6 +17,8 @@ router.register(r"notifications", notification_views.NotificationViewSet, basena
 urlpatterns = [
     path("notifications/preferences/", notification_views.notification_preferences),
     path("presets/", views.list_presets),
+    path("user-settings/ide/", views.user_ide_settings),
+    path("user-settings/ide/options/", views.user_ide_options),
     path("timeline/", views.timeline),
     path("kanban/", views.kanban),
     path("tasks/search/", views.task_search),

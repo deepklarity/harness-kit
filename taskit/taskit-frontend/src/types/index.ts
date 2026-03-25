@@ -383,6 +383,28 @@ export interface ForcedProviderStatus {
     source: string;
 }
 
+export interface DetectedIde {
+    id: string;
+    label: string;
+    icon_key: string;
+}
+
+export interface IdeSettings {
+    preferred_ide_id: string | null;
+}
+
+export interface IdeOptions {
+    preferred_ide_id: string | null;
+    detected_ides: DetectedIde[];
+}
+
+export interface TaskIdeOptions {
+    project_root: string | null;
+    preferred_ide_id: string | null;
+    detected_ides: DetectedIde[];
+    has_configured_ide: boolean;
+}
+
 // ─── Reflection Types ──────────────────────────────────────
 
 export interface ReflectionReport {

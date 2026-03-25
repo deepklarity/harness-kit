@@ -18,6 +18,9 @@ import type {
     ForcedProviderStatus,
     AnalyticsCostSummary,
     TaskSchedule,
+    IdeOptions,
+    IdeSettings,
+    TaskIdeOptions,
 } from '../../types';
 
 export interface AuthState {
@@ -116,6 +119,11 @@ export interface IntegrationService {
     fetchOdinStatus(params?: { spec?: string; agent?: string; status?: string }): Promise<OdinStatusResponse>;
     fetchForcedProviderStatus(): Promise<ForcedProviderStatus>;
     fetchProcessMonitor(params?: { boardId?: string; specId?: string; runningOnly?: boolean }): Promise<ProcessMonitorResponse>;
+    fetchIdeOptions(): Promise<IdeOptions>;
+    fetchIdeSettings(): Promise<IdeSettings>;
+    saveIdeSettings(preferredIdeId: string | null): Promise<IdeSettings>;
+    fetchTaskIdeOptions(taskId: string): Promise<TaskIdeOptions>;
+    openTaskProject(taskId: string): Promise<void>;
 
     getAvailableStatuses(): string[];
 

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { Task, Member, Label, TaskComment } from '../types';
+import type { Task, Member, Label, TaskComment, TaskIdeOptions } from '../types';
 import { collectDownstreamTaskIds } from '../utils/dagUtils';
 import { formatDate, formatDuration, getStatusColor } from '../utils/transformer';
 import { parseActor } from '../services/harness/HarnessTimeService';
@@ -44,6 +44,7 @@ import { ReflectionReportViewer } from './ReflectionReportViewer';
 import { useToast } from '@/hooks/use-toast';
 import { parseCommentBody } from '../utils/commentParser';
 import { parseFailureDetails } from '../utils/failureParser';
+import { IdeBadge, IdeSetupModal } from './IdeSetupModal';
 
 interface TaskDetailModalProps {
     task: Task;
@@ -89,6 +90,11 @@ export function TaskDetailModal({
     const [showDependencyPicker, setShowDependencyPicker] = useState(false);
     const [dependencyDraft, setDependencyDraft] = useState<string[]>([]);
     const [savingDependencies, setSavingDependencies] = useState(false);
+    const [ideOptions, setIdeOptions] = useState<TaskIdeOptions | null>(null);
+    const [loadingIdeOptions, setLoadingIdeOptions] = useState(false);
+    const [showIdeSetup, setShowIdeSetup] = useState(false);
+    const [savingIde, setSavingIde] = useState(false);
+    const [openingProject, setOpeningProject] = useState(false);
 
     const [showAllHistory, setShowAllHistory] = useState(false);
     const [showAllComments, setShowAllComments] = useState(false);
@@ -151,7 +157,24 @@ export function TaskDetailModal({
         }
     }, [task.id, service, reflections.some(r => r.status === 'PENDING' || r.status === 'RUNNING')]);
 
-    // unused label handlers removed
+    useEffect(() => {
+        let active = true;
+        setLoadingIdeOptions(true);
+        service.fetchTaskIdeOptions(task.id)
+            .then(options => {
+                if (!active) return;
+                setIdeOptions(options);
+            })
+            .catch(() => {
+                if (!active) return;
+                setIdeOptions(null);
+            })
+            .finally(() => {
+                if (!active) return;
+                setLoadingIdeOptions(false);
+            });
+        return () => { active = false; };
+    }, [task.id, service]);
 
     const isJson = useMemo(() => {
         if (!task.description) return false;
@@ -332,6 +355,8 @@ export function TaskDetailModal({
 
     // Cost comes from the backend — single source of truth
     const estimatedCost = task.estimatedCostUsd ?? null;
+    const preferredIde = ideOptions?.detected_ides.find(ide => ide.id === ideOptions.preferred_ide_id) || null;
+    const routingReasoning = typeof task.metadata?.routing_reasoning === 'string' ? task.metadata.routing_reasoning : null;
 
     const hasExecContext = !!(execContext.model || execContext.cwd || execContext.harness || execContext.branch || task.complexity || task.dependsOn?.length || task.currentStatus === 'TODO');
 
@@ -362,6 +387,61 @@ export function TaskDetailModal({
             setReflections(reports || []);
         } catch {
             // ignore
+        }
+    };
+
+    const refreshIdeOptions = async () => {
+        const options = await service.fetchTaskIdeOptions(task.id);
+        setIdeOptions(options);
+        return options;
+    };
+
+    const handleSaveIde = async (ideId: string) => {
+        setSavingIde(true);
+        try {
+            await service.saveIdeSettings(ideId);
+            await refreshIdeOptions();
+            setShowIdeSetup(false);
+            toast({ title: 'IDE saved', description: 'Open Project will use this IDE for this board root.' });
+        } catch (e) {
+            toast({
+                title: 'Failed to save IDE',
+                description: e instanceof Error ? e.message : 'Unknown error',
+                variant: 'destructive',
+            });
+        } finally {
+            setSavingIde(false);
+        }
+    };
+
+    const handleOpenProject = async () => {
+        if (!ideOptions?.preferred_ide_id || !preferredIde) {
+            setShowIdeSetup(true);
+            return;
+        }
+        setOpeningProject(true);
+        try {
+            await service.openTaskProject(task.id);
+            toast({ title: 'Project opened', description: `Opened ${ideOptions.project_root || 'project root'} in ${preferredIde.label}.` });
+        } catch (e) {
+            const body = (e as { body?: { code?: string; detail?: string } })?.body;
+            const code = body?.code;
+            if (code === 'no_preferred_ide' || code === 'preferred_ide_not_detected') {
+                setShowIdeSetup(true);
+            } else {
+                toast({
+                    title: 'Failed to open project',
+                    description: body?.detail || (e instanceof Error ? e.message : 'Unknown error'),
+                    variant: 'destructive',
+                });
+            }
+            try {
+                await refreshIdeOptions();
+            } catch {
+                // Ignore refresh failures after open error
+            }
+        } finally {
+            setOpeningProject(false);
         }
     };
 
@@ -451,6 +531,20 @@ export function TaskDetailModal({
                         <span className="font-mono">#{task.idShort}</span>
                         <div className="flex-1" />
                     </div>
+                    {ideOptions?.project_root && (
+                        <div className="mb-3 flex items-center">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-2 text-xs font-medium"
+                                onClick={handleOpenProject}
+                                disabled={openingProject || loadingIdeOptions}
+                            >
+                                <FolderOpen className="size-3.5" />
+                                {openingProject ? 'Opening...' : preferredIde ? `Open in ${preferredIde.label}` : 'Open Project'}
+                            </Button>
+                        </div>
+                    )}
                     {editingField === 'title' ? (
                         <div className="flex gap-2">
                             <Input className="flex-1 text-xl font-bold" value={editValue}
@@ -803,10 +897,9 @@ export function TaskDetailModal({
                                             </div>
                                         </CompactRow>
                                     )}
-
-                                    {typeof task.metadata?.routing_reasoning === 'string' && (
+                                    {routingReasoning && (
                                         <CompactRow label="Routing" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />} noBorder>
-                                            <span className="text-[10px] font-mono text-muted-foreground/80 leading-snug">{task.metadata.routing_reasoning as string}</span>
+                                            <span className="text-[10px] font-mono text-muted-foreground/80 leading-snug">{routingReasoning}</span>
                                         </CompactRow>
                                     )}
 
@@ -1271,6 +1364,17 @@ export function TaskDetailModal({
                     </DialogContent>
                 </Dialog>
             )}
+
+            <IdeSetupModal
+                open={showIdeSetup}
+                onOpenChange={setShowIdeSetup}
+                detectedIdes={ideOptions?.detected_ides || []}
+                initialIdeId={ideOptions?.preferred_ide_id || null}
+                saving={savingIde}
+                onSave={handleSaveIde}
+                title="Configure IDE"
+                description="Choose the IDE TaskIt should use when opening this board's Odin project root."
+            />
 
             {/* Reflection Modal */}
             {showReflectionModal && (

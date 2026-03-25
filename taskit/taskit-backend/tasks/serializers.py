@@ -7,7 +7,7 @@ from .models import (
     Board, CommentAttachment, CommentType, Label, Notification, NotificationPreference,
     ReflectionReport, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
     TaskComment, TaskHistory, TaskPriority, TaskSchedule, TaskScheduleRun,
-    TaskStatus, User,
+    TaskStatus, User, UserSetting,
 )
 from .scheduling import ScheduleValidationError, parse_local_datetime
 
@@ -82,7 +82,6 @@ class TaskSerializer(serializers.ModelSerializer):
             "estimated_cost_usd", "reflection_cost_usd", "usage", "time_in_statuses",
             "reference_images",
             "schedule_summary",
-            "reference_images",
         ]
         read_only_fields = ["id", "created_at", "last_updated_at", "kanban_position"]
 
@@ -153,7 +152,6 @@ class TaskSerializer(serializers.ModelSerializer):
             "materialized_task_id": schedule.materialized_task_id,
             "current_run_id": obj.current_schedule_run_id,
         }
-
 
 class CreateTaskSerializer(serializers.Serializer):
     board_id = serializers.IntegerField()
@@ -513,6 +511,13 @@ class MemberListSerializer(UserSerializer):
         fields = UserSerializer.Meta.fields + ["task_count"]
 
 
+class UserSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserSetting
+        fields = ["preferred_ide_id", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
+
+
 class TaskWithHistorySerializer(TaskSerializer):
     history = TaskHistorySerializer(many=True, read_only=True)
     comments = TaskCommentSerializer(many=True, read_only=True)
@@ -563,6 +568,14 @@ class ReflectionRequestSerializer(serializers.Serializer):
         default=["description", "comments", "execution_result", "dependencies", "metadata"],
     )
     requested_by = serializers.EmailField(required=False, default="")
+
+
+class UserIdeSettingUpdateSerializer(serializers.Serializer):
+    preferred_ide_id = serializers.CharField(max_length=50, allow_null=True, allow_blank=True, required=False)
+
+
+class OpenProjectSerializer(serializers.Serializer):
+    ide_id = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
 
 
 class ReflectionReportSerializer(serializers.ModelSerializer):

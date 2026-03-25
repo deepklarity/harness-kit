@@ -14,4 +14,6 @@ router.register(r"reflections", views.ReflectionReportViewSet, basename="reflect
 
 urlpatterns = [
     path("dashboard/", views.dashboard),
+    path("user-settings/ide/", views.user_ide_settings),
+    path("user-settings/ide/options/", views.user_ide_options),
 ] + router.urls

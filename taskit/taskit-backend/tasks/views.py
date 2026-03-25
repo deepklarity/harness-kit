@@ -23,7 +23,7 @@ from .kanban_ordering import move_task
 from .models import (
     Board, BoardMembership, CommentAttachment, CommentType, Label,
     ReflectionReport, ReflectionStatus, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
-    TaskComment, TaskHistory, TaskSchedule, TaskScheduleRun, TaskStatus, User,
+    TaskComment, TaskHistory, TaskSchedule, TaskScheduleRun, TaskStatus, User, UserSetting,
 )
 from .scheduling import (
     compute_schedule_next_run,
@@ -34,6 +34,7 @@ from .scheduling import (
     rebind_local_datetime,
     ScheduleValidationError,
 )
+from .ide import detect_supported_ides, get_supported_ide
 from .utils.logger import logger
 from .permissions import IsAdmin
 from .forced_provider import (
@@ -63,6 +64,7 @@ from .serializers import (
     ReflectionReportSerializer,
     ReflectionReportUpdateSerializer,
     ReflectionRequestSerializer,
+    OpenProjectSerializer,
     RuntimeStopSerializer,
     ScheduleStatusMutationSerializer,
     SpecDiagnosticSerializer,
@@ -82,6 +84,8 @@ from .serializers import (
     UpdateScheduleSerializer,
     UpdateTaskSerializer,
     UserSerializer,
+    UserIdeSettingUpdateSerializer,
+    UserSettingSerializer,
 )
 
 FAILURE_DEBUG_PREVIEW_LIMIT = 400
@@ -295,6 +299,33 @@ def _forced_provider_response():
     }
 
 
+def _fallback_task_user():
+    admin = User.objects.filter(is_admin=True).order_by("id").first()
+    if admin:
+        return admin
+    return User.objects.order_by("id").first()
+
+
+def _request_task_user(request):
+    user = getattr(request, "taskit_user", None) or getattr(request, "user", None)
+    if isinstance(user, User):
+        return user
+    return _fallback_task_user()
+
+
+def _user_settings_for_request(request):
+    user = _request_task_user(request)
+    if user is None:
+        return None, None
+    settings_obj, _ = UserSetting.objects.get_or_create(user=user)
+    return user, settings_obj
+
+
+def _board_project_root(task):
+    root = (task.board.working_dir or "").strip()
+    return root or None
+
+
 def _maybe_reassign_on_quota_failure(task, report):
     """If the task failed due to quota exhaustion, reassign to a different agent.
 
@@ -367,6 +398,46 @@ def _maybe_reassign_on_quota_failure(task, report):
         "[task:%s] Quota failure reassignment: %s/%s → %s/%s",
         task.id, old_assignee_name, old_model, new_agent.name, new_model,
     )
+
+
+@api_view(["GET", "PATCH"])
+def user_ide_settings(request):
+    user, settings_obj = _user_settings_for_request(request)
+    if user is None or settings_obj is None:
+        return Response({"detail": "No TaskIt user is available for IDE settings."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return Response(UserSettingSerializer(settings_obj).data)
+
+    ser = UserIdeSettingUpdateSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    preferred_ide_id = (ser.validated_data.get("preferred_ide_id") or "").strip().lower() or None
+
+    if preferred_ide_id:
+        supported = get_supported_ide(preferred_ide_id)
+        if supported is None:
+            raise ValidationError({"preferred_ide_id": "Unsupported IDE."})
+        detected_ids = {ide.id for ide in detect_supported_ides()}
+        if preferred_ide_id not in detected_ids:
+            raise ValidationError({"preferred_ide_id": "IDE is not currently detected on this system."})
+
+    settings_obj.preferred_ide_id = preferred_ide_id
+    settings_obj.save(update_fields=["preferred_ide_id", "updated_at"])
+    return Response(UserSettingSerializer(settings_obj).data)
+
+
+@api_view(["GET"])
+def user_ide_options(request):
+    _, settings_obj = _user_settings_for_request(request)
+    preferred_ide_id = settings_obj.preferred_ide_id if settings_obj else None
+    detected = detect_supported_ides()
+    return Response({
+        "preferred_ide_id": preferred_ide_id,
+        "detected_ides": [
+            {"id": ide.id, "label": ide.label, "icon_key": ide.icon_key}
+            for ide in detected
+        ],
+    })
 
 
 def _executing_lock_response(task, attempted_fields):
@@ -2407,6 +2478,54 @@ class TaskViewSet(viewsets.ModelViewSet):
                 "status", "terminal_task_status", "result_summary",
             ))
         return Response(data)
+
+    @action(detail=True, methods=["get"], url_path="ide-options")
+    def ide_options(self, request, pk=None):
+        task = get_object_or_404(Task.objects.select_related("board"), pk=pk)
+        _, settings_obj = _user_settings_for_request(request)
+        project_root = _board_project_root(task)
+        detected_ides = detect_supported_ides()
+        preferred_ide_id = settings_obj.preferred_ide_id if settings_obj else None
+        return Response({
+            "project_root": project_root,
+            "preferred_ide_id": preferred_ide_id,
+            "detected_ides": [
+                {"id": ide.id, "label": ide.label, "icon_key": ide.icon_key}
+                for ide in detected_ides
+            ],
+            "has_configured_ide": bool(preferred_ide_id),
+        })
+
+    @action(detail=True, methods=["post"], url_path="open-project")
+    def open_project(self, request, pk=None):
+        task = get_object_or_404(Task.objects.select_related("board"), pk=pk)
+        project_root = _board_project_root(task)
+        if not project_root:
+            return Response({"code": "no_project_root", "detail": "Board has no configured project root."}, status=status.HTTP_409_CONFLICT)
+
+        _, settings_obj = _user_settings_for_request(request)
+        preferred_ide_id = settings_obj.preferred_ide_id if settings_obj else None
+        if not preferred_ide_id:
+            return Response({"code": "no_preferred_ide", "detail": "No preferred IDE is configured."}, status=status.HTTP_409_CONFLICT)
+
+        ser = OpenProjectSerializer(data=request.data or {})
+        ser.is_valid(raise_exception=True)
+        requested_ide_id = (ser.validated_data.get("ide_id") or "").strip().lower() or preferred_ide_id
+        if requested_ide_id != preferred_ide_id:
+            return Response({"code": "no_preferred_ide", "detail": "Only the configured IDE can be used for Open Project."}, status=status.HTTP_409_CONFLICT)
+
+        ide = get_supported_ide(preferred_ide_id)
+        if ide is None:
+            return Response({"code": "no_preferred_ide", "detail": "Configured IDE is unsupported."}, status=status.HTTP_409_CONFLICT)
+        if ide.detect_launcher() is None:
+            return Response({"code": "preferred_ide_not_detected", "detail": f"{ide.label} is no longer detected on this system."}, status=status.HTTP_409_CONFLICT)
+
+        try:
+            ide.launch(project_root)
+        except Exception as exc:
+            return Response({"code": "launch_failed", "detail": str(exc) or "Failed to launch project."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"ok": True, "ide_id": ide.id, "project_root": project_root})
 
     @action(detail=True, methods=["post"], url_path="reflect")
     def reflect(self, request, pk=None):

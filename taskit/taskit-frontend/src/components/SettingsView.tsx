@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import type { Board, Member } from '../types';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import React from 'react';
+import type { AgentConfig, Board, DetectedIde, Member } from '../types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useService } from '../contexts/ServiceContext';
 import { Button } from '@/components/ui/button';
@@ -16,10 +17,11 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X } from 'lucide-react';
+import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X, SettingsIcon } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { useNavigate } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
+import { IdeBadge, IdeSetupModal } from './IdeSetupModal';
 
 import {
     Popover,
@@ -45,6 +47,11 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
     const [boardToClear, setBoardToClear] = useState<Board | null>(null);
     const [clearing, setClearing] = useState(false);
     const [forcedProvider, setForcedProvider] = useState<{ provider: string | null; model: string | null } | null>(null);
+    const [detectedIdes, setDetectedIdes] = useState<DetectedIde[]>([]);
+    const [preferredIdeId, setPreferredIdeId] = useState<string | null>(null);
+    const [loadingIdeOptions, setLoadingIdeOptions] = useState(false);
+    const [showIdeSetup, setShowIdeSetup] = useState(false);
+    const [savingIde, setSavingIde] = useState(false);
 
     // Manage members modal
     const [managingBoard, setManagingBoard] = useState<Board | null>(null);
@@ -161,6 +168,47 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
             });
         return () => { active = false; };
     }, [service]);
+
+    useEffect(() => {
+        let active = true;
+        setLoadingIdeOptions(true);
+        service.fetchIdeOptions()
+            .then(options => {
+                if (!active) return;
+                setDetectedIdes(options.detected_ides || []);
+                setPreferredIdeId(options.preferred_ide_id || null);
+            })
+            .catch(() => {
+                if (!active) return;
+                setDetectedIdes([]);
+                setPreferredIdeId(null);
+            })
+            .finally(() => {
+                if (!active) return;
+                setLoadingIdeOptions(false);
+            });
+        return () => { active = false; };
+    }, [service]);
+
+    const preferredIde = detectedIdes.find(ide => ide.id === preferredIdeId) || null;
+
+    const handleSaveIde = async (ideId: string) => {
+        setSavingIde(true);
+        try {
+            const saved = await service.saveIdeSettings(ideId);
+            setPreferredIdeId(saved.preferred_ide_id || null);
+            setShowIdeSetup(false);
+            toast({ title: 'IDE saved', description: 'Open Project will use this IDE by default.' });
+        } catch (e) {
+            toast({
+                title: 'Failed to save IDE',
+                description: e instanceof Error ? e.message : 'Unknown error',
+                variant: 'destructive',
+            });
+        } finally {
+            setSavingIde(false);
+        }
+    };
 
     const handleClear = async () => {
         if (!boardToClear) return;
@@ -302,6 +350,41 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                     </div>
                 </div>
             )}
+            <div className="rounded-lg border border-border bg-muted/20 px-4 py-4">
+                <div className="flex items-center justify-between gap-4">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <SettingsIcon className="size-4 text-muted-foreground" />
+                            <h3 className="text-sm font-medium">IDE Configuration</h3>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            Choose the IDE used by Open Project for Odin-initialized board roots.
+                        </p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => setShowIdeSetup(true)}>
+                        {preferredIde ? 'Change IDE' : 'Configure IDE'}
+                    </Button>
+                </div>
+
+                <div className="mt-3">
+                    {loadingIdeOptions ? (
+                        <div className="text-xs text-muted-foreground">Detecting supported IDEs...</div>
+                    ) : detectedIdes.length === 0 ? (
+                        <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
+                            No supported IDEs detected. Install or expose one of these CLIs on this machine: Cursor, VS Code, Zed.
+                        </div>
+                    ) : preferredIde ? (
+                        <div className="flex items-center gap-3">
+                            <IdeBadge ide={preferredIde} />
+                            <span className="text-xs text-muted-foreground">Configured for Open Project</span>
+                        </div>
+                    ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                            {detectedIdes.map(ide => <IdeBadge key={ide.id} ide={ide} muted />)}
+                        </div>
+                    )}
+                </div>
+            </div>
             {/* Boards Section */}
             <div>
                 <div className="flex items-center justify-between mb-3">
@@ -732,6 +815,15 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                     }}
                 />
             )}
+
+            <IdeSetupModal
+                open={showIdeSetup}
+                onOpenChange={setShowIdeSetup}
+                detectedIdes={detectedIdes}
+                initialIdeId={preferredIdeId}
+                saving={savingIde}
+                onSave={handleSaveIde}
+            />
         </div>
     );
 }
