@@ -25,6 +25,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { LabelPicker } from './LabelPicker';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { MarkdownEditor } from './MarkdownEditor';
 import { TraceViewer } from './TraceViewer';
@@ -61,10 +62,7 @@ interface TaskDetailModalProps {
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
-const LABEL_COLORS = [
-    '#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4',
-    '#3b82f6', '#8b5cf6', '#ec4899', '#64748b',
-];
+// unused LABEL_COLORS removed
 
 const PRIORITY_COLORS: Record<string, string> = {
     CRITICAL: 'text-red-400',
@@ -102,24 +100,36 @@ export function TaskDetailModal({
     const [isPostingReply, setIsPostingReply] = useState(false);
     const [isSummarizing, setIsSummarizing] = useState(false);
     const [summarizeError, setSummarizeError] = useState<string | null>(null);
-    const [isEditingLabels, setIsEditingLabels] = useState(false);
     const [allLabels, setAllLabels] = useState<Label[]>([]);
     const [selectedLabels, setSelectedLabels] = useState<number[]>([]);
-    const [labelSearch, setLabelSearch] = useState('');
-    const [newLabelName, setNewLabelName] = useState('');
-    const [newLabelColor, setNewLabelColor] = useState(LABEL_COLORS[0]);
+
+    useEffect(() => {
+        setSelectedLabels(task.labels?.map(l => l.id) || []);
+    }, [task.labels]);
+
+    useEffect(() => {
+        if (!availableLabels?.length && task.boardId) {
+            service.getLabels(task.boardId).then(setAllLabels).catch(() => {});
+        } else if (availableLabels) {
+            setAllLabels(availableLabels);
+        }
+    }, [task.boardId, availableLabels, service]);
+
+    const handleLabelsChange = (newLabels: Label[]) => {
+        setAllLabels(newLabels);
+    };
+
+    const handleSelectionChange = (newSelected: number[]) => {
+        setSelectedLabels(newSelected);
+        onUpdateTask(task.id, { labelIds: newSelected });
+    };
     const [refImageLightbox, setRefImageLightbox] = useState<{ url: string; filename: string } | null>(null);
 
     // Reflection state
     const [showReflectionModal, setShowReflectionModal] = useState(false);
     const [reflections, setReflections] = useState<ReflectionReport[]>([]);
 
-    useEffect(() => {
-        if (isEditingLabels) {
-            setAllLabels(availableLabels || []);
-            setSelectedLabels(task.labels?.map(l => l.id) || []);
-        }
-    }, [isEditingLabels, availableLabels, task.labels]);
+    // replaced
 
     // Fetch reflections on mount and when task changes
     useEffect(() => {
@@ -140,37 +150,7 @@ export function TaskDetailModal({
         }
     }, [task.id, service, reflections.some(r => r.status === 'PENDING' || r.status === 'RUNNING')]);
 
-    const startEditingLabels = () => setIsEditingLabels(true);
-
-    const toggleLabel = (labelId: number) => {
-        if (selectedLabels.includes(labelId)) {
-            setSelectedLabels(prev => prev.filter(id => id !== labelId));
-        } else {
-            setSelectedLabels(prev => [...prev, labelId]);
-        }
-    };
-
-    const handleCreateLabel = async () => {
-        if (!newLabelName) return;
-        try {
-            const label = await service.createLabel(newLabelName, newLabelColor);
-            setAllLabels(prev => [...prev, label]);
-            setSelectedLabels(prev => [...prev, label.id]);
-            setNewLabelName('');
-            setNewLabelColor(LABEL_COLORS[0]);
-        } catch (e) {
-            console.error('Failed to create label', e);
-        }
-    };
-
-    const handleSaveLabels = async () => {
-        onUpdateTask(task.id, { labelIds: selectedLabels });
-        setIsEditingLabels(false);
-    };
-
-    const filteredLabels = allLabels.filter(l =>
-        l.name.toLowerCase().includes(labelSearch.toLowerCase())
-    );
+    // unused label handlers removed
 
     const isJson = useMemo(() => {
         if (!task.description) return false;
@@ -653,68 +633,14 @@ export function TaskDetailModal({
 
                             {/* Labels */}
                             <CompactRow label="Labels">
-                                {!isEditingLabels ? (
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                        {task.labels && task.labels.length > 0 ? (
-                                            task.labels.map(label => (
-                                                <Badge key={label.id} className="px-1.5 py-0 text-[10px] font-medium text-white border-0 h-5"
-                                                    style={{ backgroundColor: label.color }}>
-                                                    {label.name}
-                                                </Badge>
-                                            ))
-                                        ) : (
-                                            <span className="text-xs text-muted-foreground italic">None</span>
-                                        )}
-                                        <button className="opacity-40 hover:opacity-100 transition-opacity" onClick={startEditingLabels}>
-                                            <Pencil className="size-3" />
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="bg-secondary/50 p-2.5 rounded-lg border border-border shadow-inner">
-                                        <div className="space-y-2">
-                                            <div className="relative">
-                                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
-                                                <Input placeholder="Search labels..." value={labelSearch}
-                                                    onChange={e => setLabelSearch(e.target.value)} autoFocus className="pl-7 h-7 text-xs bg-background" />
-                                            </div>
-                                            <ScrollArea className="max-h-[120px]">
-                                                <div className="space-y-0.5">
-                                                    {filteredLabels.map(label => (
-                                                        <div key={label.id}
-                                                            className="flex items-center gap-2 p-1 rounded hover:bg-background/80 cursor-pointer"
-                                                            onClick={() => toggleLabel(label.id)}>
-                                                            <Checkbox checked={selectedLabels.includes(label.id)} />
-                                                            <div className="h-3 w-6 rounded" style={{ backgroundColor: label.color }} />
-                                                            <span className="text-xs">{label.name}</span>
-                                                        </div>
-                                                    ))}
-                                                    {filteredLabels.length === 0 && (
-                                                        <div className="text-[10px] text-muted-foreground p-1">No matching labels.</div>
-                                                    )}
-                                                </div>
-                                            </ScrollArea>
-                                            <div className="border-t border-border/50 pt-1.5">
-                                                <div className="flex gap-1.5 mb-1.5">
-                                                    <Input placeholder="New label" value={newLabelName} onChange={e => setNewLabelName(e.target.value)} className="h-6 text-[10px] flex-1" />
-                                                    <Button size="sm" disabled={!newLabelName} onClick={handleCreateLabel} className="h-6 text-[10px] px-2">+</Button>
-                                                </div>
-                                                <div className="flex gap-1 flex-wrap mb-1.5">
-                                                    {LABEL_COLORS.map(c => (
-                                                        <div key={c}
-                                                            className={`size-3.5 rounded-full cursor-pointer ${newLabelColor === c ? 'ring-2 ring-primary ring-offset-1 ring-offset-background' : ''}`}
-                                                            style={{ backgroundColor: c }}
-                                                            onClick={() => setNewLabelColor(c)}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </div>
-                                            <div className="flex gap-2 justify-end pt-1 border-t border-border/50">
-                                                <Button size="sm" variant="ghost" onClick={() => setIsEditingLabels(false)} className="h-6 text-[10px] px-2">Cancel</Button>
-                                                <Button size="sm" onClick={handleSaveLabels} className="h-6 text-[10px] px-2">Save</Button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
+                                <LabelPicker
+                                    boardId={task.boardId}
+                                    selectedLabelIds={selectedLabels}
+                                    allLabels={allLabels}
+                                    onLabelsChange={handleLabelsChange}
+                                    onSelectionChange={handleSelectionChange}
+                                    readonly={isExecuting}
+                                />
                             </CompactRow>
 
                             {/* Created — inline */}

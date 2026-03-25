@@ -41,9 +41,13 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class LabelSerializer(serializers.ModelSerializer):
+    board_id = serializers.PrimaryKeyRelatedField(
+        queryset=Board.objects.all(), source="board", allow_null=True, required=False
+    )
+
     class Meta:
         model = Label
-        fields = ["id", "name", "color", "created_at"]
+        fields = ["id", "board_id", "name", "color", "created_at"]
         read_only_fields = ["id", "created_at"]
 
 
@@ -191,7 +195,7 @@ class UpdateTaskSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=TaskStatus.choices, required=False)
     assignee_id = serializers.IntegerField(required=False, allow_null=True)
     label_ids = serializers.ListField(
-        child=serializers.IntegerField(), required=False,
+        child=serializers.IntegerField(), required=False, allow_empty=True
     )
     updated_by = serializers.EmailField()
     depends_on = serializers.ListField(child=serializers.CharField(), required=False)

@@ -86,6 +86,7 @@ class Board(models.Model):
 
 
 class Label(models.Model):
+    board = models.ForeignKey('Board', on_delete=models.CASCADE, related_name="labels", null=True, blank=True)
     name = models.CharField(max_length=255)
     color = models.CharField(max_length=50, default="", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

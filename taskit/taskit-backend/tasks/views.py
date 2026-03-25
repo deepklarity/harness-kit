@@ -1494,9 +1494,15 @@ class ScheduleViewSet(viewsets.ModelViewSet):
 
 
 class LabelViewSet(viewsets.ModelViewSet):
-    queryset = Label.objects.all().order_by("id")
     serializer_class = LabelSerializer
     pagination_class = StandardPagination
+
+    def get_queryset(self):
+        queryset = Label.objects.all().order_by("id")
+        board_id = self.request.query_params.get("board_id")
+        if board_id:
+            queryset = queryset.filter(board_id=board_id)
+        return queryset
 
     def update(self, request, *args, **kwargs):
         kwargs["partial"] = True

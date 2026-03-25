@@ -202,13 +202,7 @@ export const TaskCard = memo(function TaskCard({
                                     <span className={`text-[9px] font-semibold uppercase shrink-0 px-1 rounded-sm border leading-tight ${COMPLEXITY_COLORS[task.complexity.toLowerCase()] || 'bg-muted text-muted-foreground'}`}>{task.complexity}</span>
                                 )}
                                 {blockedByFailed && <AlertTriangle className="size-2.5 shrink-0 text-red-500" />}
-                                {task.labels && task.labels.length > 0 && (
-                                    <div className="flex gap-0.5 shrink-0 ml-auto">
-                                        {task.labels.map(label => (
-                                            <span key={label.id} className="size-1.5 rounded-full" style={{ backgroundColor: label.color }} />
-                                        ))}
-                                    </div>
-                                )}
+
                             </div>
 
                             <div className="font-medium text-[12.5px] leading-snug truncate group-hover:text-primary transition-colors">
@@ -290,18 +284,7 @@ export const TaskCard = memo(function TaskCard({
                                         {task.complexity}
                                     </Badge>
                                 )}
-                                {task.labels && task.labels.length > 0 && (
-                                    <div className="flex gap-0.5 ml-auto">
-                                        {task.labels.map(label => (
-                                            <span
-                                                key={label.id}
-                                                className="size-2 rounded-full"
-                                                style={{ backgroundColor: label.color }}
-                                                title={label.name}
-                                            />
-                                        ))}
-                                    </div>
-                                )}
+
                             </div>
 
                             {isEditingTitle ? (

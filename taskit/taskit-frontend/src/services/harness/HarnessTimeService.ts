@@ -1001,13 +1001,14 @@ export class HarnessTimeService implements IntegrationService {
         return this.get<ProcessMonitorResponse>(`/api/runtime/process-monitor/${qs.toString() ? `?${qs}` : ''}`);
     }
 
-    async getLabels(): Promise<Label[]> {
-        const payload = await this.get<PaginatedResponseBody<Label> | Label[]>('/api/labels/?page_size=500');
+    async getLabels(boardId?: string): Promise<Label[]> {
+        const query = boardId ? `?board_id=${encodeURIComponent(boardId)}&page_size=500` : '?page_size=500';
+        const payload = await this.get<PaginatedResponseBody<Label> | Label[]>(`/api/labels/${query}`);
         return this.extractList(payload);
     }
 
-    async createLabel(name: string, color: string): Promise<Label> {
-        return this.post<Label>('/api/labels/', { name, color });
+    async createLabel(name: string, color: string, boardId?: string): Promise<Label> {
+        return this.post<Label>('/api/labels/', { name, color, board_id: boardId ? Number(boardId) : undefined });
     }
 
     async addTaskLabel(taskId: string, labelId: number): Promise<void> {

@@ -160,7 +160,7 @@ function App() {
                 service.fetchBoardsPage({ page: 1, page_size: 200, sort: 'name' }),
                 needsMembers ? service.fetchMembersPage({ page: 1, page_size: 200, sort: 'name', board: boardFilter }) : Promise.resolve(null),
                 needsSpecs ? service.fetchSpecsPage({ page: 1, page_size: 200, board: boardFilter }) : Promise.resolve(null),
-                needsLabels ? service.getLabels() : Promise.resolve(null),
+                needsLabels ? service.getLabels(boardFilter) : Promise.resolve(null),
             ]);
             const loadedMembers = membersResp?.results || [];
             const loadedBoards = boardsResp.results.map(board => ({

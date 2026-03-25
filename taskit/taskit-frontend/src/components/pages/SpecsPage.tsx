@@ -17,7 +17,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { DollarSign, Plus, Terminal, Trash2 } from 'lucide-react';
+import { Plus, Terminal, Trash2 } from 'lucide-react';
 import { formatCost } from '@/utils/costEstimation';
 import { OdinGuideModal, OdinGuideContent } from '@/components/OdinGuideModal';
 import { FilterBar, MultiSelectFilter, PaginationControls, SearchBar, SortControl, DateRangeFilter } from '@/components/filters';
@@ -273,19 +273,16 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                                         </div>
                                     </div>
                                     <div className="text-base font-semibold mb-2 break-all">{spec.title}</div>
-                                    {(spec.costSummary?.total_cost_usd || spec.costSummary?.reflection_cost_usd) ? (
-                                        <div className="flex items-center gap-3 text-[10px] font-mono mb-1.5">
-                                            <span className="flex items-center gap-1 text-emerald-400">
-                                                <DollarSign className="size-3" />
-                                                {formatCost(spec.costSummary.total_cost_usd)}
+                                    <div className="flex items-center gap-3 text-[10px] font-mono mb-1.5">
+                                        <span className="flex items-center gap-1 text-emerald-400">
+                                            {formatCost(spec.costSummary?.total_cost_usd ?? 0)}
+                                        </span>
+                                        {(spec.costSummary?.reflection_cost_usd ?? 0) > 0 && (
+                                            <span className="text-violet-400">
+                                                +{formatCost(spec.costSummary?.reflection_cost_usd)} reflect
                                             </span>
-                                            {(spec.costSummary.reflection_cost_usd ?? 0) > 0 && (
-                                                <span className="text-violet-400">
-                                                    +{formatCost(spec.costSummary.reflection_cost_usd)} reflect
-                                                </span>
-                                            )}
-                                        </div>
-                                    ) : null}
+                                        )}
+                                    </div>
                                     <div className="text-xs text-muted-foreground line-clamp-2">{spec.content || 'No content'}</div>
                                 </CardContent>
                             </Card>

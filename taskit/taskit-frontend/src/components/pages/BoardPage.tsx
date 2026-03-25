@@ -408,7 +408,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         }, { replace: true });
     }, [setSearchParams]);
 
-    const isEmpty = !loading && visibleTasks.length === 0;
+    const isEmpty = !loading && tasks.length === 0;
     const handleSearchSelect = useCallback((result: TaskSearchResult, scope: 'board' | 'global') => {
         setSearchParams(prev => {
             const next = new URLSearchParams(prev);

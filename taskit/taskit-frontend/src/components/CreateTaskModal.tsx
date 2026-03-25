@@ -8,13 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ChevronDown, Plus, X, Bot, User, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Plus, Bot, User, AlertTriangle } from 'lucide-react';
 import { PresetPicker } from './PresetPicker';
 import { ImageDropZone } from './ImageDropZone';
+import { LabelPicker } from './LabelPicker';
 
 const WEEKDAY_KEYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
 
@@ -94,15 +95,10 @@ export function CreateTaskModal({
     const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([]);
     const [allLabels, setAllLabels] = useState<LabelType[]>(availableLabels || []);
     const [selectedLabelIds, setSelectedLabelIds] = useState<number[]>([]);
-    const [showLabelPicker, setShowLabelPicker] = useState(false);
-    const [newLabelName, setNewLabelName] = useState('');
-    const [newLabelColor, setNewLabelColor] = useState('#3b82f6');
     const [showNewUser, setShowNewUser] = useState(false);
     const [newUserName, setNewUserName] = useState('');
     const [newUserEmail, setNewUserEmail] = useState('');
     const [creatingUser, setCreatingUser] = useState(false);
-
-    const LABEL_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#64748b'];
 
     useEffect(() => {
         service.fetchPresets()
@@ -178,6 +174,12 @@ export function CreateTaskModal({
         );
         return [...onBoard, ...disabledAgents];
     }, [users, selectedBoardObj, disabledAgentEmails]);
+
+    useEffect(() => {
+        if (boardId) {
+            service.getLabels(boardId).then(setAllLabels).catch(() => {});
+        }
+    }, [boardId, service]);
 
     useEffect(() => {
         const enabledBoardUsers = boardUsers.filter(u => !disabledAgentEmails.has(u.email));
@@ -296,22 +298,6 @@ export function CreateTaskModal({
         const defaultModel = availableModels.find(m => m.is_default)?.name || availableModels[0].name;
         setSelectedModelName(defaultModel);
     }, [selectedUserId, availableModels]);
-
-    const toggleLabel = (id: number) => {
-        setSelectedLabelIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-    };
-
-    const handleCreateLabel = async () => {
-        if (!newLabelName.trim()) return;
-        try {
-            const label = await service.createLabel(newLabelName.trim(), newLabelColor);
-            setAllLabels(prev => [...prev, label]);
-            setSelectedLabelIds(prev => [...prev, label.id]);
-            setNewLabelName('');
-        } catch {
-            toast({ title: 'Error', description: 'Failed to create label.', variant: 'destructive' });
-        }
-    };
 
     const handleCreateUser = async () => {
         if (!newUserName.trim() || !newUserEmail.trim()) return;
@@ -737,48 +723,13 @@ export function CreateTaskModal({
 
                                     <div className="flex flex-col gap-2">
                                         <Label>Labels</Label>
-                                        <div className="flex flex-wrap gap-1.5 min-h-[32px] items-center">
-                                            {selectedLabelIds.map(id => {
-                                                const label = allLabels.find(l => l.id === id);
-                                                if (!label) return null;
-                                                return (
-                                                    <Badge key={id} className="gap-1 pr-1 text-xs text-white border-0" style={{ backgroundColor: label.color }}>
-                                                        {label.name}
-                                                        <button type="button" onClick={() => toggleLabel(id)} className="hover:opacity-70">
-                                                            <X className="size-3" />
-                                                        </button>
-                                                    </Badge>
-                                                );
-                                            })}
-                                            <Button type="button" variant="outline" size="sm" className="h-6 text-xs px-2" onClick={() => setShowLabelPicker(!showLabelPicker)}>
-                                                <Plus className="size-3 mr-1" /> {showLabelPicker ? 'Close' : 'Add Labels'}
-                                            </Button>
-                                        </div>
-                                        {showLabelPicker && (
-                                            <div className="border rounded-lg p-3 bg-secondary/50 space-y-2">
-                                                <ScrollArea className="max-h-[120px]">
-                                                    <div className="space-y-1">
-                                                        {allLabels.map(label => (
-                                                            <div key={label.id} className="flex items-center gap-2 p-1 rounded hover:bg-background/80 cursor-pointer" onClick={() => toggleLabel(label.id)}>
-                                                                <Checkbox checked={selectedLabelIds.includes(label.id)} />
-                                                                <div className="h-3 w-6 rounded" style={{ backgroundColor: label.color }} />
-                                                                <span className="text-sm">{label.name}</span>
-                                                            </div>
-                                                        ))}
-                                                        {allLabels.length === 0 && <span className="text-xs text-muted-foreground">No labels yet.</span>}
-                                                    </div>
-                                                </ScrollArea>
-                                                <div className="flex gap-2 items-center border-t pt-2">
-                                                    <Input placeholder="New label" value={newLabelName} onChange={e => setNewLabelName(e.target.value)} className="h-7 text-xs flex-1" />
-                                                    <div className="flex gap-1">
-                                                        {LABEL_COLORS.map(c => (
-                                                            <div key={c} className={`size-4 rounded-full cursor-pointer ${newLabelColor === c ? 'ring-2 ring-primary' : ''}`} style={{ backgroundColor: c }} onClick={() => setNewLabelColor(c)} />
-                                                        ))}
-                                                    </div>
-                                                    <Button type="button" size="sm" className="h-7 text-xs" disabled={!newLabelName.trim()} onClick={handleCreateLabel}>Add</Button>
-                                                </div>
-                                            </div>
-                                        )}
+                                        <LabelPicker
+                                            boardId={boardId}
+                                            selectedLabelIds={selectedLabelIds}
+                                            allLabels={allLabels}
+                                            onLabelsChange={setAllLabels}
+                                            onSelectionChange={setSelectedLabelIds}
+                                        />
                                     </div>
                                 </div>
                             )}
