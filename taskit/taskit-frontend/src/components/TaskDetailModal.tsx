@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Task, Member, Label, TaskComment, TaskIdeOptions } from '../types';
 import { collectDownstreamTaskIds } from '../utils/dagUtils';
@@ -33,6 +33,7 @@ import {
     Pencil, Search, Trash2, Eye, Code, FileText, FolderOpen,
     GitBranch, Package, Terminal, User, ChevronRight,
     HelpCircle, CornerDownRight, Send, ShieldCheck, Sparkles, Loader2,
+    ZoomIn, ZoomOut, RotateCcw,
     Bot,
 } from 'lucide-react';
 import { useService } from '../contexts/ServiceContext';
@@ -78,6 +79,7 @@ export function TaskDetailModal({
 }: TaskDetailModalProps) {
     const service = useService();
     const { user: authUser } = useAuth();
+    console.log('TaskDetailModal loaded, version 2 with zoomScale');
     const { toast } = useToast();
     const [searchParams] = useSearchParams();
     const isExecuting = task.currentStatus === 'EXECUTING';
@@ -1461,6 +1463,57 @@ export function TaskDetailModal({
     );
 }
 
+function CollapsibleContent({ children, maxHeight = 150 }: { children: React.ReactNode; maxHeight?: number }) {
+    const ref = useRef<HTMLDivElement>(null);
+    const [overflows, setOverflows] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+
+    const measure = useCallback(() => {
+        if (ref.current) {
+            setOverflows(ref.current.scrollHeight > maxHeight);
+        }
+    }, [maxHeight]);
+
+    useEffect(() => {
+        measure();
+        const el = ref.current;
+        if (!el) return;
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, [measure]);
+
+    return (
+        <div>
+            <div
+                ref={ref}
+                className={expanded ? '' : 'overflow-hidden'}
+                style={!expanded && overflows ? { maxHeight } : undefined}
+            >
+                {children}
+            </div>
+            {overflows && !expanded && (
+                <div className="relative -mt-6 pt-6 bg-gradient-to-t from-card/90 to-transparent">
+                    <button
+                        className="text-[11px] text-muted-foreground hover:text-foreground font-medium transition-colors"
+                        onClick={() => setExpanded(true)}
+                    >
+                        Show more
+                    </button>
+                </div>
+            )}
+            {overflows && expanded && (
+                <button
+                    className="text-[11px] text-muted-foreground hover:text-foreground font-medium mt-1 transition-colors"
+                    onClick={() => setExpanded(false)}
+                >
+                    Show less
+                </button>
+            )}
+        </div>
+    );
+}
+
 function CommentItem({ comment, onReply, replyComment }: {
     comment: TaskComment;
     onReply?: (questionCommentId: string) => void;
@@ -1471,6 +1524,21 @@ function CommentItem({ comment, onReply, replyComment }: {
 
     const [traceCopyState, setTraceCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const [lightboxImage, setLightboxImage] = useState<{ url: string; filename: string } | null>(null);
+    const [zoomScale, setZoomScale] = useState(1);
+    const [panX, setPanX] = useState(0);
+    const [panY, setPanY] = useState(0);
+    const [isDragging, setIsDragging] = useState(false);
+    const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const imageRef = useRef<HTMLImageElement>(null);
+
+    useEffect(() => {
+        if (!lightboxImage) {
+            setZoomScale(1);
+            setPanX(0);
+            setPanY(0);
+        }
+    }, [lightboxImage]);
 
     useEffect(() => {
         if (traceCopyState === 'idle') return;
@@ -1509,6 +1577,69 @@ function CommentItem({ comment, onReply, replyComment }: {
         if (traceData) parts.push(traceData);
         return parts.join('\n\n').trim();
     }, [failureDetails.failureDebug, traceData]);
+
+    const handleZoomIn = () => setZoomScale(s => Math.min(s + 0.1, 5));
+    const handleZoomOut = () => setZoomScale(s => Math.max(s - 0.1, 0.5));
+    const handleResetZoom = () => {
+        setZoomScale(1);
+        setPanX(0);
+        setPanY(0);
+    };
+
+    const handleWheelZoom = (e: React.WheelEvent) => {
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        setZoomScale(s => Math.max(0.5, Math.min(5, s + delta)));
+    };
+
+    // Clamp pan values to prevent image from going completely off-screen
+    const clampPan = (panXValue: number, panYValue: number, scale: number) => {
+        const container = containerRef.current;
+        const image = imageRef.current;
+        if (!container || !image) return { x: panXValue, y: panYValue };
+
+        const containerRect = container.getBoundingClientRect();
+        const imageRect = image.getBoundingClientRect();
+
+        const scaledWidth = imageRect.width * scale;
+        const scaledHeight = imageRect.height * scale;
+
+        const maxX = Math.max(0, (scaledWidth - containerRect.width) / 2);
+        const maxY = Math.max(0, (scaledHeight - containerRect.height) / 2);
+
+        return {
+            x: Math.max(-maxX, Math.min(maxX, panXValue)),
+            y: Math.max(-maxY, Math.min(maxY, panYValue))
+        };
+    };
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        if (zoomScale <= 1) return; // Only allow dragging when zoomed in
+        e.preventDefault();
+        setIsDragging(true);
+        dragStartRef.current = { x: e.clientX - panX, y: e.clientY - panY };
+    };
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!isDragging || zoomScale <= 1 || !dragStartRef.current) return;
+        e.preventDefault();
+
+        const newX = e.clientX - dragStartRef.current.x;
+        const newY = e.clientY - dragStartRef.current.y;
+
+        const clamped = clampPan(newX, newY, zoomScale);
+        setPanX(clamped.x);
+        setPanY(clamped.y);
+    };
+
+    const handleMouseUp = () => {
+        setIsDragging(false);
+        dragStartRef.current = null;
+    };
+
+    const handleMouseLeave = () => {
+        setIsDragging(false);
+        dragStartRef.current = null;
+    };
 
     // Extract reflection verdict from attachments for color coding
     const reflectionVerdict = isReflection
@@ -1595,15 +1726,19 @@ function CommentItem({ comment, onReply, replyComment }: {
                 <div className="text-xs font-mono mb-1 text-muted-foreground">{metrics}</div>
             )}
             {!summary && isExecutionTraceAtt && traceText && (
-                <TraceViewer traceText={traceText} />
+                <CollapsibleContent>
+                    <TraceViewer traceText={traceText} />
+                </CollapsibleContent>
             )}
             {summary && (
                 isSummary ? (
                     <div className="mt-1 rounded-md border border-amber-400/20 bg-card/60 p-3 overflow-x-auto">
-                        <MarkdownRenderer
-                            text={summary}
-                            className="text-sm text-foreground/80"
-                        />
+                        <CollapsibleContent>
+                            <MarkdownRenderer
+                                text={summary}
+                                className="text-sm text-foreground/80"
+                            />
+                        </CollapsibleContent>
                     </div>
                 ) : (
                     <>
@@ -1616,10 +1751,12 @@ function CommentItem({ comment, onReply, replyComment }: {
                             </div>
                         )}
                         {failureDetails.displaySummary && (
-                            <MarkdownRenderer
-                                text={failureDetails.displaySummary}
-                                className="text-sm text-foreground/80"
-                            />
+                            <CollapsibleContent>
+                                <MarkdownRenderer
+                                    text={failureDetails.displaySummary}
+                                    className="text-sm text-foreground/80"
+                                />
+                            </CollapsibleContent>
                         )}
                     </>
                 )
@@ -1678,16 +1815,78 @@ function CommentItem({ comment, onReply, replyComment }: {
             {/* Image lightbox preview */}
             {lightboxImage && (
                 <Dialog open={true} onOpenChange={() => setLightboxImage(null)}>
-                    <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 bg-black/95 border-border/20 overflow-hidden flex items-center justify-center">
+                    <DialogContent className="max-w-[95vw] max-h-[95vh] w-full h-full p-0 bg-black/95 border-border/20 overflow-hidden flex flex-col items-center justify-center">
                         <DialogHeader className="sr-only">
                             <DialogTitle>{lightboxImage.filename}</DialogTitle>
                         </DialogHeader>
-                        <img
-                            src={lightboxImage.url}
-                            alt={lightboxImage.filename}
-                            className="max-w-full max-h-[85vh] object-contain"
-                        />
-                        <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-xs text-white/60 font-mono bg-black/60 px-3 py-1 rounded-full">
+
+                        <div
+                            ref={containerRef}
+                            className="relative w-full h-full flex items-center justify-center overflow-auto custom-scrollbar p-12"
+                            onWheel={handleWheelZoom}
+                            onMouseDown={handleMouseDown}
+                            onMouseMove={handleMouseMove}
+                            onMouseUp={handleMouseUp}
+                            onMouseLeave={handleMouseLeave}
+                            style={{
+                                cursor: zoomScale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
+                            }}
+                        >
+                            <div
+                                style={{
+                                    transform: `scale(${zoomScale}) translate(${panX}px, ${panY}px)`,
+                                    transformOrigin: 'center center',
+                                    transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+                                    willChange: 'transform'
+                                }}
+                                className="flex items-center justify-center"
+                            >
+                                <img
+                                    ref={imageRef}
+                                    src={lightboxImage.url}
+                                    alt={lightboxImage.filename}
+                                    className="max-w-full max-h-[85vh] object-contain shadow-2xl rounded-sm"
+                                    style={{ imageRendering: 'auto' }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Zoom Controls Overlay */}
+                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-full shadow-2xl z-50">
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="size-8 rounded-full text-white/70 hover:text-white hover:bg-white/10"
+                                onClick={handleZoomOut}
+                                disabled={zoomScale <= 0.5}
+                            >
+                                <ZoomOut className="size-4" />
+                            </Button>
+                            <span className="text-xs font-mono text-white/90 min-w-[3rem] text-center">
+                                {Math.round(zoomScale * 100)}%
+                            </span>
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="size-8 rounded-full text-white/70 hover:text-white hover:bg-white/10"
+                                onClick={handleZoomIn}
+                                disabled={zoomScale >= 5}
+                            >
+                                <ZoomIn className="size-4" />
+                            </Button>
+                            <div className="w-px h-4 bg-white/10 mx-1" />
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                className="size-8 rounded-full text-white/70 hover:text-white hover:bg-white/10"
+                                onClick={handleResetZoom}
+                                title="Reset Zoom"
+                            >
+                                <RotateCcw className="size-4" />
+                            </Button>
+                        </div>
+
+                        <span className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] text-white/40 font-mono tracking-wider uppercase">
                             {lightboxImage.filename}
                         </span>
                     </DialogContent>
@@ -1717,10 +1916,12 @@ function CommentItem({ comment, onReply, replyComment }: {
                         <span className="text-muted-foreground font-mono">{formatDate(replyComment.createdAt)}</span>
                     </div>
                     <div className="pl-4">
-                        <MarkdownRenderer
-                            text={replyComment.content}
-                            className="text-sm text-foreground/80"
-                        />
+                        <CollapsibleContent>
+                            <MarkdownRenderer
+                                text={replyComment.content}
+                                className="text-sm text-foreground/80"
+                            />
+                        </CollapsibleContent>
                     </div>
                 </div>
             )}

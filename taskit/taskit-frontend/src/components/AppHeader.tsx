@@ -8,9 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import {
     BarChart3, LayoutDashboard, FileText, TrendingUp,
-    Plus, LogOut, Moon, Sun, Settings,
-    Activity, Search, Keyboard, Clock3,
+    Plus, LogOut, Settings,
+    Activity, Search, ChevronDown, Clock3,
 } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 import { NotificationBell } from './NotificationBell';
 import type { LucideIcon } from 'lucide-react';
 
@@ -22,6 +24,7 @@ const VIEW_ROUTES: { id: ViewMode; path: string; label: string; icon: LucideIcon
     { id: 'scheduling', path: '/scheduling', label: 'Scheduling', icon: Clock3 },
     { id: 'specs', path: '/specs', label: 'Specs', icon: FileText },
     { id: 'overview', path: '/stats', label: 'Stats', icon: BarChart3 },
+    { id: 'analytics', path: '/analytics', label: 'Analytics', icon: TrendingUp },
 ];
 
 export { ALL_BOARDS_ID, VIEW_ROUTES };
@@ -32,23 +35,20 @@ interface AppHeaderProps {
     currentBoard: Board | null;
     isAllBoards: boolean;
     viewMode: ViewMode;
-    dark: boolean;
     onBoardChange: (value: string) => void;
     onNavChange: (value: string) => void;
-    onToggleDark: () => void;
     onCreateTask: () => void;
     onCreateBoard: () => void;
     onNavigateHome: () => void;
     onOpenProcessMonitor: () => void;
     onOpenCommandPalette: () => void;
-    onOpenShortcuts: () => void;
 }
 
 export function AppHeader({
-    boards, selectedBoard, currentBoard, isAllBoards, viewMode, dark,
-    onBoardChange, onNavChange, onToggleDark,
+    boards, selectedBoard, currentBoard, isAllBoards, viewMode,
+    onBoardChange, onNavChange,
     onCreateTask, onCreateBoard, onNavigateHome,
-    onOpenProcessMonitor, onOpenCommandPalette, onOpenShortcuts,
+    onOpenProcessMonitor, onOpenCommandPalette,
 }: AppHeaderProps) {
     const { user: authUser, authEnabled, logout } = useAuth();
 
@@ -102,19 +102,66 @@ export function AppHeader({
                     </Select>
                 </div>
 
-                <Tabs value={viewMode} onValueChange={onNavChange} className="shrink-0">
-                    <TabsList>
-                        {VIEW_ROUTES.map(item => {
-                            const Icon = item.icon;
-                            return (
-                                <TabsTrigger key={item.id} value={item.id} className="gap-1.5 text-xs">
-                                    <Icon className="size-3.5" />
-                                    <span className="hidden sm:inline">{item.label}</span>
-                                </TabsTrigger>
-                            );
-                        })}
-                    </TabsList>
-                </Tabs>
+                <div className="flex items-center gap-1">
+                    <Tabs value={viewMode} onValueChange={onNavChange} className="shrink-0">
+                        <TabsList>
+                            {VIEW_ROUTES.filter(item => ['board', 'specs'].includes(item.id)).map(item => {
+                                const Icon = item.icon;
+                                return (
+                                    <TabsTrigger key={item.id} value={item.id} className="gap-1.5 text-xs">
+                                        <Icon className="size-3.5" />
+                                        <span className="hidden sm:inline">{item.label}</span>
+                                    </TabsTrigger>
+                                );
+                            })}
+                        </TabsList>
+                    </Tabs>
+
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className={cn(
+                                    "h-8 px-2.5 gap-1.5 text-xs font-medium transition-colors",
+                                    ['overview', 'analytics'].includes(viewMode)
+                                        ? "bg-muted text-foreground"
+                                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                )}
+                            >
+                                <BarChart3 className="size-3.5" />
+                                <span className="hidden sm:inline">Stats</span>
+                                <ChevronDown className="size-3 opacity-50" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="center" className="w-40 p-1">
+                            <div className="flex flex-col gap-0.5">
+                                <button
+                                    type="button"
+                                    onClick={() => onNavChange('overview')}
+                                    className={cn(
+                                        "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
+                                        viewMode === 'overview' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                                    )}
+                                >
+                                    <BarChart3 className="size-3.5" />
+                                    <span>Stats</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => onNavChange('analytics')}
+                                    className={cn(
+                                        "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
+                                        viewMode === 'analytics' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                                    )}
+                                >
+                                    <TrendingUp className="size-3.5" />
+                                    <span>Analytics</span>
+                                </button>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
+                </div>
 
                 <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                     <button
@@ -137,22 +184,11 @@ export function AppHeader({
                         <span className="hidden md:inline">Task</span>
                     </Button>
                     <Button variant="ghost" size="sm" className="size-8 p-0" asChild>
-                        <Link to="/analytics">
-                            <TrendingUp className="size-4" />
-                        </Link>
-                    </Button>
-                    <Button variant="ghost" size="sm" className="size-8 p-0" asChild>
                         <Link to={selectedBoard && selectedBoard !== ALL_BOARDS_ID ? `/settings?board=${selectedBoard}` : '/settings'}>
                             <Settings className="size-4" />
                         </Link>
                     </Button>
                     <NotificationBell />
-                    <Button variant="ghost" size="sm" className="size-8 p-0" onClick={onOpenShortcuts}>
-                        <Keyboard className="size-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" className="size-8 p-0" onClick={onToggleDark}>
-                        {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-                    </Button>
                     {authEnabled && authUser && (
                         <div className="flex items-center gap-1 sm:gap-2 ml-1 sm:ml-2 pl-1 sm:pl-2 border-l border-border">
                             <span className="text-xs text-muted-foreground truncate max-w-[80px] lg:max-w-[150px] hidden sm:block">

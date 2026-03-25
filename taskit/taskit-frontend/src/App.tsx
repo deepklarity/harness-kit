@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Routes, Route, useNavigate, useLocation, useParams, Navigate, useSearchParams } from 'react-router-dom';
-import type { Board, DashboardStats, Label, Member, ReflectionReport, Spec, Task, ViewMode } from './types';
+import type { Board, Label, Member, ReflectionReport, Spec, Task, ViewMode } from './types';
 import { useService } from './contexts/ServiceContext';
 import { useAuth } from './contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -27,7 +27,6 @@ import { EditUserModal } from './components/EditUserModal';
 import { BoardPage, SchedulingPage, SpecsPage } from './components/pages';
 import { NotificationsPage } from './components/NotificationsPage';
 import { CommandPalette } from './components/CommandPalette';
-import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { AnalyticsPage } from './components/analytics';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 
@@ -117,17 +116,15 @@ function App() {
     const [selectedUser, setSelectedUser] = useState<Member | null>(null);
     const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
     const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState<string | undefined>();
-    const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
 
     const suppressSingleKeys = showCreateTask || showCreateBoard || !!selectedTask
-        || processModalOpen || !!selectedUser || commandPaletteOpen || shortcutsModalOpen;
+        || processModalOpen || !!selectedUser || commandPaletteOpen;
 
     const globalShortcutActions = useCallback(() => ({
         openCommandPalette: (initialQuery?: string) => {
             setCommandPaletteInitialQuery(initialQuery);
             setCommandPaletteOpen(true);
         },
-        openShortcutsModal: () => setShortcutsModalOpen(true),
         createTask: () => setShowCreateTask(true),
         navigateTo: (path: string) => {
             const board = searchParams.get('board');
@@ -657,8 +654,6 @@ function App() {
         );
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const boardViewParam = searchParams.get('view');
     const isFullWidthBoard = viewMode === 'board';
 
     return (
@@ -670,10 +665,8 @@ function App() {
                     currentBoard={currentBoard}
                     isAllBoards={selectedBoard === ALL_BOARDS_ID}
                     viewMode={viewMode}
-                    dark={dark}
                     onBoardChange={handleBoardChange}
                     onNavChange={handleNavChange}
-                    onToggleDark={() => setDark(d => !d)}
                     onCreateTask={() => setShowCreateTask(true)}
                     onCreateBoard={() => setShowCreateBoard(true)}
                     onNavigateHome={() => {
@@ -682,7 +675,6 @@ function App() {
                     }}
                     onOpenProcessMonitor={() => setProcessModalOpen(true)}
                     onOpenCommandPalette={handleOpenCommandPalette}
-                    onOpenShortcuts={() => setShortcutsModalOpen(true)}
                 />
 
                 <main className={`flex-1 w-full py-6 px-4 sm:px-6 lg:px-8 ${isFullWidthBoard ? 'max-w-none' : 'max-w-[90vw] mx-auto'}`}>
@@ -766,6 +758,8 @@ function App() {
                                     onDataChange={() => setRefreshKey(k => k + 1)}
                                     onCreateBoard={() => setShowCreateBoard(true)}
                                     onDeleteBoard={handleDeleteBoard}
+                                    dark={dark}
+                                    onToggleDark={() => setDark(d => !d)}
                                 />
                             </>
                         } />
@@ -820,11 +814,6 @@ function App() {
                     boardId={boardFilter}
                     refreshKey={refreshKey}
                     onTaskStopped={() => setRefreshKey(k => k + 1)}
-                />
-
-                <KeyboardShortcutsModal
-                    open={shortcutsModalOpen}
-                    onClose={() => setShortcutsModalOpen(false)}
                 />
 
                 <CommandPalette

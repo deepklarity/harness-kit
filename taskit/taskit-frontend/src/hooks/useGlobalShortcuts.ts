@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 interface ShortcutActions {
     openCommandPalette: (initialQuery?: string) => void;
-    openShortcutsModal: () => void;
+    openShortcutsModal?: () => void;
     createTask: () => void;
     navigateTo: (path: string) => void;
 }
@@ -36,7 +36,7 @@ export function useGlobalShortcuts(actions: ShortcutActions, suppressSingleKeys:
             }
             if (e.key === '?' || (e.shiftKey && e.key === '/')) {
                 e.preventDefault();
-                actions.openShortcutsModal();
+                actions.openShortcutsModal?.();
                 return;
             }
 

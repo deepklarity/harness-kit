@@ -17,7 +17,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X, SettingsIcon } from 'lucide-react';
+import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X, SettingsIcon,Moon, Sun, Keyboard } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { useNavigate } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
@@ -30,6 +30,74 @@ import {
 } from '@/components/ui/popover';
 
 import { NotificationSettings } from './NotificationSettings';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
+const isMac = () => navigator.platform.toUpperCase().includes('MAC');
+
+function Kbd({ children }: { children: React.ReactNode }) {
+    return (
+        <kbd className="inline-flex h-5 items-center rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground pointer-events-none">
+            {children}
+        </kbd>
+    );
+}
+
+type ShortcutRow = { label: string; keys: string[] };
+type ShortcutGroup = { heading: string; rows: ShortcutRow[] };
+
+function KeyboardShortcutsContent() {
+    const modKey = isMac() ? '⌘' : 'Ctrl';
+
+    const groups: ShortcutGroup[] = [
+        {
+            heading: 'Navigation',
+            rows: [
+                { label: 'Go to Board', keys: ['G', 'B'] },
+                { label: 'Go to Specs', keys: ['G', 'S'] },
+                { label: 'Go to Stats', keys: ['G', 'D'] },
+                { label: 'Go to Notifications', keys: ['G', 'N'] },
+                { label: 'Go to Settings', keys: ['G', 'T'] },
+            ],
+        },
+        {
+            heading: 'Tasks',
+            rows: [
+                { label: 'Create new task', keys: ['N'] },
+            ],
+        },
+        {
+            heading: 'System',
+            rows: [
+                { label: 'Open command palette', keys: [`${modKey}K`] },
+                { label: 'Show keyboard shortcuts', keys: ['?'] },
+            ],
+        },
+    ];
+
+    return (
+        <div className="space-y-4">
+            {groups.map((group) => (
+                <div key={group.heading}>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-2">
+                        {group.heading}
+                    </div>
+                    <div className="space-y-2">
+                        {group.rows.map((row) => (
+                            <div key={row.label} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+                                <span className="text-sm text-foreground/80">{row.label}</span>
+                                <div className="flex items-center gap-1">
+                                    {row.keys.map((k, i) => (
+                                        <Kbd key={i}>{k}</Kbd>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
 
 
 interface SettingsViewProps {
@@ -38,9 +106,11 @@ interface SettingsViewProps {
     onDataChange: () => void;
     onCreateBoard: () => void;
     onDeleteBoard: (boardId: string) => Promise<void>;
+    dark: boolean;
+    onToggleDark: () => void;
 }
 
-export function SettingsView({ members, currentBoard, onDataChange, onCreateBoard, onDeleteBoard }: SettingsViewProps) {
+export function SettingsView({ members, currentBoard, onDataChange, onCreateBoard, onDeleteBoard, dark, onToggleDark }: SettingsViewProps) {
     const service = useService();
     const { toast } = useToast();
     const navigate = useNavigate();
@@ -798,6 +868,49 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                 </AlertDialogContent>
             </AlertDialog>
 
+            {/* Appearance Section */}
+            <div id="appearance" className="mt-8">
+                <h2 className="text-lg font-semibold mb-4">Appearance</h2>
+                <Card>
+                    <CardContent className="pt-6">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="size-10 rounded-md bg-muted flex items-center justify-center">
+                                    {dark ? <Sun className="size-5" /> : <Moon className="size-5" />}
+                                </div>
+                                <div>
+                                    <div className="font-medium">Theme</div>
+                                    <div className="text-sm text-muted-foreground">
+                                        Toggle between light and dark mode
+                                    </div>
+                                </div>
+                            </div>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-2"
+                                onClick={onToggleDark}
+                            >
+                                {dark ? (
+                                    <>
+                                        <Sun className="size-4" />
+                                        <span>Light Mode</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Moon className="size-4" />
+                                        <span>Dark Mode</span>
+                                    </>
+                                )}
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Keyboard Shortcuts Section */}
+
+
             {/* Notification Settings */}
             <div id="notifications" className="mt-8">
                 <h2 className="text-lg font-semibold mb-4">Notifications</h2>
@@ -816,6 +929,22 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                 />
             )}
 
+
+                        <div id="keyboard-shortcuts" className="mt-8">
+                <h2 className="text-lg font-semibold mb-4">Keyboard Shortcuts</h2>
+                <Card>
+                    <CardHeader className="pb-3">
+                        <div className="flex items-center gap-2">
+                            <Keyboard className="size-4 text-muted-foreground" />
+                            <CardTitle className="text-base">Available Shortcuts</CardTitle>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        <KeyboardShortcutsContent />
+                    </CardContent>
+                </Card>
+            </div>
+
             <IdeSetupModal
                 open={showIdeSetup}
                 onOpenChange={setShowIdeSetup}
@@ -824,6 +953,7 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                 saving={savingIde}
                 onSave={handleSaveIde}
             />
+
         </div>
     );
 }
