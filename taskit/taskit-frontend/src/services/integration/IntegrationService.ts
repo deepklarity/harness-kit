@@ -103,12 +103,13 @@ export interface IntegrationService {
             labelIds?: number[];
             dependsOn?: string[];
             workingDir?: string;
+            skipReflection?: boolean;
         }
     ): Promise<unknown>;
     updateTask(taskId: string, updates: {
         title?: string; description?: string; priority?: string; devEta?: number; status?: string;
         labelIds?: number[]; modelName?: string; dependsOn?: string[];
-        kanbanTargetIndex?: number; kanbanTargetStatus?: string;
+        kanbanTargetIndex?: number; kanbanTargetStatus?: string; skipReflection?: boolean;
     }): Promise<void>;
     stopExecution(taskId: string, targetStatus: string): Promise<void>;
     stopRuntimeTask(taskId: string, targetStatus?: string): Promise<void>;

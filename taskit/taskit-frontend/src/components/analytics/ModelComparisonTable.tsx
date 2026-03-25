@@ -9,7 +9,7 @@ interface ModelComparisonTableProps {
     data: AnalyticsModelComparison[];
 }
 
-type SortKey = 'model' | 'avg_cost' | 'total_cost' | 'avg_duration_ms' | 'avg_tokens' | 'success_rate' | 'task_count';
+type SortKey = 'model' | 'avg_cost' | 'total_cost' | 'avg_duration_ms' | 'avg_tokens' | 'success_rate' | 'task_count' | 'reflection_pass_rate';
 
 export function ModelComparisonTable({ data }: ModelComparisonTableProps) {
     const [sortKey, setSortKey] = useState<SortKey>('total_cost');
@@ -24,7 +24,9 @@ export function ModelComparisonTable({ data }: ModelComparisonTableProps) {
         const av = a[sortKey];
         const bv = b[sortKey];
         if (typeof av === 'string' && typeof bv === 'string') return sortDesc ? bv.localeCompare(av) : av.localeCompare(bv);
-        return sortDesc ? (bv as number) - (av as number) : (av as number) - (bv as number);
+        const numA = (av as number | null) ?? -1;
+        const numB = (bv as number | null) ?? -1;
+        return sortDesc ? numB - numA : numA - numB;
     });
 
     const columns: { key: SortKey; label: string; align?: string }[] = [
@@ -35,6 +37,7 @@ export function ModelComparisonTable({ data }: ModelComparisonTableProps) {
         { key: 'avg_tokens', label: 'Avg Tokens', align: 'right' },
         { key: 'avg_duration_ms', label: 'Avg Duration', align: 'right' },
         { key: 'success_rate', label: 'Success Rate', align: 'right' },
+        { key: 'reflection_pass_rate', label: 'Reflection Pass', align: 'right' },
     ];
 
     return (
@@ -80,6 +83,15 @@ export function ModelComparisonTable({ data }: ModelComparisonTableProps) {
                                             <span className={row.success_rate >= 80 ? 'text-green-500' : row.success_rate >= 50 ? 'text-yellow-500' : 'text-red-500'}>
                                                 {row.success_rate}%
                                             </span>
+                                        </td>
+                                        <td className="py-2 px-3 text-right tabular-nums">
+                                            {row.reflection_pass_rate === null ? (
+                                                <span className="text-muted-foreground">—</span>
+                                            ) : (
+                                                <span className={row.reflection_pass_rate >= 80 ? 'text-green-500' : row.reflection_pass_rate >= 50 ? 'text-yellow-500' : 'text-red-500'}>
+                                                    {row.reflection_pass_rate}%
+                                                </span>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}

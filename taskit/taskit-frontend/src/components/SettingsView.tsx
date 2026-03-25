@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { Board, Member } from '../types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useService } from '../contexts/ServiceContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +17,7 @@ import {
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { useNavigate } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
 
@@ -30,12 +32,13 @@ import { NotificationSettings } from './NotificationSettings';
 
 interface SettingsViewProps {
     members: Member[];
+    currentBoard: Board | null;
     onDataChange: () => void;
     onCreateBoard: () => void;
     onDeleteBoard: (boardId: string) => Promise<void>;
 }
 
-export function SettingsView({ members, onDataChange, onCreateBoard, onDeleteBoard }: SettingsViewProps) {
+export function SettingsView({ members, currentBoard, onDataChange, onCreateBoard, onDeleteBoard }: SettingsViewProps) {
     const service = useService();
     const { toast } = useToast();
     const navigate = useNavigate();
@@ -62,6 +65,25 @@ export function SettingsView({ members, onDataChange, onCreateBoard, onDeleteBoa
     const [currentPage, setCurrentPage] = useState(1);
     const [sortConfig, setSortConfig] = useState<{ key: 'id' | 'name' | 'tasks' | 'members', dir: 'asc' | 'desc' }>({ key: 'id', dir: 'asc' });
     const [expandedBoardId, setExpandedBoardId] = useState<string | null>(null);
+
+    const [reflectionModelEdits, setReflectionModelEdits] = useState<Record<string, string>>({});
+
+    // Current board reflection settings (top section)
+    const [currentSkip, setCurrentSkip] = useState(currentBoard?.skipReflection ?? false);
+    const [currentModel, setCurrentModel] = useState(currentBoard?.reflectionModel || '');
+    useEffect(() => {
+        setCurrentSkip(currentBoard?.skipReflection ?? false);
+        setCurrentModel(currentBoard?.reflectionModel || '');
+    }, [currentBoard?.id]);
+
+    const allModels = useMemo(() => {
+        const seen = new Set<string>();
+        return members.flatMap(m => m.availableModels || []).filter(m => {
+            if (seen.has(m.name)) return false;
+            seen.add(m.name);
+            return true;
+        });
+    }, [members]);
 
     // Backend-driven table data
     const [tableBoards, setTableBoards] = useState<Board[]>([]);
@@ -179,6 +201,20 @@ export function SettingsView({ members, onDataChange, onCreateBoard, onDeleteBoa
         }
     };
 
+    const handleUpdateBoardReflection = async (boardId: string, updates: { skip_reflection?: boolean; reflection_model?: string }) => {
+        try {
+            await service.updateBoard(boardId, updates);
+            setTableBoards(prev => prev.map(b => b.id === boardId ? {
+                ...b,
+                ...(updates.skip_reflection !== undefined && { skipReflection: updates.skip_reflection }),
+                ...(updates.reflection_model !== undefined && { reflectionModel: updates.reflection_model }),
+            } : b));
+            toast({ title: 'Board updated' });
+        } catch {
+            toast({ title: 'Error', description: 'Failed to update board settings.', variant: 'destructive' });
+        }
+    };
+
     const handleDeleteBoard = async () => {
         if (!boardToDelete) return;
         setDeleting(true);
@@ -203,10 +239,60 @@ export function SettingsView({ members, onDataChange, onCreateBoard, onDeleteBoa
         }
     };
 
+    const handleCurrentBoardReflection = async (updates: { skip_reflection?: boolean; reflection_model?: string }) => {
+        if (!currentBoard) return;
+        if (updates.skip_reflection !== undefined) setCurrentSkip(updates.skip_reflection);
+        if (updates.reflection_model !== undefined) setCurrentModel(updates.reflection_model);
+        try {
+            await service.updateBoard(currentBoard.id, updates);
+            toast({ title: 'Board updated' });
+        } catch {
+            // revert
+            setCurrentSkip(currentBoard.skipReflection ?? false);
+            setCurrentModel(currentBoard.reflectionModel || '');
+            toast({ title: 'Error', description: 'Failed to update reflection settings.', variant: 'destructive' });
+        }
+    };
+
     const isAgentUser = (member: Member) => member.email.endsWith('@odin.agent');
 
     return (
         <div className="space-y-8">
+            {currentBoard && (
+                <div>
+                    <h3 className="text-sm font-medium text-muted-foreground mb-3">Reflection Settings</h3>
+                    <div className="border border-border rounded-md p-4 flex flex-col gap-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-sm font-medium">{currentBoard.name}</div>
+                                <div className="text-xs text-muted-foreground mt-0.5">Skip reflection for all tasks in this board</div>
+                            </div>
+                            <Switch
+                                checked={currentSkip}
+                                onCheckedChange={v => handleCurrentBoardReflection({ skip_reflection: v })}
+                            />
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className="text-sm text-muted-foreground shrink-0">Reflection model</span>
+                            <Select
+                                value={currentModel || ''}
+                                onValueChange={v => handleCurrentBoardReflection({ reflection_model: v })}
+                            >
+                                <SelectTrigger className="h-8 text-xs font-mono flex-1">
+                                    <SelectValue placeholder="claude-sonnet-4-5-20250929" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {allModels.map(m => (
+                                        <SelectItem key={m.name} value={m.name}>
+                                            <span className="font-mono">{m.name}</span>
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                </div>
+            )}
             {forcedProvider?.provider && (
                 <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
                     <div className="text-xs font-medium text-muted-foreground">Forced AI Provider</div>
@@ -423,7 +509,7 @@ export function SettingsView({ members, onDataChange, onCreateBoard, onDeleteBoa
                                                                                 ))}
                                                                             </div>
                                                                         )}
-                                                                        
+
                                                                         <div className="font-medium text-xs text-muted-foreground uppercase tracking-wider mt-1">Agents</div>
                                                                         {hasAgentConfigs ? (
                                                                             <div className="flex flex-wrap gap-1.5">
@@ -448,6 +534,42 @@ export function SettingsView({ members, onDataChange, onCreateBoard, onDeleteBoa
                                                                         )}
                                                                     </div>
                                                                 )}
+                                                                <div className="flex gap-2">
+                                                                    <Sparkles className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                                                                    <div className="flex-1">
+                                                                        <div className="font-medium mb-2">Reflection Settings</div>
+                                                                        <div className="flex flex-col gap-3">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <span className="text-xs text-muted-foreground">Skip reflection for all tasks in this board</span>
+                                                                                <Switch
+                                                                                    checked={!!board.skipReflection}
+                                                                                    onCheckedChange={v => handleUpdateBoardReflection(board.id, { skip_reflection: v })}
+                                                                                />
+                                                                            </div>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <Select
+                                                                                    value={reflectionModelEdits[board.id] !== undefined ? reflectionModelEdits[board.id] : (board.reflectionModel || '')}
+                                                                                    onValueChange={val => {
+                                                                                        setReflectionModelEdits(prev => ({ ...prev, [board.id]: val }));
+                                                                                        handleUpdateBoardReflection(board.id, { reflection_model: val });
+                                                                                    }}
+                                                                                >
+                                                                                    <SelectTrigger className="h-7 text-xs font-mono flex-1">
+                                                                                        <SelectValue placeholder="claude-sonnet-4-5-20250929" />
+                                                                                    </SelectTrigger>
+                                                                                    <SelectContent>
+                                                                                        {allModels.map(m => (
+                                                                                            <SelectItem key={m.name} value={m.name}>
+                                                                                                <span className="font-mono">{m.name}</span>
+                                                                                            </SelectItem>
+                                                                                        ))}
+                                                                                    </SelectContent>
+                                                                                </Select>
+                                                                                <span className="text-xs text-muted-foreground whitespace-nowrap">Reflection model</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </td>
                                                     </tr>

@@ -44,7 +44,8 @@ interface CreateTaskModalProps {
         devEta?: number,
         labelIds?: number[],
         dependsOn?: string[],
-        workingDir?: string
+        workingDir?: string,
+        skipReflection?: boolean
     ) => Promise<string | void>;
     onCreateSchedule?: (payload: Record<string, unknown>) => Promise<void>;
     availableLabels?: LabelType[];
@@ -76,6 +77,7 @@ export function CreateTaskModal({
     const [stagedFiles, setStagedFiles] = useState<File[]>([]);
     const [uploadingScreenshots, setUploadingScreenshots] = useState(false);
     const [selectedDependencyIds, setSelectedDependencyIds] = useState<string[]>([]);
+    const [skipReflection, setSkipReflection] = useState(false);
     const [dependencyDialogOpen, setDependencyDialogOpen] = useState(false);
     const [createMode, setCreateMode] = useState<'TASK' | 'SCHEDULE'>('TASK');
     const [scheduleKind, setScheduleKind] = useState<'ONE_TIME' | 'RECURRING'>('ONE_TIME');
@@ -405,6 +407,7 @@ export function CreateTaskModal({
                 selectedLabelIds.length > 0 ? selectedLabelIds : undefined,
                 selectedDependencyIds.length > 0 ? selectedDependencyIds : undefined,
                 undefined,
+                skipReflection || undefined,
             );
             taskId = result || undefined;
         } catch {
@@ -626,48 +629,69 @@ export function CreateTaskModal({
                                 </div>
                             )}
 
-                            <div className="flex flex-col gap-2">
-                                <Label>Assignee</Label>
-                                {showNewUser ? (
-                                    <div className="flex flex-col gap-2">
-                                        <Input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Name" />
-                                        <Input type="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="Email" />
-                                        <div className="flex gap-2">
-                                            <Button type="button" size="sm" className="flex-1" disabled={creatingUser || !newUserName.trim() || !newUserEmail.trim()} onClick={handleCreateUser}>
-                                                {creatingUser ? 'Creating...' : 'Add User'}
-                                            </Button>
-                                            <Button type="button" size="sm" variant="outline" onClick={() => setShowNewUser(false)}>Cancel</Button>
+                            <div className="flex gap-4">
+                                <div className="flex flex-col gap-2 flex-1 min-w-0">
+                                    <Label>Assignee</Label>
+                                    {showNewUser ? (
+                                        <div className="flex flex-col gap-2">
+                                            <Input value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Name" />
+                                            <Input type="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="Email" />
+                                            <div className="flex gap-2">
+                                                <Button type="button" size="sm" className="flex-1" disabled={creatingUser || !newUserName.trim() || !newUserEmail.trim()} onClick={handleCreateUser}>
+                                                    {creatingUser ? 'Creating...' : 'Add User'}
+                                                </Button>
+                                                <Button type="button" size="sm" variant="outline" onClick={() => setShowNewUser(false)}>Cancel</Button>
+                                            </div>
                                         </div>
-                                    </div>
-                                ) : (
-                                    <div className="flex gap-2">
-                                        <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                                            <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                                    ) : (
+                                        <div className="flex gap-2">
+                                            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                                                <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    {boardUsers.map(u => {
+                                                        const agent = isAgentUser(u);
+                                                        const disabled = disabledAgentEmails.has(u.email);
+                                                        return (
+                                                            <SelectItem key={u.id} value={String(u.id)} disabled={disabled} className={disabled ? 'opacity-40' : ''}>
+                                                                <span className="flex items-center gap-2">
+                                                                    {agent ? (
+                                                                        <Bot className="size-3.5 text-blue-500 shrink-0" />
+                                                                    ) : (
+                                                                        <User className="size-3.5 text-muted-foreground shrink-0" />
+                                                                    )}
+                                                                    <span className={disabled ? 'line-through' : ''}>{u.name}</span>
+                                                                    {disabled && <span className="text-[10px] text-muted-foreground">disabled</span>}
+                                                                </span>
+                                                            </SelectItem>
+                                                        );
+                                                    })}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button type="button" variant="outline" size="icon" onClick={() => setShowNewUser(true)} title="Create new user">
+                                                <Plus className="size-4" />
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex flex-col gap-2 flex-1 min-w-0">
+                                    <Label>Model</Label>
+                                    {availableModels.length > 0 ? (
+                                        <Select value={selectedModelName} onValueChange={setSelectedModelName}>
+                                            <SelectTrigger><SelectValue placeholder="Select model..." /></SelectTrigger>
                                             <SelectContent>
-                                                {boardUsers.map(u => {
-                                                    const agent = isAgentUser(u);
-                                                    const disabled = disabledAgentEmails.has(u.email);
-                                                    return (
-                                                        <SelectItem key={u.id} value={String(u.id)} disabled={disabled} className={disabled ? 'opacity-40' : ''}>
-                                                            <span className="flex items-center gap-2">
-                                                                {agent ? (
-                                                                    <Bot className="size-3.5 text-blue-500 shrink-0" />
-                                                                ) : (
-                                                                    <User className="size-3.5 text-muted-foreground shrink-0" />
-                                                                )}
-                                                                <span className={disabled ? 'line-through' : ''}>{u.name}</span>
-                                                                {disabled && <span className="text-[10px] text-muted-foreground">disabled</span>}
-                                                            </span>
-                                                        </SelectItem>
-                                                    );
-                                                })}
+                                                {availableModels.map(model => (
+                                                    <SelectItem key={model.name} value={model.name}>
+                                                        <span className="font-mono">{model.name}</span>
+                                                    </SelectItem>
+                                                ))}
                                             </SelectContent>
                                         </Select>
-                                        <Button type="button" variant="outline" size="icon" onClick={() => setShowNewUser(true)} title="Create new user">
-                                            <Plus className="size-4" />
-                                        </Button>
-                                    </div>
-                                )}
+                                    ) : (
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            No models configured for this assignee.
+                                        </p>
+                                    )}
+                                </div>
                             </div>
 
                             <button
@@ -684,24 +708,15 @@ export function CreateTaskModal({
 
                             {showExtra && (
                                 <div className="flex flex-col gap-4 pl-2 border-l-2 border-muted">
-                                    <div className="flex flex-col gap-2">
-                                        <Label>Model</Label>
-                                        {availableModels.length > 0 ? (
-                                            <Select value={selectedModelName} onValueChange={setSelectedModelName}>
-                                                <SelectTrigger><SelectValue placeholder="Select model..." /></SelectTrigger>
-                                                <SelectContent>
-                                                    {availableModels.map(model => (
-                                                        <SelectItem key={model.name} value={model.name}>
-                                                            <span className="font-mono">{model.name}</span>
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        ) : (
-                                            <p className="text-xs text-muted-foreground">
-                                                No models configured for this assignee — can be set later.
-                                            </p>
-                                        )}
+                                    <div className="flex items-center gap-2">
+                                        <Checkbox
+                                            id="skip-reflection"
+                                            checked={skipReflection}
+                                            onCheckedChange={v => setSkipReflection(Boolean(v))}
+                                        />
+                                        <label htmlFor="skip-reflection" className="text-sm cursor-pointer select-none">
+                                            Skip reflection
+                                        </label>
                                     </div>
 
                                     <div className="flex flex-col gap-2">

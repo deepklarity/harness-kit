@@ -257,6 +257,7 @@ class Orchestrator:
         mode: str = "quiet",
         stream_callback: Optional[Callable[[str], None]] = None,
         quick: bool = False,
+        skip_reflection: bool = False,
     ) -> Tuple[str, List[Task]]:
         """Decompose a spec into sub-tasks and create them with suggested agent
         assignments.  Does NOT execute anything.
@@ -374,7 +375,7 @@ class Orchestrator:
         )
 
         # 7. Create tasks from plan
-        tasks = await self._create_tasks_from_plan(sub_tasks, sid, quota, routing_config)
+        tasks = await self._create_tasks_from_plan(sub_tasks, sid, quota, routing_config, skip_reflection=skip_reflection)
 
         # 8. Post planning trace to backend (if captured)
         if decompose_result is not None:
@@ -544,6 +545,7 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         spec_id: str,
         quota: Optional[Dict[str, Dict[str, float]]] = None,
         routing_config: Optional[Dict[str, Any]] = None,
+        skip_reflection: bool = False,
     ) -> List[Task]:
         """Two-pass task creation: create tasks, then resolve dependencies.
 
@@ -589,6 +591,7 @@ Write your final plan as a JSON array to: `{plan_path}`"""
                 description=st["description"],
                 metadata=task_metadata,
                 spec_id=spec_id,
+                skip_reflection=skip_reflection,
             )
             # Map symbolic ID (e.g. "task_1") to real UUID
             symbolic_id = st.get("id", "")

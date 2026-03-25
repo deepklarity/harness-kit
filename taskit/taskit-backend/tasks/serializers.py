@@ -63,6 +63,7 @@ class TaskSerializer(serializers.ModelSerializer):
     usage = serializers.SerializerMethodField()
     time_in_statuses = serializers.SerializerMethodField()
     reference_images = serializers.SerializerMethodField()
+    board_skip_reflection = serializers.SerializerMethodField()
     schedule_summary = serializers.SerializerMethodField()
 
     class Meta:
@@ -72,13 +73,17 @@ class TaskSerializer(serializers.ModelSerializer):
             "assignee_id", "assignee", "priority", "status", "created_by",
             "created_at", "last_updated_at", "labels", "kanban_position",
             "spec_id", "depends_on",
-            "complexity", "metadata", "model_name",
+            "complexity", "metadata", "model_name", "skip_reflection",
+            "board_skip_reflection",
             "estimated_cost_usd", "reflection_cost_usd", "usage", "time_in_statuses",
             "reference_images",
             "schedule_summary",
             "reference_images",
         ]
         read_only_fields = ["id", "created_at", "last_updated_at", "kanban_position"]
+
+    def get_board_skip_reflection(self, obj):
+        return obj.board.skip_reflection if obj.board_id else False
 
     def get_usage(self, obj):
         from .execution_processing import compute_usage_from_trace
@@ -168,6 +173,7 @@ class CreateTaskSerializer(serializers.Serializer):
     complexity = serializers.CharField(max_length=20, required=False)
     metadata = serializers.JSONField(required=False, default=dict)
     model_name = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
+    skip_reflection = serializers.BooleanField(required=False, default=False)
 
     def validate(self, data):
         if not data.get("created_by") and not data.get("created_by_user_id"):
@@ -194,6 +200,7 @@ class UpdateTaskSerializer(serializers.Serializer):
     model_name = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
     kanban_target_index = serializers.IntegerField(required=False, min_value=0)
     kanban_target_status = serializers.ChoiceField(choices=TaskStatus.choices, required=False)
+    skip_reflection = serializers.BooleanField(required=False)
 
 
 class AssignTaskSerializer(serializers.Serializer):
@@ -216,7 +223,7 @@ class BoardSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Board
-        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "created_at", "updated_at", "member_ids", "agents"]
+        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "skip_reflection", "reflection_model", "created_at", "updated_at", "member_ids", "agents"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_member_ids(self, obj):

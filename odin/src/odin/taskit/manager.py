@@ -61,6 +61,7 @@ class TaskManager:
         parent_task_id: Optional[str] = None,
         metadata: Optional[dict] = None,
         spec_id: Optional[str] = None,
+        skip_reflection: bool = False,
     ) -> Task:
         task = Task(
             id=uuid.uuid4().hex[:12],
@@ -69,6 +70,7 @@ class TaskManager:
             parent_task_id=parent_task_id,
             metadata=metadata or {},
             spec_id=spec_id,
+            skip_reflection=skip_reflection,
         )
         self._create(task)
         return task

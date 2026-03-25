@@ -304,6 +304,8 @@ def _build_model_comparison(cost_data):
         "tokens": [],
         "success_count": 0,
         "total_count": 0,
+        "reflection_pass": 0,
+        "reflection_total": 0,
     })
     for d in cost_data:
         model = d["model"] or "unknown"
@@ -318,12 +320,28 @@ def _build_model_comparison(cost_data):
         if d["status"] in ("DONE", "TESTING", "REVIEW"):
             info["success_count"] += 1
 
+    task_model_map = {d["task_id"]: (d["model"] or "unknown") for d in cost_data}
+    if task_model_map:
+        for r in ReflectionReport.objects.filter(
+            task_id__in=task_model_map.keys(),
+            status="COMPLETED",
+        ).values("task_id", "verdict"):
+            model = task_model_map.get(r["task_id"], "unknown")
+            if model in models:
+                models[model]["reflection_total"] += 1
+                if r["verdict"] == "PASS":
+                    models[model]["reflection_pass"] += 1
+
     result = []
     for model, info in sorted(models.items(), key=lambda x: -sum(x[1]["costs"]) if x[1]["costs"] else 0):
         avg_cost = (sum(info["costs"]) / len(info["costs"])) if info["costs"] else 0
         avg_duration = (sum(info["durations"]) / len(info["durations"])) if info["durations"] else 0
         avg_tokens = (sum(info["tokens"]) / len(info["tokens"])) if info["tokens"] else 0
         success_rate = (info["success_count"] / info["total_count"] * 100) if info["total_count"] > 0 else 0
+        reflection_pass_rate = (
+            round(info["reflection_pass"] / info["reflection_total"] * 100, 1)
+            if info["reflection_total"] > 0 else None
+        )
         result.append({
             "model": model,
             "avg_cost": round(avg_cost, 4),
@@ -332,6 +350,7 @@ def _build_model_comparison(cost_data):
             "avg_tokens": round(avg_tokens),
             "success_rate": round(success_rate, 1),
             "task_count": info["total_count"],
+            "reflection_pass_rate": reflection_pass_rate,
         })
     return result
 

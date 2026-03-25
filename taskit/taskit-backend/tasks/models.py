@@ -73,6 +73,8 @@ class Board(models.Model):
     working_dir = models.CharField(max_length=1024, null=True, blank=True, unique=True)
     timezone = models.CharField(max_length=64, default="UTC")
     odin_initialized = models.BooleanField(default=False)
+    skip_reflection = models.BooleanField(default=False)
+    reflection_model = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -158,6 +160,7 @@ class Task(models.Model):
     complexity = models.CharField(max_length=20, null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     model_name = models.CharField(max_length=255, null=True, blank=True)
+    skip_reflection = models.BooleanField(default=False)
     schedule = models.ForeignKey(
         "TaskSchedule", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="materialized_tasks",

@@ -346,6 +346,8 @@ class TaskItBackend(BoardBackend):
         if dev_eta_seconds is not None:
             payload["dev_eta_seconds"] = dev_eta_seconds
         payload["metadata"] = task.metadata
+        if task.skip_reflection:
+            payload["skip_reflection"] = True
         # Link to spec if we have a taskit spec PK cached
         if task.spec_id and task.spec_id in self._spec_pk_cache:
             payload["spec_id"] = self._spec_pk_cache[task.spec_id]
@@ -383,6 +385,7 @@ class TaskItBackend(BoardBackend):
             spec_id=str(data["spec_id"]) if data.get("spec_id") else None,
             depends_on=depends_on,
             metadata=metadata,
+            skip_reflection=data.get("skip_reflection", False),
         )
 
     def create_task(self, task: Task) -> Task:

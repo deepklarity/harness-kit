@@ -58,6 +58,8 @@ interface HarnessBoard {
     working_dir?: string | null;
     timezone?: string;
     odin_initialized?: boolean;
+    skip_reflection?: boolean;
+    reflection_model?: string | null;
     member_ids?: number[];
     agents?: AgentConfig[];
     tasks?: HarnessTask[];
@@ -122,6 +124,8 @@ interface HarnessTask {
     comments?: HarnessTaskComment[];
     comment_count?: number;
     reference_images?: Array<Record<string, unknown>>;
+    skip_reflection?: boolean;
+    board_skip_reflection?: boolean;
     schedule_summary?: {
         id: number;
         kind: 'ONE_TIME' | 'RECURRING';
@@ -436,6 +440,8 @@ export class HarnessTimeService implements IntegrationService {
                     metadata: task.metadata && Object.keys(task.metadata).length > 0 ? task.metadata : undefined,
                     dependsOn: task.depends_on && task.depends_on.length > 0 ? task.depends_on : undefined,
                     modelName: task.model_name || undefined,
+                    skipReflection: task.skip_reflection ?? false,
+                    boardSkipReflection: task.board_skip_reflection ?? false,
                     commentCount: task.comment_count ?? 0,
                     estimatedCostUsd: task.estimated_cost_usd ?? undefined,
                     reflectionCostUsd: task.reflection_cost_usd ?? undefined,
@@ -467,6 +473,8 @@ export class HarnessTimeService implements IntegrationService {
                 lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'],
                 totalActions: allTasks.reduce((sum, t) => sum + t.mutations.length, 0),
                 createdAt: b.created_at || new Date().toISOString(),
+                skipReflection: b.skip_reflection ?? false,
+                reflectionModel: b.reflection_model || null,
             });
         }
 
@@ -568,6 +576,7 @@ export class HarnessTimeService implements IntegrationService {
             metadata: raw.metadata && Object.keys(raw.metadata).length > 0 ? raw.metadata : undefined,
             dependsOn: raw.depends_on && raw.depends_on.length > 0 ? raw.depends_on : undefined,
             modelName: raw.model_name || undefined,
+            skipReflection: raw.skip_reflection ?? false,
             commentCount: comments.length,
             estimatedCostUsd: raw.estimated_cost_usd ?? undefined,
             reflectionCostUsd: raw.reflection_cost_usd ?? undefined,
@@ -677,6 +686,8 @@ export class HarnessTimeService implements IntegrationService {
                 workingDir: b.working_dir || null,
                 timezone: b.timezone || 'UTC',
                 odinInitialized: b.odin_initialized || false,
+                skipReflection: b.skip_reflection ?? false,
+                reflectionModel: b.reflection_model || null,
                 memberIds: boardMemberIds,
                 agents: (b as { agents?: AgentConfig[] }).agents,
                 tasks: [],
@@ -877,6 +888,7 @@ export class HarnessTimeService implements IntegrationService {
             labelIds?: number[];
             dependsOn?: string[];
             workingDir?: string;
+            skipReflection?: boolean;
         }
     ): Promise<unknown> {
         const body: Record<string, unknown> = {
@@ -890,6 +902,7 @@ export class HarnessTimeService implements IntegrationService {
         if (options?.labelIds && options.labelIds.length > 0) body.label_ids = options.labelIds;
         if (options?.dependsOn && options.dependsOn.length > 0) body.depends_on = options.dependsOn;
         if (options?.workingDir) body.metadata = { working_dir: options.workingDir };
+        if (options?.skipReflection) body.skip_reflection = true;
 
         return this.post<HarnessTask>('/api/tasks/', body);
     }
@@ -914,7 +927,7 @@ export class HarnessTimeService implements IntegrationService {
     async updateTask(taskId: string, updates: {
         title?: string; description?: string; priority?: string; devEta?: number; status?: string;
         labelIds?: number[]; modelName?: string; dependsOn?: string[];
-        kanbanTargetIndex?: number; kanbanTargetStatus?: string;
+        kanbanTargetIndex?: number; kanbanTargetStatus?: string; skipReflection?: boolean;
     }): Promise<void> {
         const email = this.baseUrl.includes('localhost') ? 'admin@example.com' : 'unknown@example.com';
         const body: Record<string, unknown> = { ...updates, updated_by: email };
@@ -941,6 +954,10 @@ export class HarnessTimeService implements IntegrationService {
         if (updates.kanbanTargetStatus !== undefined) {
             body.kanban_target_status = updates.kanbanTargetStatus;
             delete body.kanbanTargetStatus;
+        }
+        if (updates.skipReflection !== undefined) {
+            body.skip_reflection = updates.skipReflection;
+            delete body.skipReflection;
         }
         await this.post(`/api/tasks/${Number(taskId)}/`, body, 'PUT');
     }
@@ -1264,6 +1281,7 @@ export class HarnessTimeService implements IntegrationService {
             metadata: task.metadata && Object.keys(task.metadata).length > 0 ? task.metadata : undefined,
             dependsOn: task.depends_on && task.depends_on.length > 0 ? task.depends_on : undefined,
             modelName: task.model_name || undefined,
+            skipReflection: task.skip_reflection ?? false,
             commentCount: task.comment_count ?? 0,
             estimatedCostUsd: task.estimated_cost_usd ?? undefined,
             reflectionCostUsd: task.reflection_cost_usd ?? undefined,
@@ -1325,6 +1343,7 @@ export class HarnessTimeService implements IntegrationService {
                 metadata: t.metadata && Object.keys(t.metadata).length > 0 ? t.metadata : undefined,
                 dependsOn: t.depends_on && t.depends_on.length > 0 ? t.depends_on : undefined,
                 modelName: t.model_name || undefined,
+                skipReflection: t.skip_reflection ?? false,
                 estimatedCostUsd: t.estimated_cost_usd ?? undefined,
                 reflectionCostUsd: t.reflection_cost_usd ?? undefined,
                 usage: t.usage ?? undefined,

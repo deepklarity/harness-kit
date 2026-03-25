@@ -345,6 +345,7 @@ class OdinCLI:
         quiet: bool = False,
         quick: bool = False,
         base_agent: Optional[str] = None,
+        skip_reflection: bool = False,
     ):
         """Decompose a spec into sub-tasks and suggest agent assignments.
 
@@ -364,6 +365,7 @@ class OdinCLI:
             odin plan specs/poem_spec.md --quick       Direct plan, no exploration
             odin plan --prompt "Write a haiku" --auto
             odin plan spec.md --auto --base-agent codex
+            odin plan spec.md --auto --skip-reflection
 
         Args:
             spec_file: Path to a markdown spec file.
@@ -374,6 +376,8 @@ class OdinCLI:
             quick: Skip codebase exploration; the agent generates the plan
                 directly from the spec without reading files.
             base_agent: Override which agent does decomposition (e.g. codex).
+            skip_reflection: Mark all tasks in this plan to skip the
+                auto-reflection step when they reach REVIEW.
         """
         if not spec_file and not prompt:
             console.print("[red]Provide either a spec file or --prompt.[/red]")
@@ -406,12 +410,15 @@ class OdinCLI:
                 console.print(f"[dim]Using base agent override: {base_agent}[/dim]")
         orch = Orchestrator(cfg)
 
+        if skip_reflection:
+            console.print("[dim]All tasks in this plan will skip auto-reflection.[/dim]")
+
         if quiet:
             # Quiet mode implies auto — spinner, no streaming
             console.print("[bold]Decomposing and planning...[/bold]")
             with console.status("[bold green]Planning..."):
                 spec_id, tasks = asyncio.run(
-                    orch.plan(spec, spec_file=spec_file, mode="quiet", quick=quick)
+                    orch.plan(spec, spec_file=spec_file, mode="quiet", quick=quick, skip_reflection=skip_reflection)
                 )
         elif auto:
             from odin.harnesses.base import extract_text_from_line
@@ -425,14 +432,14 @@ class OdinCLI:
             planning_agent = cfg.forced_base_provider or cfg.base_agent
             console.print(f"[bold]Planning with {planning_agent}...[/bold]\n")
             spec_id, tasks = asyncio.run(
-                orch.plan(spec, spec_file=spec_file, mode="auto", stream_callback=_stream_chunk, quick=quick)
+                orch.plan(spec, spec_file=spec_file, mode="auto", stream_callback=_stream_chunk, quick=quick, skip_reflection=skip_reflection)
             )
             # Ensure a newline after streamed output
             sys.stdout.write("\n")
         else:
             # Interactive mode (default): tmux session with agent
             spec_id, tasks = asyncio.run(
-                orch.plan(spec, spec_file=spec_file, mode="interactive", quick=quick)
+                orch.plan(spec, spec_file=spec_file, mode="interactive", quick=quick, skip_reflection=skip_reflection)
             )
 
         console.print(

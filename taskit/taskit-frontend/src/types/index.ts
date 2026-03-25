@@ -109,6 +109,8 @@ export interface Task {
     metadata?: Record<string, unknown>;
     dependsOn?: string[];
     modelName?: string;
+    skipReflection?: boolean;
+    boardSkipReflection?: boolean;
     commentCount?: number;
     estimatedCostUsd?: number | null;
     reflectionCostUsd?: number | null;
@@ -148,6 +150,8 @@ export interface Board {
     workingDir?: string | null;
     timezone?: string;
     odinInitialized?: boolean;
+    skipReflection?: boolean;
+    reflectionModel?: string | null;
     memberIds: string[];
     agents?: AgentConfig[];
     tasks: Task[];
@@ -467,6 +471,9 @@ export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflection
 export interface AnalyticsSummaryKPIs {
     total_spend: number;
     total_tokens: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_cache_read_tokens: number;
     task_count: number;
     avg_cost_per_task: number;
     reflection_cost: number;
@@ -482,6 +489,8 @@ export interface AnalyticsCostByModel {
     model: string;
     cost: number;
     tokens: number;
+    input_tokens: number;
+    output_tokens: number;
     task_count: number;
 }
 
@@ -516,8 +525,11 @@ export interface AnalyticsModelComparison {
     total_cost: number;
     avg_duration_ms: number;
     avg_tokens: number;
+    avg_input_tokens: number;
+    avg_output_tokens: number;
     success_rate: number;
     task_count: number;
+    reflection_pass_rate: number | null;
 }
 
 export interface AnalyticsTopExpensiveTask {

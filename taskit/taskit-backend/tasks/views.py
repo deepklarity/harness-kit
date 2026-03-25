@@ -97,10 +97,12 @@ WEEKDAY_KEYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 
 
-def _reflection_reviewer_defaults():
+def _reflection_reviewer_defaults(board=None):
     selection = get_forced_provider_selection()
     if selection.enabled:
         return selection.provider, selection.model
+    if board and board.reflection_model:
+        return "claude", board.reflection_model
     return "claude", "claude-sonnet-4-5-20250929"
 
 
@@ -159,6 +161,13 @@ def _trigger_auto_reflection(task):
     Called when a task transitions to REVIEW — mirrors the pattern used for
     auto-execution on IN_PROGRESS (explicit call in the view, not a signal).
     """
+    if task.skip_reflection:
+        logger.info("[task:%s] Skipping auto-reflection: skip_reflection=True", task.id)
+        return
+    if task.board.skip_reflection:
+        logger.info("[task:%s] Skipping auto-reflection: board skip_reflection=True (board=%s)", task.id, task.board_id)
+        return
+
     active_exists = ReflectionReport.objects.filter(
         task=task,
         status__in=(ReflectionStatus.PENDING, ReflectionStatus.RUNNING),
@@ -170,7 +179,7 @@ def _trigger_auto_reflection(task):
         )
         return
 
-    reviewer_agent, reviewer_model = _reflection_reviewer_defaults()
+    reviewer_agent, reviewer_model = _reflection_reviewer_defaults(board=task.board)
     report = ReflectionReport.objects.create(
         task=task,
         reviewer_agent=reviewer_agent,
@@ -1684,6 +1693,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             complexity=d.get("complexity"),
             metadata=d.get("metadata", {}),
             model_name=model_name,
+            skip_reflection=d.get("skip_reflection", False),
         )
         task.kanban_position = move_task(task, target_status=task.status, target_index=0)
 
@@ -1803,6 +1813,10 @@ class TaskViewSet(viewsets.ModelViewSet):
         if "model_name" in d and d["model_name"]:
             task.metadata = dict(task.metadata or {})
             task.metadata["selected_model"] = d["model_name"]
+
+        if "skip_reflection" in d:
+            if _record_change(histories, task, "skip_reflection", task.skip_reflection, d["skip_reflection"], updated_by):
+                task.skip_reflection = d["skip_reflection"]
 
         # A new queue/run cycle clears stale stop guards from prior executions.
         if "status" in d and d["status"] == TaskStatus.IN_PROGRESS and old_status != TaskStatus.IN_PROGRESS:
@@ -2778,6 +2792,7 @@ class SpecViewSet(viewsets.ModelViewSet):
                     depends_on=task.depends_on,
                     complexity=task.complexity,
                     metadata=task.metadata,
+                    skip_reflection=task.skip_reflection,
                 )
                 # Copy M2M labels
                 new_task.labels.set(task.labels.all())

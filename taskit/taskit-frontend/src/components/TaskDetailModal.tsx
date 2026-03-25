@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -351,7 +352,7 @@ export function TaskDetailModal({
     // Cost comes from the backend — single source of truth
     const estimatedCost = task.estimatedCostUsd ?? null;
 
-    const hasExecContext = !!(execContext.model || execContext.cwd || execContext.harness || execContext.branch || task.complexity || task.dependsOn?.length);
+    const hasExecContext = !!(execContext.model || execContext.cwd || execContext.harness || execContext.branch || task.complexity || task.dependsOn?.length || task.currentStatus === 'TODO');
 
     const canReflect = ['REVIEW', 'DONE', 'FAILED'].includes(task.currentStatus);
 
@@ -482,6 +483,11 @@ export function TaskDetailModal({
                             <button className="opacity-50 hover:opacity-100 transition-opacity" onClick={() => startEditingField('title', task.title || task.name)}>
                                 <Pencil className="size-4" />
                             </button>
+                            {(task.skipReflection || task.boardSkipReflection) && (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 tracking-normal">
+                                    {task.boardSkipReflection && !task.skipReflection ? 'Reflection disabled (board)' : 'Reflection disabled'}
+                                </span>
+                            )}
                         </DialogTitle>
                     )}
                 </DialogHeader>
@@ -814,6 +820,20 @@ export function TaskDetailModal({
                                             ) : (
                                                 <span className="text-[11px] font-mono font-medium text-primary/80 truncate">{execContext.model}</span>
                                             )}
+                                        </CompactRow>
+                                    )}
+
+                                    {task.currentStatus === 'TODO' && (
+                                        <CompactRow label="Skip reflection" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />} noBorder>
+                                            <div className="flex items-center gap-2">
+                                                <Switch
+                                                    checked={!!task.skipReflection}
+                                                    onCheckedChange={v => onUpdateTask(task.id, { skipReflection: v })}
+                                                />
+                                                <span className="text-[11px] text-muted-foreground select-none">
+                                                    {task.skipReflection ? 'Enabled' : 'Disabled'}
+                                                </span>
+                                            </div>
                                         </CompactRow>
                                     )}
 

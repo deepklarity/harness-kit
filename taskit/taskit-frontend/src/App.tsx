@@ -468,7 +468,8 @@ function App() {
     const handleCreateTask = async (
         boardId: string, title: string, description: string, priority: string,
         assigneeId: number, modelName: string | undefined, devEta?: number,
-        labelIds?: number[], dependsOn?: string[], workingDir?: string
+        labelIds?: number[], dependsOn?: string[], workingDir?: string,
+        skipReflection?: boolean
     ): Promise<string> => {
         const result = await service.createTask(
             boardId,
@@ -483,6 +484,7 @@ function App() {
                 labelIds,
                 dependsOn,
                 workingDir,
+                skipReflection,
             },
         ) as { id: number };
         await refreshDependencyTasksForBoard(boardId);
@@ -511,18 +513,34 @@ function App() {
         }
     };
     const handleUpdateTask = async (taskId: string, updates: Record<string, unknown>) => {
+        // Optimistically update the open modal so it never closes/flashes
+        if (selectedTask?.id === taskId) {
+            setSelectedTask(prev => prev ? { ...prev, ...updates } : prev);
+        }
         try {
             await service.updateTask(taskId, updates as Parameters<typeof service.updateTask>[1]);
+            // Refresh dependency tasks if dependencies changed
             const boardId = selectedTask?.id === taskId ? selectedTask.boardId : null;
-            if (boardId) {
+            if (boardId && 'dependsOn' in updates) {
                 await refreshDependencyTasksForBoard(boardId);
             }
-            setRefreshKey(k => k + 1);
+            // Only refresh the board when the update affects kanban-visible fields
+            const boardVisibleFields = new Set(['status', 'priority', 'assigneeId', 'title', 'labelIds', 'kanbanTargetIndex', 'kanbanTargetStatus']);
+            const affectsBoard = Object.keys(updates).some(k => boardVisibleFields.has(k));
+            if (affectsBoard) {
+                setRefreshKey(k => k + 1);
+            }
+            // Re-sync the modal with server truth after the API call
             if (selectedTask?.id === taskId) {
                 const detail = await service.fetchTaskDetail(taskId);
                 setSelectedTask(detail);
             }
         } catch (e) {
+            // Revert optimistic update on failure
+            if (selectedTask?.id === taskId) {
+                const detail = await service.fetchTaskDetail(taskId).catch(() => null);
+                if (detail) setSelectedTask(detail);
+            }
             console.error('Failed to update task', e);
             toast({
                 title: 'Error',
@@ -743,8 +761,8 @@ function App() {
                             <>
                                 <SectionHeader title="Settings" />
                                 <SettingsView
-
                                     members={members}
+                                    currentBoard={currentBoard}
                                     onDataChange={() => setRefreshKey(k => k + 1)}
                                     onCreateBoard={() => setShowCreateBoard(true)}
                                     onDeleteBoard={handleDeleteBoard}
