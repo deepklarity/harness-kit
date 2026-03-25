@@ -264,10 +264,10 @@ function DroppableColumn({
     const hiddenTaskCount = tasks.length - displayTasks.length;
 
     return (
-        <div className="flex-shrink-0 w-[280px] self-start">
+        <div className="flex-shrink-0 w-[280px]">
             <Card
                 className={`border-border flex flex-col overflow-hidden transition-all ${isOver ? 'ring-2 ring-primary/50 bg-primary/5' : ''}`}
-                style={{ maxHeight: `${maxColumnHeight}px` }}
+                style={{ height: `${maxColumnHeight}px` }}
             >
                 <CardHeader className="p-3 pb-2 shrink-0 border-b border-border/70">
                     <CardTitle className="flex items-center justify-between text-sm">
@@ -296,7 +296,7 @@ function DroppableColumn({
                         <div className="flex flex-col gap-2 p-1 min-h-full">
                             <SortableContext items={displayTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
                                 {tasks.length === 0 && (
-                                    <div className="min-h-[120px] flex items-center justify-center text-xs text-muted-foreground">
+                                    <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground border-2 border-dashed border-border/40 rounded-lg bg-muted/10 mx-1 mb-1">
                                         Drop tasks here
                                     </div>
                                 )}

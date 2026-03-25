@@ -59,10 +59,11 @@ export function NotificationsPage() {
 
     const handleClick = (notification: Notification) => {
         void markAsRead(notification.id);
+        const targetBoard = notification.board ? String(notification.board) : searchParams.get('board');
         if (notification.task) {
-            navigate(`/board?taskId=${notification.task}`);
+            navigate(targetBoard ? `/board?taskId=${notification.task}&board=${targetBoard}` : `/board?taskId=${notification.task}`);
         } else if (notification.spec) {
-            navigate(`/specs?specId=${notification.spec}`);
+            navigate(targetBoard ? `/specs?specId=${notification.spec}&board=${targetBoard}` : `/specs?specId=${notification.spec}`);
         }
     };
 

@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDistanceToNow, format } from "date-fns";
 import { Settings, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ interface Props {
 
 export function NotificationDropdown({ onClose }: Props) {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const {
         notifications,
         loading,
@@ -31,10 +32,11 @@ export function NotificationDropdown({ onClose }: Props) {
 
     const handleClick = (notification: Notification) => {
         void markAsRead(notification.id);
+        const targetBoard = notification.board ? String(notification.board) : searchParams.get('board');
         if (notification.task) {
-            navigate(`/board?taskId=${notification.task}`);
+            navigate(targetBoard ? `/board?taskId=${notification.task}&board=${targetBoard}` : `/board?taskId=${notification.task}`);
         } else if (notification.spec) {
-            navigate(`/specs?specId=${notification.spec}`);
+            navigate(targetBoard ? `/specs?specId=${notification.spec}&board=${targetBoard}` : `/specs?specId=${notification.spec}`);
         }
         onClose();
     };
@@ -44,7 +46,8 @@ export function NotificationDropdown({ onClose }: Props) {
     };
 
     const handleSettingsClick = () => {
-        navigate("/settings#notifications");
+        const board = searchParams.get('board');
+        navigate(board ? `/settings?board=${board}#notifications` : "/settings#notifications");
         onClose();
     };
 
@@ -165,7 +168,8 @@ export function NotificationDropdown({ onClose }: Props) {
                                 type="button"
                                 className="text-xs text-primary hover:text-primary/80 font-medium transition-colors"
                                 onClick={() => {
-                                    navigate('/notifications');
+                                    const board = searchParams.get('board');
+                                    navigate(board ? `/notifications?board=${board}` : '/notifications');
                                     onClose();
                                 }}
                             >

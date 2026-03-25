@@ -365,12 +365,12 @@ function App() {
         }, { replace: true });
     }, [setSearchParams]);
 
-    // Auto-select first board when no board param is set
+    // Auto-select first board when on board view and no board param is set
     useEffect(() => {
-        if (!loadingShell && boards.length > 0 && selectedBoard === ALL_BOARDS_ID && !searchParams.get('board')) {
+        if (viewMode === 'board' && !loadingShell && boards.length > 0 && selectedBoard === ALL_BOARDS_ID && !searchParams.get('board')) {
             updateSearchParam('board', boards[0].id);
         }
-    }, [loadingShell, boards, selectedBoard, searchParams, updateSearchParam]);
+    }, [viewMode, loadingShell, boards, selectedBoard, searchParams, updateSearchParam]);
 
     const markTaskSignalsSeen = useCallback((task: Task) => {
         markCommentsSeen(task.id, task.comments?.length ?? 0);
