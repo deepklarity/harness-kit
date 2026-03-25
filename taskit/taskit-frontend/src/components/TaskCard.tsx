@@ -41,12 +41,7 @@ interface TaskCardProps {
     compact?: boolean;
 }
 
-const PRIORITY_STYLES: Record<string, { dot: string; text: string }> = {
-    CRITICAL: { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400' },
-    HIGH: { dot: 'bg-orange-500', text: 'text-orange-600 dark:text-orange-400' },
-    MEDIUM: { dot: 'bg-blue-500', text: 'text-blue-600 dark:text-blue-400' },
-    LOW: { dot: 'bg-zinc-400', text: 'text-zinc-500 dark:text-zinc-400' },
-};
+
 
 const COMPLEXITY_COLORS: Record<string, string> = {
     trivial: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800',
@@ -85,7 +80,7 @@ export const TaskCard = memo(function TaskCard({
 }: TaskCardProps) {
     const statusCategory = classifyStatus(task.currentStatus);
     const StatusIcon = getStatusIcon(task.currentStatus);
-    const priorityStyle = PRIORITY_STYLES[task.priority || 'MEDIUM'] || PRIORITY_STYLES.MEDIUM;
+
     const statusStyle = STATUS_STYLES[statusCategory] || STATUS_STYLES.other;
 
     const seenCount = getSeenCommentCount(task.id);
@@ -180,7 +175,7 @@ export const TaskCard = memo(function TaskCard({
                     if (!isEditingTitle) onClick(task);
                 }}
             >
-                <CardContent className={compact ? "relative !px-2.5 !py-1.5" : "relative p-2 space-y-1"} title={compact ? task.name : undefined}>
+                <CardContent className={compact ? "relative !px-2.5 !py-1.5" : "relative px-2 py-1.5 space-y-0.5"} title={compact ? task.name : undefined}>
                     {onDelete && !isOverlay && (
                         <button
                             className="absolute right-1.5 top-1.5 opacity-40 hover:opacity-100 transition-opacity p-1 rounded-sm hover:bg-destructive/10 text-muted-foreground hover:text-destructive z-20"
@@ -203,8 +198,7 @@ export const TaskCard = memo(function TaskCard({
                             )}
                             <div className="flex items-center gap-1.5 min-w-0">
                                 <span className="text-muted-foreground font-mono font-semibold text-[10px] shrink-0">#{task.idShort}</span>
-                                <span className={`size-1.5 rounded-full shrink-0 ${priorityStyle.dot}`} />
-                                {task.complexity && task.complexity !== task.priority && (
+                                {task.complexity && !['HIGH', 'MEDIUM', 'LOW', 'CRITICAL'].includes(task.complexity.toUpperCase()) && (
                                     <span className={`text-[9px] font-semibold uppercase shrink-0 px-1 rounded-sm border leading-tight ${COMPLEXITY_COLORS[task.complexity.toLowerCase()] || 'bg-muted text-muted-foreground'}`}>{task.complexity}</span>
                                 )}
                                 {blockedByFailed && <AlertTriangle className="size-2.5 shrink-0 text-red-500" />}
@@ -229,7 +223,7 @@ export const TaskCard = memo(function TaskCard({
                                             <span className="truncate">{task.specName}</span>
                                         </span>
                                     )}
-                                    {model && (
+                                    {model && !['HIGH', 'MEDIUM', 'LOW', 'CRITICAL'].includes(model.toUpperCase()) && (
                                         <span className="flex items-center gap-0.5 shrink-0 font-mono">
                                             <Package className="size-2.5 shrink-0 opacity-60" />
                                             {model}
@@ -291,11 +285,7 @@ export const TaskCard = memo(function TaskCard({
                             )}
                             <div className="flex items-center gap-1.5">
                                 <span className="text-xs text-muted-foreground font-mono font-semibold">#{task.idShort}</span>
-                                <div className="flex items-center gap-1" title={`Priority: ${task.priority || 'MEDIUM'}`}>
-                                    <span className={`size-1.5 rounded-full ${priorityStyle.dot}`} />
-                                    <span className={`text-[11px] font-semibold uppercase ${priorityStyle.text}`}>{task.priority || 'MEDIUM'}</span>
-                                </div>
-                                {task.complexity && (
+                                {task.complexity && !['HIGH', 'MEDIUM', 'LOW', 'CRITICAL'].includes(task.complexity.toUpperCase()) && (
                                     <Badge variant="outline" className={`text-[10px] h-4 px-1 rounded-sm border font-semibold uppercase ${COMPLEXITY_COLORS[task.complexity.toLowerCase()] || 'bg-muted text-muted-foreground'}`}>
                                         {task.complexity}
                                     </Badge>
@@ -358,17 +348,24 @@ export const TaskCard = memo(function TaskCard({
                                 </div>
                             )}
 
-                            {task.specName && (
-                                <div className="flex items-center gap-1 text-muted-foreground text-xs">
-                                    <FileText className="size-3 shrink-0" />
-                                    <span className="truncate">{task.specName}</span>
-                                </div>
-                            )}
-
-                            {model && (
-                                <div className="flex items-center gap-1 text-muted-foreground text-xs">
-                                    <Package className="size-3 shrink-0" />
-                                    <span className="truncate font-mono">{model}</span>
+                            {/* Row 3: Spec & Model context (Combined) */}
+                            {(task.specName || (model && !['HIGH', 'MEDIUM', 'LOW', 'CRITICAL'].includes(model.toUpperCase()))) && (
+                                <div className="flex items-center gap-2 text-muted-foreground text-[10px] truncate max-w-full">
+                                    {task.specName && (
+                                        <div className="flex items-center gap-1 truncate min-w-0 max-w-[50%]">
+                                            <FileText className="size-2.5 shrink-0 opacity-70" />
+                                            <span className="truncate">{task.specName}</span>
+                                        </div>
+                                    )}
+                                    {task.specName && model && !['HIGH', 'MEDIUM', 'LOW', 'CRITICAL'].includes(model.toUpperCase()) && (
+                                        <span className="text-muted-foreground/30">•</span>
+                                    )}
+                                    {model && !['HIGH', 'MEDIUM', 'LOW', 'CRITICAL'].includes(model.toUpperCase()) && (
+                                        <div className="flex items-center gap-1 truncate min-w-0 font-mono">
+                                            <Package className="size-2.5 shrink-0 opacity-70" />
+                                            <span className="truncate">{model}</span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

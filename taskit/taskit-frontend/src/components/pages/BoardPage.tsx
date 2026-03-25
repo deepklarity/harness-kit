@@ -92,23 +92,39 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    const qParam = searchParams.get('q');
+    const statusParam = searchParams.get('status');
+    const assigneeParam = searchParams.get('assignee');
+    const priorityParam = searchParams.get('priority');
+    const specParam = searchParams.get('spec');
+    const labelsParam = searchParams.get('labels');
+    const sortParam = searchParams.get('sort');
+    const createdFromParam = searchParams.get('created_from');
+    const createdToParam = searchParams.get('created_to');
+    const pageParam = searchParams.get('page');
+    const pageSizeParam = searchParams.get('page_size');
+
     const query = useMemo(() => {
-        const page = Number(searchParams.get('page') || '1');
-        const pageSize = Number(searchParams.get('page_size') || '20');
+        const page = Number(pageParam || '1');
+        const pageSize = Number(pageSizeParam || '20');
         return {
-            q: searchParams.get('q') || '',
-            status: splitParam(searchParams.get('status')),
-            assignee: splitParam(searchParams.get('assignee')),
-            priority: splitParam(searchParams.get('priority')),
-            spec: splitParam(searchParams.get('spec')),
-            labels: splitParam(searchParams.get('labels')),
-            sort: searchParams.get('sort') || undefined,
-            created_from: searchParams.get('created_from') || undefined,
-            created_to: searchParams.get('created_to') || undefined,
+            q: qParam || '',
+            status: splitParam(statusParam),
+            assignee: splitParam(assigneeParam),
+            priority: splitParam(priorityParam),
+            spec: splitParam(specParam),
+            labels: splitParam(labelsParam),
+            sort: sortParam || undefined,
+            created_from: createdFromParam || undefined,
+            created_to: createdToParam || undefined,
             page: Number.isNaN(page) ? 1 : page,
             page_size: Number.isNaN(pageSize) ? 20 : pageSize,
         };
-    }, [searchParams]);
+    }, [
+        qParam, statusParam, assigneeParam, priorityParam, specParam,
+        labelsParam, sortParam, createdFromParam, createdToParam,
+        pageParam, pageSizeParam
+    ]);
 
     const setParam = useCallback((key: string, value?: string) => {
         setSearchParams(prev => {
