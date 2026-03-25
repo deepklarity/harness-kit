@@ -3,10 +3,12 @@ import { ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Badge } from '@/components/ui/badge';
 
 interface Option {
     label: string;
     value: string;
+    role?: 'HUMAN' | 'AGENT' | 'ADMIN';
 }
 
 interface MultiSelectFilterProps {
@@ -44,7 +46,12 @@ export function MultiSelectFilter({ label, options, selected, onChange }: MultiS
                                 onCheckedChange={() => toggle(option.value)}
                                 aria-label={option.label}
                             />
-                            <span className="text-sm">{option.label}</span>
+                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                <span className="text-sm truncate">{option.label}</span>
+                                {option.role === 'AGENT' && (
+                                    <Badge variant="secondary" className="text-[9px] px-1 py-0 bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400 shrink-0">Agent</Badge>
+                                )}
+                            </div>
                         </label>
                     ))}
                     {options.length === 0 && (

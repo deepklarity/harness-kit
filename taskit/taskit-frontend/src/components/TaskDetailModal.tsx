@@ -33,6 +33,7 @@ import {
     Pencil, Search, Trash2, Eye, Code, FileText, FolderOpen,
     GitBranch, Package, Terminal, User, ChevronRight,
     HelpCircle, CornerDownRight, Send, ShieldCheck, Sparkles, Loader2,
+    Bot,
 } from 'lucide-react';
 import { useService } from '../contexts/ServiceContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -545,11 +546,19 @@ export function TaskDetailModal({
                                         {task.assignees.length > 0
                                             ? task.assignees.map((name, i) => {
                                                 const member = memberMap?.get(task.assigneeIds[i]) ?? allMembers.find(m => m.id === task.assigneeIds[i]);
+                                                const isAgent = member?.role === 'AGENT' || member?.email.endsWith('@odin.agent');
                                                 return (
                                                     <div key={i} className="flex items-center gap-1.5 bg-secondary/60 rounded px-1.5 py-0.5">
-                                                        <div className="size-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-                                                            style={{ background: member?.color || 'hsl(240, 60%, 50%)' }}>
-                                                            {member?.initials || name.substring(0, 2).toUpperCase()}
+                                                        <div className="relative shrink-0">
+                                                            <div className="size-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white font-mono"
+                                                                style={{ background: member?.color || 'hsl(240, 60%, 50%)' }}>
+                                                                {member?.initials || name.substring(0, 2).toUpperCase()}
+                                                            </div>
+                                                            {isAgent && (
+                                                                <div className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-indigo-600 border border-background flex items-center justify-center">
+                                                                    <Bot className="size-1 text-white" />
+                                                                </div>
+                                                            )}
                                                         </div>
                                                         <span className="text-xs font-medium">{member?.fullName || name}</span>
                                                     </div>
@@ -570,21 +579,53 @@ export function TaskDetailModal({
                                                     onChange={e => setAssigneeSearch(e.target.value)} autoFocus className="pl-7 h-7 text-xs bg-background" />
                                             </div>
                                             <div className="max-h-[120px] overflow-y-auto">
-                                                {filteredMembers.map(member => {
-                                                    const isSelected = selectedAssignee === member.id;
-                                                    return (
-                                                        <div key={member.id}
-                                                            className={`flex items-center gap-2 p-1.5 rounded cursor-pointer transition-colors ${isSelected ? 'bg-primary/15' : 'hover:bg-background/80'}`}
-                                                            onClick={() => setSelectedAssignee(isSelected ? null : member.id)}>
-                                                            <div className={`size-4 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-primary bg-primary' : 'border-muted-foreground/30'}`}>
-                                                                {isSelected && <div className="size-1.5 rounded-full bg-white" />}
+                                                {(() => {
+                                                    const isAgent = (m: Member) => m.role === 'AGENT' || m.email.endsWith('@odin.agent');
+                                                    const humans = filteredMembers.filter(m => !isAgent(m));
+                                                    const agents = filteredMembers.filter(m => isAgent(m));
+                                                    
+                                                    const renderItem = (member: Member) => {
+                                                        const isSelected = selectedAssignee === member.id;
+                                                        const isA = isAgent(member);
+                                                        return (
+                                                            <div key={member.id}
+                                                                className={`flex items-center gap-2 p-1.5 rounded cursor-pointer transition-colors ${isSelected ? 'bg-primary/15' : 'hover:bg-background/80'}`}
+                                                                onClick={() => setSelectedAssignee(isSelected ? null : member.id)}>
+                                                                <div className={`size-4 shrink-0 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-primary bg-primary' : 'border-muted-foreground/30'}`}>
+                                                                    {isSelected && <div className="size-1.5 rounded-full bg-white" />}
+                                                                </div>
+                                                                <div className="relative shrink-0">
+                                                                    <div className="size-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white font-mono"
+                                                                        style={{ background: member.color }}>{member.initials}</div>
+                                                                    {isA && (
+                                                                        <div className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-indigo-600 border border-background flex items-center justify-center">
+                                                                            <Bot className="size-[4px] text-white" />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                <span className="text-xs font-medium truncate flex-1">{member.fullName}</span>
+                                                                {isA && <Badge variant="secondary" className="text-[9px] px-1 py-0 bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400">Agent</Badge>}
                                                             </div>
-                                                            <div className="size-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
-                                                                style={{ background: member.color }}>{member.initials}</div>
-                                                            <span className="text-xs font-medium">{member.fullName}</span>
+                                                        );
+                                                    };
+
+                                                    return (
+                                                        <div className="space-y-1">
+                                                            {humans.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[9px] font-bold text-muted-foreground px-1.5 py-0.5 uppercase tracking-wider">Team</div>
+                                                                    {humans.map(renderItem)}
+                                                                </div>
+                                                            )}
+                                                            {agents.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[9px] font-bold text-muted-foreground px-1.5 py-0.5 uppercase tracking-wider">Agents</div>
+                                                                    {agents.map(renderItem)}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     );
-                                                })}
+                                                })()}
                                             </div>
                                         </div>
                                         <div className="flex gap-2 justify-end mt-1.5">
@@ -1392,8 +1433,9 @@ function CommentItem({ comment, onReply, replyComment }: {
                     {isReply && <CornerDownRight className="size-3.5 text-emerald-500" />}
                     {isReflection && <Sparkles className="size-3.5 text-violet-400" />}
                     {isProofFinal && !isQuestion && !isReply && !isSummary && !isReflection && <ShieldCheck className="size-3.5 text-cyan-400" />}
-                    <span className="text-sm font-semibold">
+                    <span className="text-sm font-semibold flex items-center gap-1">
                         {comment.authorLabel || actor.display}
+                        {isMcpAgent && <Bot className="size-3 text-indigo-500" />}
                     </span>
                     {/* Comment type badge */}
                     {isSummary && (

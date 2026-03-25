@@ -209,7 +209,7 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
                 />
                 <MultiSelectFilter
                     label="Assignee"
-                    options={members.map(m => ({ label: m.fullName, value: m.id }))}
+                    options={members.map(m => ({ label: m.fullName, value: m.id, role: m.role }))}
                     selected={query.assignee}
                     onChange={(next) => setParam('assignee', next.length ? next.join(',') : undefined)}
                 />

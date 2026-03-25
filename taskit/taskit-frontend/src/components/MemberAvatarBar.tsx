@@ -1,8 +1,9 @@
 import type { Member } from '../types';
-import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount } from '@/components/ui/avatar';
+import { AvatarGroup, AvatarGroupCount } from '@/components/ui/avatar';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { X } from 'lucide-react';
+import { X, Bot } from 'lucide-react';
+import { UserAvatar } from './UserAvatar';
 
 interface MemberAvatarBarProps {
     members: Member[];
@@ -44,24 +45,37 @@ export function MemberAvatarBar({ members, filteredMemberId, onSelect }: MemberA
                         </PopoverTrigger>
                         <PopoverContent className="w-56 p-2" align="start">
                             <div className="space-y-1">
-                                {overflow.map(member => (
-                                    <button
-                                        key={member.id}
-                                        type="button"
-                                        className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm transition-colors hover:bg-muted ${
-                                            filteredMemberId === member.id ? 'bg-primary/10 text-primary' : ''
-                                        }`}
-                                        onClick={() => handleClick(member.id)}
-                                    >
-                                        <div
-                                            className="size-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-                                            style={{ background: member.color }}
+                                {overflow.map(member => {
+                                    const isAgent = member.role === 'AGENT' || member.email.endsWith('@odin.agent');
+                                    return (
+                                        <button
+                                            key={member.id}
+                                            type="button"
+                                            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm transition-colors hover:bg-muted ${
+                                                filteredMemberId === member.id ? 'bg-primary/10 text-primary' : ''
+                                            }`}
+                                            onClick={() => handleClick(member.id)}
                                         >
-                                            {member.initials}
-                                        </div>
-                                        <span className="truncate">{member.fullName}</span>
-                                    </button>
-                                ))}
+                                            <div className="relative shrink-0">
+                                                <div
+                                                    className="size-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white"
+                                                    style={{ background: member.color }}
+                                                >
+                                                    {member.initials}
+                                                </div>
+                                                {isAgent && (
+                                                    <div className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-indigo-600 border border-background flex items-center justify-center">
+                                                        <Bot className="size-1 text-white" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <span className="truncate flex-1 text-left">{member.fullName}</span>
+                                            {isAgent && (
+                                                <span className="text-[10px] bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400 px-1 rounded-sm">Agent</span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </PopoverContent>
                     </Popover>
@@ -87,29 +101,22 @@ function MemberAvatar({ member, isSelected, onClick }: {
     isSelected: boolean;
     onClick: () => void;
 }) {
+    const isAgent = member.role === 'AGENT' || member.email.endsWith('@odin.agent');
+
     return (
         <Tooltip>
             <TooltipTrigger asChild>
-                <button type="button" onClick={onClick} className="cursor-pointer">
-                    <Avatar
+                <div>
+                    <UserAvatar
+                        member={member}
                         size="sm"
-                        className={`transition-all cursor-pointer ${
-                            isSelected
-                                ? 'ring-2 ring-primary ring-offset-1 ring-offset-background'
-                                : 'opacity-70 hover:opacity-100'
-                        }`}
-                    >
-                        <AvatarFallback
-                            className="text-[10px] font-bold text-white"
-                            style={{ background: member.color }}
-                        >
-                            {member.initials}
-                        </AvatarFallback>
-                    </Avatar>
-                </button>
+                        isSelected={isSelected}
+                        onClick={onClick}
+                    />
+                </div>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
-                {member.fullName}
+                {member.fullName} {isAgent ? '(Agent)' : ''}
             </TooltipContent>
         </Tooltip>
     );

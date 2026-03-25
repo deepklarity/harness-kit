@@ -6,7 +6,7 @@ import { TaskTimeDisplay } from './TaskTimeDisplay';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2, GitBranch } from 'lucide-react';
+import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2, Bot, GitBranch } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -90,12 +90,11 @@ export const TaskCard = memo(function TaskCard({
     const hasPendingQuestion = !!(task.metadata?.has_pending_question);
     const model = task.modelName || (task.metadata?.model ?? task.metadata?.selected_model) as string | undefined;
 
-    const assigneeName = task.assignees.length > 0
-        ? (memberMap?.get(task.assigneeIds[0])?.fullName || task.assignees[0])
-        : null;
-    const assigneeColor = task.assignees.length > 0
-        ? (memberMap?.get(task.assigneeIds[0])?.color || 'hsl(240, 60%, 50%)')
-        : null;
+    // Resolve assignee full name
+    const assignee = task.assigneeIds.length > 0 ? memberMap?.get(task.assigneeIds[0]) : null;
+    const isAgent = assignee?.role === 'AGENT' || assignee?.email.endsWith('@odin.agent');
+    const assigneeName = assignee ? assignee.fullName : (task.assignees.length > 0 ? task.assignees[0] : null);
+    const assigneeColor = assignee ? assignee.color : (task.assignees.length > 0 ? 'hsl(240, 60%, 50%)' : null);
 
     const resolvedTaskMap = useMemo(
         () => taskMap || new Map(allTasks.map(item => [item.id, item] as const)),
@@ -249,9 +248,17 @@ export const TaskCard = memo(function TaskCard({
                                         </span>
                                     )}
                                     {assigneeName ? (
-                                        <span className="size-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white" style={{ background: assigneeColor || undefined }}>
-                                            {assigneeName.charAt(0)}
-                                        </span>
+                                        <div className="relative shrink-0">
+                                            <span className="size-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white font-mono"
+                                                style={{ background: assigneeColor || undefined }}>
+                                                {assigneeName.charAt(0)}
+                                            </span>
+                                            {isAgent && (
+                                                <div className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-indigo-600 border border-background flex items-center justify-center">
+                                                    <Bot className="size-[4px] text-white" />
+                                                </div>
+                                            )}
+                                        </div>
                                     ) : (
                                         <User className="size-2.5" />
                                     )}
@@ -352,6 +359,7 @@ export const TaskCard = memo(function TaskCard({
                                 </div>
                             )}
 
+                            {/* Row 5: Footer — status, assignee, time */}
                             <div className="flex items-center justify-between pt-1 border-t border-border">
                                 <div className="flex items-center gap-1.5">
                                     {!hideStatus && (
@@ -372,11 +380,22 @@ export const TaskCard = memo(function TaskCard({
 
                                 <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
                                     {assigneeName && (
-                                        <div className="flex items-center gap-1 min-w-0" title={assigneeName}>
-                                            <span className="size-4 rounded-full shrink-0 flex items-center justify-center text-[8px] font-bold text-white" style={{ background: assigneeColor || undefined }}>
-                                                {assigneeName.charAt(0)}
-                                            </span>
-                                            <span className="truncate max-w-[90px] font-medium">{assigneeName}</span>
+                                        <div className="flex items-center gap-1 min-w-0" title={assigneeName + (isAgent ? ' (Agent)' : '')}>
+                                            <div className="relative shrink-0">
+                                                <span className="size-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white font-mono"
+                                                    style={{ background: assigneeColor || undefined }}>
+                                                    {assigneeName.charAt(0)}
+                                                </span>
+                                                {isAgent && (
+                                                    <div className="absolute -right-0.5 -bottom-0.5 size-2 rounded-full bg-indigo-600 border border-background flex items-center justify-center">
+                                                        <Bot className="size-1 text-white" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <span className="truncate max-w-[80px] font-medium">{assigneeName}</span>
+                                            {isAgent && (
+                                                <Bot className="size-3 text-indigo-500 shrink-0" />
+                                            )}
                                         </div>
                                     )}
                                     {!assigneeName && (
