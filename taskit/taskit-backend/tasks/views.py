@@ -1141,206 +1141,6 @@ class BoardViewSet(viewsets.ModelViewSet):
         board.save(update_fields=["working_dir", "odin_initialized", "updated_at"])
         return Response(BoardSerializer(board).data)
 
-
-class ScheduleViewSet(viewsets.ModelViewSet):
-    serializer_class = TaskScheduleSerializer
-    pagination_class = StandardPagination
-
-    def get_queryset(self):
-        qs = TaskSchedule.objects.select_related(
-            "board", "template_assignee", "materialized_task", "last_released_run"
-        ).prefetch_related("runs")
-        query_params = self.request.query_params
-
-        board_ids = _parse_multi_values(query_params, "board_id", aliases=("board",))
-        if board_ids:
-            qs = qs.filter(board_id__in=board_ids)
-
-        statuses = _parse_multi_values(query_params, "status")
-        if statuses:
-            qs = qs.filter(status__in=statuses)
-
-        kinds = _parse_multi_values(query_params, "kind")
-        if kinds:
-            qs = qs.filter(kind__in=kinds)
-
-        history_mode = str(query_params.get("history") or "").lower() in ("1", "true", "yes")
-        if history_mode:
-            qs = qs.filter(
-                Q(status__in=[ScheduleStatus.COMPLETED, ScheduleStatus.CANCELED])
-                | Q(runs__finished_at_utc__isnull=False)
-            ).distinct()
-        else:
-            qs = qs.exclude(status__in=[ScheduleStatus.COMPLETED, ScheduleStatus.CANCELED])
-
-        # Search by template title or description
-        search_term = query_params.get("search") or query_params.get("q")
-        if search_term:
-            qs = qs.filter(
-                Q(template_title__icontains=search_term)
-                | Q(template_description__icontains=search_term)
-            )
-
-        # Date range filters
-        qs = _apply_date_range(qs, query_params, "created_at", "created_from", "created_to")
-        qs = _apply_date_range(qs, query_params, "next_run_at_utc", "next_run_from", "next_run_to")
-
-        # Configurable sort
-        SCHEDULE_SORT_FIELDS = {
-            "next_run_at_utc", "created_at", "template_title", "kind", "status", "starts_at_utc",
-        }
-        SCHEDULE_SORT_MAP = {f: f for f in SCHEDULE_SORT_FIELDS}
-        DEFAULT_SCHEDULE_SORT = [("next_run_at_utc", False)]
-        sort_tokens = _parse_sort_tokens(query_params.get("sort"), SCHEDULE_SORT_FIELDS, DEFAULT_SCHEDULE_SORT)
-        order_by = _build_order_by(sort_tokens, SCHEDULE_SORT_MAP)
-        # Always append "id" as tiebreaker
-        if "id" not in order_by and "-id" not in order_by:
-            order_by.append("id")
-
-        return qs.order_by(*order_by)
-
-    def create(self, request, *args, **kwargs):
-        ser = CreateScheduleSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        data = ser.validated_data
-        board = get_object_or_404(Board, pk=data["board_id"])
-        created_by = data.get("created_by", "")
-        if data.get("created_by_user_id"):
-            created_by = get_object_or_404(User, pk=data["created_by_user_id"]).email
-        try:
-            starts_at_local = parse_local_datetime(data["starts_at_local"], data["timezone"])
-        except ScheduleValidationError as exc:
-            raise ValidationError({exc.field: exc.message}) from exc
-        schedule = create_schedule(
-            board=board,
-            kind=data["kind"],
-            timezone_name=data["timezone"],
-            starts_at_local=starts_at_local,
-            template=data["template"],
-            recurrence_rule=data.get("recurrence_rule") or {},
-            created_by=created_by,
-        )
-        return Response(TaskScheduleSerializer(schedule).data, status=status.HTTP_201_CREATED)
-
-    def partial_update(self, request, *args, **kwargs):
-        schedule = self.get_object()
-        ser = UpdateScheduleSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        data = ser.validated_data
-        effective_timezone = data.get("timezone", schedule.timezone)
-        try:
-            if "starts_at_local" in data:
-                effective_starts_at_local = parse_local_datetime(data["starts_at_local"], effective_timezone)
-            elif "timezone" in data:
-                effective_starts_at_local = rebind_local_datetime(
-                    schedule.starts_at_local,
-                    schedule.timezone,
-                    effective_timezone,
-                )
-            else:
-                effective_starts_at_local = schedule.starts_at_local
-        except ScheduleValidationError as exc:
-            raise ValidationError({exc.field: exc.message}) from exc
-        effective_recurrence = data.get("recurrence_rule", schedule.recurrence_rule or {})
-        if "starts_at_local" in data and effective_starts_at_local <= timezone.now().astimezone(effective_starts_at_local.tzinfo):
-            raise ValidationError({
-                "starts_at_local": "Scheduled start time must be in the future.",
-            })
-        if schedule.kind == ScheduleKind.RECURRING:
-            if effective_recurrence.get("freq") == "WEEKLY":
-                weekdays = effective_recurrence.get("by_weekday") or []
-                expected = WEEKDAY_KEYS[effective_starts_at_local.weekday()]
-                if weekdays and expected not in weekdays:
-                    raise ValidationError({
-                        "recurrence_rule": f"Weekly recurrence must include the first scheduled weekday: {expected}."
-                    })
-            if effective_recurrence.get("freq") == "MONTHLY":
-                monthdays = effective_recurrence.get("by_monthday") or []
-                if monthdays and effective_starts_at_local.day not in monthdays:
-                    raise ValidationError({
-                        "recurrence_rule": f"Monthly recurrence must include the first scheduled day: {effective_starts_at_local.day}."
-                    })
-        if "timezone" in data:
-            schedule.timezone = effective_timezone
-        if any(key in data for key in ("starts_at_local", "timezone")):
-            schedule.starts_at_local = effective_starts_at_local
-            schedule.starts_at_utc = local_to_utc(schedule.starts_at_local, effective_timezone)
-        if "template" in data:
-            template = data["template"]
-            schedule.template_title = template["title"]
-            schedule.template_description = template.get("description", "")
-            schedule.template_priority = template.get("priority", schedule.template_priority)
-            schedule.template_assignee_id = template.get("assignee_id")
-            schedule.template_model_name = template.get("model_name")
-            schedule.template_label_ids = template.get("label_ids", [])
-            schedule.template_depends_on = template.get("depends_on", [])
-            schedule.template_dev_eta_seconds = template.get("dev_eta_seconds")
-            schedule.template_spec_id = template.get("spec_id")
-            schedule.template_metadata = template.get("metadata", {})
-        if "recurrence_rule" in data:
-            schedule.recurrence_rule = data["recurrence_rule"]
-        if (
-            schedule.status in (ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED)
-            and any(key in data for key in ("starts_at_local", "timezone", "recurrence_rule"))
-        ):
-            now = timezone.now()
-            schedule.next_run_at_utc = compute_schedule_next_run(schedule, reference_utc=now)
-            if schedule.kind == ScheduleKind.ONE_TIME and schedule.next_run_at_utc is None:
-                raise ValidationError({
-                    "starts_at_local": "Scheduled start time must be in the future.",
-                })
-            if schedule.status == ScheduleStatus.PAUSED and schedule.next_run_at_utc is None:
-                schedule.status = ScheduleStatus.COMPLETED
-                schedule.completed_at = now
-        schedule.save()
-        return Response(TaskScheduleSerializer(schedule).data)
-
-    @action(detail=True, methods=["post"])
-    def pause(self, request, pk=None):
-        schedule = self.get_object()
-        ser = ScheduleStatusMutationSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        schedule.status = ScheduleStatus.PAUSED
-        schedule.paused_at = timezone.now()
-        schedule.save(update_fields=["status", "paused_at", "updated_at"])
-        return Response(TaskScheduleSerializer(schedule).data)
-
-    @action(detail=True, methods=["post"])
-    def resume(self, request, pk=None):
-        schedule = self.get_object()
-        ser = ScheduleStatusMutationSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        now = timezone.now()
-        schedule.status = ScheduleStatus.ACTIVE
-        schedule.paused_at = None
-        schedule.next_run_at_utc = compute_schedule_next_run(schedule, reference_utc=now)
-        if schedule.next_run_at_utc is None:
-            schedule.status = ScheduleStatus.COMPLETED
-            schedule.completed_at = now
-            schedule.save(update_fields=["status", "paused_at", "next_run_at_utc", "completed_at", "updated_at"])
-            return Response(TaskScheduleSerializer(schedule).data)
-        schedule.save(update_fields=["status", "paused_at", "next_run_at_utc", "updated_at"])
-        return Response(TaskScheduleSerializer(schedule).data)
-
-    @action(detail=True, methods=["post"])
-    def cancel(self, request, pk=None):
-        schedule = self.get_object()
-        ser = ScheduleStatusMutationSerializer(data=request.data)
-        ser.is_valid(raise_exception=True)
-        schedule.status = ScheduleStatus.CANCELED
-        schedule.canceled_at = timezone.now()
-        schedule.next_run_at_utc = None
-        schedule.save(update_fields=["status", "canceled_at", "next_run_at_utc", "updated_at"])
-        return Response(TaskScheduleSerializer(schedule).data)
-
-    def destroy(self, request, *args, **kwargs):
-        schedule = self.get_object()
-        schedule.status = ScheduleStatus.CANCELED
-        schedule.canceled_at = timezone.now()
-        schedule.next_run_at_utc = None
-        schedule.save(update_fields=["status", "canceled_at", "next_run_at_utc", "updated_at"])
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
     @action(detail=True, methods=["get"], url_path="members", url_name="members-list")
     def members(self, request, *args, **kwargs):
         """List board members."""
@@ -1586,6 +1386,206 @@ class ScheduleViewSet(viewsets.ModelViewSet):
             "tasks_deleted": tasks_deleted,
             "specs_deleted": specs_deleted,
         })
+
+
+class ScheduleViewSet(viewsets.ModelViewSet):
+    serializer_class = TaskScheduleSerializer
+    pagination_class = StandardPagination
+
+    def get_queryset(self):
+        qs = TaskSchedule.objects.select_related(
+            "board", "template_assignee", "materialized_task", "last_released_run"
+        ).prefetch_related("runs")
+        query_params = self.request.query_params
+
+        board_ids = _parse_multi_values(query_params, "board_id", aliases=("board",))
+        if board_ids:
+            qs = qs.filter(board_id__in=board_ids)
+
+        statuses = _parse_multi_values(query_params, "status")
+        if statuses:
+            qs = qs.filter(status__in=statuses)
+
+        kinds = _parse_multi_values(query_params, "kind")
+        if kinds:
+            qs = qs.filter(kind__in=kinds)
+
+        history_mode = str(query_params.get("history") or "").lower() in ("1", "true", "yes")
+        if history_mode:
+            qs = qs.filter(
+                Q(status__in=[ScheduleStatus.COMPLETED, ScheduleStatus.CANCELED])
+                | Q(runs__finished_at_utc__isnull=False)
+            ).distinct()
+        else:
+            qs = qs.exclude(status__in=[ScheduleStatus.COMPLETED, ScheduleStatus.CANCELED])
+
+        # Search by template title or description
+        search_term = query_params.get("search") or query_params.get("q")
+        if search_term:
+            qs = qs.filter(
+                Q(template_title__icontains=search_term)
+                | Q(template_description__icontains=search_term)
+            )
+
+        # Date range filters
+        qs = _apply_date_range(qs, query_params, "created_at", "created_from", "created_to")
+        qs = _apply_date_range(qs, query_params, "next_run_at_utc", "next_run_from", "next_run_to")
+
+        # Configurable sort
+        SCHEDULE_SORT_FIELDS = {
+            "next_run_at_utc", "created_at", "template_title", "kind", "status", "starts_at_utc",
+        }
+        SCHEDULE_SORT_MAP = {f: f for f in SCHEDULE_SORT_FIELDS}
+        DEFAULT_SCHEDULE_SORT = [("next_run_at_utc", False)]
+        sort_tokens = _parse_sort_tokens(query_params.get("sort"), SCHEDULE_SORT_FIELDS, DEFAULT_SCHEDULE_SORT)
+        order_by = _build_order_by(sort_tokens, SCHEDULE_SORT_MAP)
+        # Always append "id" as tiebreaker
+        if "id" not in order_by and "-id" not in order_by:
+            order_by.append("id")
+
+        return qs.order_by(*order_by)
+
+    def create(self, request, *args, **kwargs):
+        ser = CreateScheduleSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        board = get_object_or_404(Board, pk=data["board_id"])
+        created_by = data.get("created_by", "")
+        if data.get("created_by_user_id"):
+            created_by = get_object_or_404(User, pk=data["created_by_user_id"]).email
+        try:
+            starts_at_local = parse_local_datetime(data["starts_at_local"], data["timezone"])
+        except ScheduleValidationError as exc:
+            raise ValidationError({exc.field: exc.message}) from exc
+        schedule = create_schedule(
+            board=board,
+            kind=data["kind"],
+            timezone_name=data["timezone"],
+            starts_at_local=starts_at_local,
+            template=data["template"],
+            recurrence_rule=data.get("recurrence_rule") or {},
+            created_by=created_by,
+        )
+        return Response(TaskScheduleSerializer(schedule).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, *args, **kwargs):
+        schedule = self.get_object()
+        ser = UpdateScheduleSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        effective_timezone = data.get("timezone", schedule.timezone)
+        try:
+            if "starts_at_local" in data:
+                effective_starts_at_local = parse_local_datetime(data["starts_at_local"], effective_timezone)
+            elif "timezone" in data:
+                effective_starts_at_local = rebind_local_datetime(
+                    schedule.starts_at_local,
+                    schedule.timezone,
+                    effective_timezone,
+                )
+            else:
+                effective_starts_at_local = schedule.starts_at_local
+        except ScheduleValidationError as exc:
+            raise ValidationError({exc.field: exc.message}) from exc
+        effective_recurrence = data.get("recurrence_rule", schedule.recurrence_rule or {})
+        if "starts_at_local" in data and effective_starts_at_local <= timezone.now().astimezone(effective_starts_at_local.tzinfo):
+            raise ValidationError({
+                "starts_at_local": "Scheduled start time must be in the future.",
+            })
+        if schedule.kind == ScheduleKind.RECURRING:
+            if effective_recurrence.get("freq") == "WEEKLY":
+                weekdays = effective_recurrence.get("by_weekday") or []
+                expected = WEEKDAY_KEYS[effective_starts_at_local.weekday()]
+                if weekdays and expected not in weekdays:
+                    raise ValidationError({
+                        "recurrence_rule": f"Weekly recurrence must include the first scheduled weekday: {expected}."
+                    })
+            if effective_recurrence.get("freq") == "MONTHLY":
+                monthdays = effective_recurrence.get("by_monthday") or []
+                if monthdays and effective_starts_at_local.day not in monthdays:
+                    raise ValidationError({
+                        "recurrence_rule": f"Monthly recurrence must include the first scheduled day: {effective_starts_at_local.day}."
+                    })
+        if "timezone" in data:
+            schedule.timezone = effective_timezone
+        if any(key in data for key in ("starts_at_local", "timezone")):
+            schedule.starts_at_local = effective_starts_at_local
+            schedule.starts_at_utc = local_to_utc(schedule.starts_at_local, effective_timezone)
+        if "template" in data:
+            template = data["template"]
+            schedule.template_title = template["title"]
+            schedule.template_description = template.get("description", "")
+            schedule.template_priority = template.get("priority", schedule.template_priority)
+            schedule.template_assignee_id = template.get("assignee_id")
+            schedule.template_model_name = template.get("model_name")
+            schedule.template_label_ids = template.get("label_ids", [])
+            schedule.template_depends_on = template.get("depends_on", [])
+            schedule.template_dev_eta_seconds = template.get("dev_eta_seconds")
+            schedule.template_spec_id = template.get("spec_id")
+            schedule.template_metadata = template.get("metadata", {})
+        if "recurrence_rule" in data:
+            schedule.recurrence_rule = data["recurrence_rule"]
+        if (
+            schedule.status in (ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED)
+            and any(key in data for key in ("starts_at_local", "timezone", "recurrence_rule"))
+        ):
+            now = timezone.now()
+            schedule.next_run_at_utc = compute_schedule_next_run(schedule, reference_utc=now)
+            if schedule.kind == ScheduleKind.ONE_TIME and schedule.next_run_at_utc is None:
+                raise ValidationError({
+                    "starts_at_local": "Scheduled start time must be in the future.",
+                })
+            if schedule.status == ScheduleStatus.PAUSED and schedule.next_run_at_utc is None:
+                schedule.status = ScheduleStatus.COMPLETED
+                schedule.completed_at = now
+        schedule.save()
+        return Response(TaskScheduleSerializer(schedule).data)
+
+    @action(detail=True, methods=["post"])
+    def pause(self, request, pk=None):
+        schedule = self.get_object()
+        ser = ScheduleStatusMutationSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        schedule.status = ScheduleStatus.PAUSED
+        schedule.paused_at = timezone.now()
+        schedule.save(update_fields=["status", "paused_at", "updated_at"])
+        return Response(TaskScheduleSerializer(schedule).data)
+
+    @action(detail=True, methods=["post"])
+    def resume(self, request, pk=None):
+        schedule = self.get_object()
+        ser = ScheduleStatusMutationSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        now = timezone.now()
+        schedule.status = ScheduleStatus.ACTIVE
+        schedule.paused_at = None
+        schedule.next_run_at_utc = compute_schedule_next_run(schedule, reference_utc=now)
+        if schedule.next_run_at_utc is None:
+            schedule.status = ScheduleStatus.COMPLETED
+            schedule.completed_at = now
+            schedule.save(update_fields=["status", "paused_at", "next_run_at_utc", "completed_at", "updated_at"])
+            return Response(TaskScheduleSerializer(schedule).data)
+        schedule.save(update_fields=["status", "paused_at", "next_run_at_utc", "updated_at"])
+        return Response(TaskScheduleSerializer(schedule).data)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        schedule = self.get_object()
+        ser = ScheduleStatusMutationSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        schedule.status = ScheduleStatus.CANCELED
+        schedule.canceled_at = timezone.now()
+        schedule.next_run_at_utc = None
+        schedule.save(update_fields=["status", "canceled_at", "next_run_at_utc", "updated_at"])
+        return Response(TaskScheduleSerializer(schedule).data)
+
+    def destroy(self, request, *args, **kwargs):
+        schedule = self.get_object()
+        schedule.status = ScheduleStatus.CANCELED
+        schedule.canceled_at = timezone.now()
+        schedule.next_run_at_utc = None
+        schedule.save(update_fields=["status", "canceled_at", "next_run_at_utc", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class LabelViewSet(viewsets.ModelViewSet):
