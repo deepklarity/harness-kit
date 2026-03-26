@@ -575,6 +575,19 @@ export interface AnalyticsCostSummary {
     meta: { task_count: number; granularity: string };
 }
 
+export interface ProviderQuota {
+    provider: string;
+    plan: string | null;
+    usage_pct: number | null;
+    used: number | null;
+    limit: number | null;
+    remaining: number | null;
+    unit: string;
+    reset_date: string | null;
+    state: string | null;
+    raw: Record<string, unknown> | null;
+}
+
 // ─── Notification Types ───────────────────────────────────────
 
 export type NotificationType = 'task_assigned' | 'comment_added' | 'status_changed' | 'planning_complete' | 'question_asked' | 'spec_finished';

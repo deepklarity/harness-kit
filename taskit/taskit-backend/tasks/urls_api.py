@@ -29,4 +29,5 @@ urlpatterns = [
     path("runtime/process-monitor/", views.runtime_process_monitor),
     path("runtime/stop/", views.runtime_stop),
     path("analytics/cost-summary/", analytics.cost_summary),
+    path("analytics/quota-status/", analytics.quota_status),
 ] + router.urls

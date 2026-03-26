@@ -24,6 +24,7 @@ import type {
     ProcessMonitorResponse,
     ForcedProviderStatus,
     AnalyticsCostSummary,
+    ProviderQuota,
     TaskSchedule,
     IdeOptions,
     IdeSettings,
@@ -1133,6 +1134,10 @@ export class HarnessTimeService implements IntegrationService {
         if (params?.granularity) sp.set('granularity', params.granularity);
         const qs = sp.toString();
         return this.get<AnalyticsCostSummary>(`/api/analytics/cost-summary/${qs ? `?${qs}` : ''}`);
+    }
+
+    async fetchQuotaStatus(): Promise<ProviderQuota[]> {
+        return this.get<ProviderQuota[]>('/api/analytics/quota-status/');
     }
 
     async fetchBoardMembers(boardId: string): Promise<Member[]> {

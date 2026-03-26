@@ -17,6 +17,7 @@ import type {
     ProcessMonitorResponse,
     ForcedProviderStatus,
     AnalyticsCostSummary,
+    ProviderQuota,
     TaskSchedule,
     IdeOptions,
     IdeSettings,
@@ -153,6 +154,7 @@ export interface IntegrationService {
 
     // Analytics
     fetchAnalytics(params?: { board?: string; date_from?: string; date_to?: string; granularity?: string }): Promise<AnalyticsCostSummary>;
+    fetchQuotaStatus(): Promise<ProviderQuota[]>;
 
     // Presets
     fetchPresets(): Promise<PresetsResponse>;

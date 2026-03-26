@@ -9,7 +9,7 @@ import { formatCost } from '../../utils/costEstimation';
 import { formatTokens } from '../../utils/transformer';
 import { BarChart3, Hash, Coins, FileSearch, ListChecks } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { AnalyticsCostSummary, Board } from '../../types';
+import type { AnalyticsCostSummary, Board, ProviderQuota } from '../../types';
 
 import { DateRangePicker } from './DateRangePicker';
 import { CostOverTimeChart } from './CostOverTimeChart';
@@ -20,6 +20,7 @@ import { EfficiencyMetrics } from './EfficiencyMetrics';
 import { ModelComparisonTable } from './ModelComparisonTable';
 import { TopExpensiveTasksList } from './TopExpensiveTasksList';
 import { exportAnalyticsCsv } from './csvExport';
+import { QuotaCards } from './QuotaCards';
 
 const ALL_BOARDS = '__ALL__';
 
@@ -61,6 +62,16 @@ export function AnalyticsPage({ boards, onTaskClick }: AnalyticsPageProps) {
     const [data, setData] = useState<AnalyticsCostSummary | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [quotaData, setQuotaData] = useState<ProviderQuota[]>([]);
+    const [quotaLoading, setQuotaLoading] = useState(true);
+
+    useEffect(() => {
+        setQuotaLoading(true);
+        service.fetchQuotaStatus()
+            .then(setQuotaData)
+            .catch(() => {})
+            .finally(() => setQuotaLoading(false));
+    }, [service]);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -178,6 +189,9 @@ export function AnalyticsPage({ boards, onTaskClick }: AnalyticsPageProps) {
                 <div className="text-sm text-muted-foreground py-8">Loading analytics...</div>
             ) : data ? (
                 <>
+                    {/* Provider Quotas */}
+                    <QuotaCards data={quotaData} loading={quotaLoading} />
+
                     {/* KPI Cards */}
                     <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
                         {kpis.map((card, i) => {

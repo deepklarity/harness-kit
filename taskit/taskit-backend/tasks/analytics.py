@@ -5,6 +5,8 @@ page. Uses the same cost computation chain as the serializers
 (compute_usage_from_trace → estimate_task_cost) but aggregates server-side.
 """
 
+import asyncio
+import logging
 from collections import defaultdict
 
 from django.utils import timezone
@@ -15,6 +17,66 @@ from .execution_processing import compute_usage_from_trace
 from .models import Board, ReflectionReport, Task
 from .pricing import estimate_task_cost
 from .views import _apply_date_range, _parse_multi_values
+
+logger = logging.getLogger(__name__)
+
+
+@api_view(["GET"])
+def quota_status(request):
+    """Return current usage/quota data for all configured AI providers.
+
+    Uses harness_usage_status to fetch live quota info. Returns [] if
+    the package is not installed or no providers are configured.
+    """
+    try:
+        from harness_usage_status.config import load_config
+        from harness_usage_status.providers.registry import get_all_providers
+    except ImportError:
+        return Response([])
+
+    try:
+        config = load_config()
+        providers = get_all_providers(config.get_provider_configs())
+    except Exception:
+        logger.exception("Failed to load harness_usage_status config/providers")
+        return Response([])
+
+    async def _fetch_all():
+        results = []
+        for name, provider in providers.items():
+            try:
+                usage = await provider.get_usage()
+                status = await provider.get_status()
+                usage.compute_pct()
+                results.append({
+                    "provider": usage.provider,
+                    "plan": usage.plan,
+                    "usage_pct": usage.usage_pct,
+                    "used": usage.used,
+                    "limit": usage.quota_limit,
+                    "remaining": usage.remaining,
+                    "unit": usage.unit,
+                    "reset_date": usage.reset_date.isoformat() if usage.reset_date else None,
+                    "state": status.state.value if status.state else None,
+                    "raw": usage.raw,
+                })
+            except Exception:
+                logger.warning("Failed to fetch quota for provider %s", name, exc_info=True)
+        return results
+
+    try:
+        data = asyncio.run(_fetch_all())
+    except RuntimeError:
+        # Already in an async event loop (e.g. ASGI) — use nest_asyncio or skip
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+            data = asyncio.run(_fetch_all())
+        except ImportError:
+            loop = asyncio.get_event_loop()
+            data = loop.run_until_complete(_fetch_all())
+
+    return Response(data)
 
 
 @api_view(["GET"])
