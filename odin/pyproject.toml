@@ -15,14 +15,10 @@ dependencies = [
     "requests>=2.28",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
-]
-
-[project.optional-dependencies]
-mcp = ["fastmcp>=2.0"]
-dev = [
+    "filelock>=3.12",
+    "fastmcp>=2.0",
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
-    "fastmcp>=2.0",
 ]
 
 [project.scripts]

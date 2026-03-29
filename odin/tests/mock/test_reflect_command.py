@@ -5,6 +5,7 @@ Tests the reflect_task() flow with mocked HTTP and harness calls.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
+import httpx
 
 from odin.models import TaskResult
 from odin.reflection import reflect_task
@@ -205,3 +206,123 @@ class TestReflectTask:
         mock_harness.execute.assert_called_once()
         context = mock_harness.execute.call_args[0][1]
         assert context["model"] == "gemini-2.5-pro"
+
+
+# Task detail with proof comments containing screenshot attachments
+MOCK_TASK_WITH_SCREENSHOTS = {
+    "id": 99,
+    "title": "Frontend Quota modal with navbar button",
+    "description": "Add a Quota button to the navbar. Proof: Screenshot showing the modal open.",
+    "status": "REVIEW",
+    "model_name": "claude-sonnet-4-5",
+    "metadata": {
+        "working_dir": "/tmp/project",
+        "selected_model": "claude-sonnet-4-5",
+        "full_output": "Feature implemented",
+        "last_duration_ms": 60000,
+        "last_usage": {"input_tokens": 3000, "output_tokens": 5000, "total_tokens": 8000},
+    },
+    "comments": [
+        {"content": "Starting implementation", "comment_type": "status_update", "attachments": []},
+        {
+            "content": "Proof: Quota button and modal implemented",
+            "comment_type": "proof",
+            "attachments": [
+                {
+                    "type": "proof",
+                    "summary": "Task complete",
+                    "screenshots": [
+                        "http://localhost:8000/media/screenshots/2026/03/proof_99_navbar.png",
+                        "http://localhost:8000/media/screenshots/2026/03/proof_99_modal.png",
+                    ],
+                }
+            ],
+        },
+    ],
+    "depends_on": [],
+    "assignee": {"name": "claude-agent"},
+}
+
+
+class TestReflectTaskScreenshots:
+    """reflect_task() must include screenshot images in the reviewer prompt."""
+
+    def test_screenshot_urls_extracted_and_downloaded(self, mock_harness, tmp_path):
+        """Screenshots from proof comments are downloaded and paths injected into prompt."""
+        # Mock HTTP: detail returns task with screenshot attachments, download returns image bytes
+        with patch("odin.reflection.httpx") as mock_requests:
+            running_resp = MagicMock()
+            running_resp.status_code = 200
+            running_resp.json.return_value = {"status": "RUNNING"}
+
+            detail_resp = MagicMock()
+            detail_resp.status_code = 200
+            detail_resp.json.return_value = MOCK_TASK_WITH_SCREENSHOTS
+
+            complete_resp = MagicMock()
+            complete_resp.status_code = 200
+            complete_resp.json.return_value = {"status": "COMPLETED"}
+
+            mock_requests.patch.side_effect = [running_resp, complete_resp]
+            mock_requests.get.side_effect = [
+                detail_resp,
+                # Two screenshot downloads
+                MagicMock(status_code=200, content=b"\x89PNG\r\n\x1a\nfake_navbar"),
+                MagicMock(status_code=200, content=b"\x89PNG\r\n\x1a\nfake_modal"),
+            ]
+
+            reflect_task(
+                task_id="99", report_id="5", model="claude-opus-4-6",
+                agent="claude", taskit_url="http://localhost:8000",
+            )
+
+        # The prompt sent to the harness must reference the screenshot files
+        prompt = mock_harness.execute.call_args[0][0]
+        assert "proof_99_navbar.png" in prompt
+        assert "proof_99_modal.png" in prompt
+        # Must instruct the reviewer to actually look at the images
+        assert "screenshot" in prompt.lower() or "image" in prompt.lower()
+
+    def test_screenshot_download_failure_degrades_gracefully(self, mock_harness):
+        """If screenshot download fails, reflection continues without images."""
+        with patch("odin.reflection.httpx") as mock_requests:
+            running_resp = MagicMock()
+            running_resp.status_code = 200
+            running_resp.json.return_value = {"status": "RUNNING"}
+
+            detail_resp = MagicMock()
+            detail_resp.status_code = 200
+            detail_resp.json.return_value = MOCK_TASK_WITH_SCREENSHOTS
+
+            complete_resp = MagicMock()
+            complete_resp.status_code = 200
+            complete_resp.json.return_value = {"status": "COMPLETED"}
+
+            mock_requests.patch.side_effect = [running_resp, complete_resp]
+
+            # Detail succeeds, screenshot downloads fail
+            download_fail = MagicMock()
+            download_fail.status_code = 404
+            download_fail.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "Not Found", request=MagicMock(), response=download_fail,
+            )
+
+            mock_requests.get.side_effect = [detail_resp, download_fail, download_fail]
+
+            # Should not raise — degrades gracefully
+            reflect_task(
+                task_id="99", report_id="5", model="claude-opus-4-6",
+                agent="claude", taskit_url="http://localhost:8000",
+            )
+
+        # Harness still called (reflection continues)
+        mock_harness.execute.assert_called_once()
+
+    def test_no_screenshots_no_image_section(self, mock_http, mock_harness):
+        """When comments have no screenshot attachments, prompt has no image section."""
+        reflect_task(
+            task_id="42", report_id="1", model="claude-opus-4-6",
+            agent="claude", taskit_url="http://localhost:8000",
+        )
+        prompt = mock_harness.execute.call_args[0][0]
+        assert "Proof Screenshots" not in prompt

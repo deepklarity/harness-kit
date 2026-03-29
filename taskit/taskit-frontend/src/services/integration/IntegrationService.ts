@@ -7,6 +7,7 @@ import type {
     PaginatedResponse,
     PresetsResponse,
     Spec,
+    SpecCommit,
     SpecListQuery,
     Task,
     TaskListQuery,
@@ -130,6 +131,8 @@ export interface IntegrationService {
 
     fetchSpecs?(): Promise<Spec[]>;
     fetchSpecDetail?(id: string): Promise<Spec>;
+    fetchSpecCommits?(specId: string): Promise<SpecCommit[]>;
+    finalizeSpec?(specId: string): Promise<{ pr_url?: string; finalized_at?: string; error?: string }>;
 
 
     uploadScreenshots(taskId: string, files: File[], authorEmail?: string): Promise<unknown>;

@@ -1,5 +1,4 @@
 {
-  "autoMemoryEnabled": false,
   "hooks": {
     "PreToolUse": [
       {
@@ -36,7 +35,6 @@
       }
     ]
   },
-  "enabledPlugins": {
-    "frontend-design@claude-plugins-official": true
-  }
+  "enabledPlugins": {},
+  "autoMemoryEnabled": false
 }

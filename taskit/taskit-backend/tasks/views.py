@@ -165,11 +165,10 @@ def _trigger_auto_reflection(task):
     Called when a task transitions to REVIEW — mirrors the pattern used for
     auto-execution on IN_PROGRESS (explicit call in the view, not a signal).
     """
-    if task.skip_reflection:
-        logger.info("[task:%s] Skipping auto-reflection: skip_reflection=True", task.id)
-        return
-    if task.board.skip_reflection:
-        logger.info("[task:%s] Skipping auto-reflection: board skip_reflection=True (board=%s)", task.id, task.board_id)
+    if task.skip_reflection or task.board.skip_reflection:
+        source = "task" if task.skip_reflection else f"board {task.board_id}"
+        logger.info("[task:%s] Skipping auto-reflection (%s) — dispatching merge+advance directly", task.id, source)
+        _merge_task_on_reflection_pass(task)
         return
 
     active_exists = ReflectionReport.objects.filter(
@@ -200,6 +199,25 @@ def _trigger_auto_reflection(task):
     execute_reflection.delay(report.id)
 
     logger.info("[task:%s] Auto-reflection triggered: report_id=%s", task.id, report.id)
+
+
+def _merge_task_on_reflection_pass(task):
+    """Dispatch merge of task branch into spec branch as a Celery task.
+
+    Called when REVIEW → TESTING (pass) or REVIEW → FAILED (3 strikes).
+    The actual merge runs in the Celery worker where odin is importable
+    (the Django web process cannot import odin.worktree).
+    """
+    branch = (task.metadata or {}).get("branch")
+    if not branch:
+        return
+
+    # Skip if already merged (e.g. manual merge or duplicate call)
+    if (task.metadata or {}).get("merge_status") == "merged":
+        return
+
+    from .dag_executor import merge_task_on_reflection
+    merge_task_on_reflection.delay(task.id)
 
 
 # -- Quota keywords matched against failure_reason, verdict_summary, and quota_failure --
@@ -1691,7 +1709,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         query_params = self.request.query_params
         qs = (
-            Task.objects.select_related("assignee")
+            Task.objects.select_related("assignee", "spec")
             .prefetch_related("labels")
             .annotate(comment_count=Count("comments"))
         )
@@ -2633,32 +2651,19 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                 }],
             )
 
-        # Auto-advance: PASS verdict moves task from REVIEW → TESTING
+        # Auto-advance: PASS verdict triggers merge, which advances
+        # REVIEW → TESTING only after merge completes.  This prevents
+        # downstream tasks from forking the spec branch before
+        # upstream code has landed.
         if (
             new_status == "COMPLETED"
             and report.verdict
             and report.verdict.upper() == "PASS"
         ):
             task = report.task
-            # Re-read from DB to guard against concurrent status changes
             task.refresh_from_db(fields=["status"])
             if task.status == TaskStatus.REVIEW:
-                old_status = task.status
-                task.status = TaskStatus.TESTING
-                task.save(update_fields=["status"])
-                TaskHistory.objects.create(
-                    task=task,
-                    schedule_run=task.current_schedule_run,
-                    field_name="status",
-                    old_value=old_status,
-                    new_value=TaskStatus.TESTING,
-                    changed_by="system@taskit",
-                )
-                maybe_finalize_schedule_run(task, TaskStatus.TESTING)
-                logger.info(
-                    "Auto-advanced task %s from REVIEW → TESTING after reflection PASS",
-                    task.id,
-                )
+                _merge_task_on_reflection_pass(task)
 
         # Auto-advance: NEEDS_WORK or FAIL verdict retries or fails after 3 attempts
         verdict = (report.verdict or "").upper()
@@ -2674,7 +2679,7 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                 ).count()
 
                 if completed_count >= 3:
-                    # 3 strikes — fail the task
+                    # 3 strikes — fail the task (no merge; branch preserved for inspection)
                     old_status = task.status
                     task.status = TaskStatus.FAILED
                     task.save(update_fields=["status"])
@@ -3024,6 +3029,181 @@ class SpecViewSet(viewsets.ModelViewSet):
                 SpecCommentSerializer(page, many=True).data
             )
         return Response(SpecCommentSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=["post"])
+    def finalize(self, request, pk=None):
+        """Create a PR for a spec by running `odin spec finalize`."""
+        spec = get_object_or_404(
+            Spec.objects.select_related("board"), pk=pk
+        )
+        meta = spec.metadata or {}
+        odin_id = meta.get("odin_id") or spec.odin_id
+        branch = meta.get("branch")
+
+        # Pre-flight: branch required
+        if not branch:
+            return Response(
+                {"error": "Spec has no branch (worktree isolation may be disabled)"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Pre-flight: already has PR
+        existing_pr = meta.get("pr_url")
+        if existing_pr:
+            return Response(
+                {"error": "Spec already has a PR", "pr_url": existing_pr},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Pre-flight: board working dir
+        working_dir = (spec.board.working_dir or "").strip()
+        if not working_dir:
+            return Response(
+                {"error": "Board has no working directory"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Pre-flight: gh CLI installed and authenticated
+        try:
+            subprocess.run(
+                ["gh", "--version"], capture_output=True, text=True, timeout=5
+            )
+        except FileNotFoundError:
+            return Response(
+                {"error": "GitHub CLI (gh) is not installed. Install it: https://cli.github.com"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        gh_auth = subprocess.run(
+            ["gh", "auth", "status"], capture_output=True, text=True, timeout=5
+        )
+        if gh_auth.returncode != 0:
+            return Response(
+                {"error": "GitHub CLI is not authenticated. Run `gh auth login` first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Pre-flight: git remote
+        try:
+            remote_result = subprocess.run(
+                ["git", "remote"], capture_output=True, text=True,
+                cwd=working_dir, timeout=5,
+            )
+            if not remote_result.stdout.strip():
+                return Response(
+                    {"error": "No git remote configured. Run `git remote add origin <url>` first."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        except Exception:
+            pass  # Non-fatal — let odin handle it
+
+        # Run odin spec finalize
+        cli_path = getattr(settings, "ODIN_CLI_PATH", "odin")
+        cmd = [cli_path, "spec", "finalize", str(odin_id)]
+
+        try:
+            result = subprocess.run(
+                cmd, cwd=working_dir, capture_output=True, text=True, timeout=120,
+            )
+        except FileNotFoundError:
+            return Response(
+                {"error": "Odin CLI not found. Check ODIN_CLI_PATH setting."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except subprocess.TimeoutExpired:
+            return Response(
+                {"error": "PR creation timed out. Try running `odin spec finalize` manually."},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        if result.returncode != 0:
+            # CLI prints errors to stdout via rich console
+            combined = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+            # Extract the human-readable part after "PR creation failed: "
+            import re
+            pr_fail = re.search(r'PR creation failed:\s*(.+)', combined)
+            if pr_fail:
+                msg = pr_fail.group(1).strip()
+            else:
+                # Fallback: last non-empty line is usually the most relevant
+                lines = [l.strip() for l in combined.splitlines() if l.strip()]
+                msg = lines[-1] if lines else "Unknown error"
+            return Response(
+                {"error": msg},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Re-read spec from DB (odin updates metadata via API)
+        spec.refresh_from_db()
+        refreshed_meta = spec.metadata or {}
+        pr_url = refreshed_meta.get("pr_url")
+
+        # Parse stdout for PR URL as fallback (odin prints it)
+        if not pr_url:
+            import re
+            url_match = re.search(r'https://github\.com/\S+/pull/\d+', result.stdout or "")
+            if url_match:
+                pr_url = url_match.group(0)
+                # Persist it to metadata so it's available on reload
+                refreshed_meta["pr_url"] = pr_url
+                spec.metadata = refreshed_meta
+                spec.save(update_fields=["metadata"])
+
+        if not pr_url:
+            logger.warning(
+                "odin spec finalize for %s produced no PR URL. stdout: %s",
+                odin_id, (result.stdout or "").strip()[:500],
+            )
+            return Response(
+                {"error": "Branches merged but no PR was created. Check that `gh auth login` is configured and the repo has a remote."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({
+            "pr_url": pr_url,
+            "finalized_at": refreshed_meta.get("finalized_at"),
+        })
+
+    @action(detail=True, methods=["get"])
+    def commits(self, request, pk=None):
+        """List commits on the spec branch since it diverged from main."""
+        spec = get_object_or_404(Spec.objects.select_related("board"), pk=pk)
+        meta = spec.metadata or {}
+        branch = meta.get("branch")
+        if not branch:
+            return Response([])
+
+        working_dir = (spec.board.working_dir or "").strip()
+        if not working_dir:
+            return Response([])
+
+        fmt = "%H%x00%h%x00%s%x00%an%x00%aI"
+        cmd = [
+            "git", "log", f"main..{branch}",
+            f"--format={fmt}", "--reverse",
+        ]
+        try:
+            result = subprocess.run(
+                cmd, cwd=working_dir, capture_output=True, text=True, timeout=10,
+            )
+        except Exception:
+            return Response([])
+
+        if result.returncode != 0:
+            return Response([])
+
+        commits = []
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("\x00")
+            if len(parts) < 5:
+                continue
+            commits.append({
+                "hash": parts[0],
+                "short_hash": parts[1],
+                "message": parts[2],
+                "author": parts[3],
+                "date": parts[4],
+            })
+        return Response(commits)
 
     def destroy(self, request, *args, **kwargs):
         spec = self.get_object()

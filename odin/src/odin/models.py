@@ -122,6 +122,12 @@ class OdinConfig(BaseModel):
     max_concurrency: int = 4
     mcps: List[str] = Field(default_factory=lambda: ["taskit", "mobile", "chrome-devtools"])
     execution_timeout_seconds: int = 1800
+    worktree_enabled: bool = True
+    base_branch: str = "main"
+    worktree_dir: str = ".odin/worktrees"
+    worktree_post_hooks: List[str] = Field(default_factory=list)
+    worktree_symlinks: List[str] = Field(default_factory=list)
+    auto_finalize: bool = True
 
     def enabled_agents(self) -> Dict[str, AgentConfig]:
         return {k: v for k, v in self.agents.items() if v.enabled}

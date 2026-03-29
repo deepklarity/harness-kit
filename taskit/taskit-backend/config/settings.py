@@ -174,7 +174,7 @@ CELERY_BEAT_SCHEDULE["schedule-release-poll"] = {
     "task": "tasks.schedule_executor.release_due_schedules",
     "schedule": int(os.environ.get("SCHEDULE_RELEASE_POLL_INTERVAL", "30")),
 }
-DAG_EXECUTOR_MAX_CONCURRENCY = int(os.environ.get("DAG_EXECUTOR_MAX_CONCURRENCY", "3"))
+DAG_EXECUTOR_MAX_CONCURRENCY = int(os.environ.get("DAG_EXECUTOR_MAX_CONCURRENCY", "10"))
 ODIN_SPEC_PLAN_TIMEOUT_SECONDS = int(os.environ.get("ODIN_SPEC_PLAN_TIMEOUT_SECONDS", "1800"))
 
 # Logging — route Django request logs through the taskit detail logger

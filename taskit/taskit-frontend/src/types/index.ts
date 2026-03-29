@@ -204,6 +204,14 @@ export interface Spec {
     isManaged?: boolean;
 }
 
+export interface SpecCommit {
+    hash: string;
+    short_hash: string;
+    message: string;
+    author: string;
+    date: string;
+}
+
 export interface DashboardData {
     boards: Board[];
     allTasks: Task[];

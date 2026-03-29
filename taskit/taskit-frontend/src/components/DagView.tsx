@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { Task, Member } from '../types'
-import { getStatusColor, formatDuration } from '../utils/transformer'
+import { getStatusColor, formatDuration, formatMergeStatus } from '../utils/transformer'
 import {
   detectCycles,
   separateConnectedAndOrphans,
@@ -364,6 +364,27 @@ export function DagView({ tasks, allTasks, members, onTaskClick, debugMode }: Da
                       </text>
                     </g>
                   )}
+                  {/* Merge status dot */}
+                  {(() => {
+                    const mergeStatus = (task.metadata as Record<string, unknown>)?.merge_status as string | undefined
+                    const dotColor = mergeStatus === 'merged' ? '#22c55e' :
+                                     mergeStatus === 'conflict' ? '#ef4444' :
+                                     mergeStatus === 'error' ? '#ef4444' :
+                                     mergeStatus ? '#eab308' :
+                                     'hsl(var(--muted-foreground) / 0.25)'
+                    return (
+                      <circle
+                        cx={x + NODE_WIDTH - 6}
+                        cy={y + 6}
+                        r={4}
+                        fill={dotColor}
+                        stroke="var(--card)"
+                        strokeWidth={1.5}
+                      >
+                        <title>{formatMergeStatus(mergeStatus)}</title>
+                      </circle>
+                    )
+                  })()}
                 </g>
               )
             })}
@@ -392,6 +413,9 @@ export function DagView({ tasks, allTasks, members, onTaskClick, debugMode }: Da
               )}
               {task.dependsOn && task.dependsOn.length > 0 && (
                 <div className="text-xs text-muted-foreground">Dependencies: {task.dependsOn.length}</div>
+              )}
+              {(task.metadata as Record<string, unknown>)?.merge_status && (
+                <div className="text-xs text-muted-foreground">Merge: {formatMergeStatus((task.metadata as Record<string, unknown>).merge_status as string)}</div>
               )}
             </div>
           )

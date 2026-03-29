@@ -1,19 +1,60 @@
 # Board → Project Lifecycle — Detailed Trace
 
-## 1. Board Model (Backend)
+## 1. odin init (CLI entry point)
 
-**File**: `taskit/taskit-backend/tasks/models.py` (lines 44-56)
-**Fields**: `id` (auto PK), `name` (CharField 255), `description` (TextField), `is_trial` (BooleanField), `created_at`, `updated_at`
-**Relations**: `memberships` (FK from BoardMembership), `tasks` (FK from Task), `specs` (FK from Spec)
+**File**: `odin/src/odin/cli.py` :: `init()` (line 180)
+**Args**: `--force`, `--board-id <int>`, `--base-url <str>`
+**Working directory**: CWD where command is run
 
-No `working_dir` field. No project directory association.
+Steps in order:
+
+1. **Config creation** (lines 196-226)
+   - If `.odin/config.yaml` exists and no `--force`: skip with warning
+   - Otherwise: copy `config/config.sample.yaml` → `.odin/config.yaml`
+   - Fallback: create minimal config if sample not found
+
+2. **Board/URL overlay** (lines 228-247)
+   - Only runs if `--board-id` or `--base-url` provided
+   - Loads existing config.yaml, merges values into both root and `taskit` section
+   - Works even if config already existed (no --force needed)
+
+3. **Board registry** (lines 249-253)
+   - If `--board-id` provided: registers `{board_id: path}` in `~/.odin/boards.json`
+   - Enables `odin logs -b <id>` from any directory
+
+4. **Subdirectories** (lines 255-259)
+   - Creates `.odin/tasks/`, `.odin/logs/`, `.odin/specs/`
+
+5. **Git repo initialization** (lines 261-288)
+   - Only runs if `.git/` doesn't exist
+   - `git init` → creates `.gitignore` → `git add -A` → `git commit -m "Initial commit (odin init)"`
+   - `.gitignore` excludes: `.odin/worktrees/`, `.odin/locks/`, `.odin/logs/`, `.odin/costs/`, `.env`
+   - Best-effort: failure logs warning, continues without worktree support
+
+6. **MCP configs** (lines 290-300)
+   - Generates per-CLI config files for 6 agent CLIs
+   - Reads `cfg.mcps` to determine which MCP servers to include
+   - Generates `.claude/settings.local.json` for Claude Code permissions
+
+7. **Auth template** (lines 302-314)
+   - Creates `.env.example` with `ODIN_ADMIN_USER`, `ODIN_ADMIN_PASSWORD`, `ODIN_FIREBASE_API_KEY`
 
 ---
 
-## 2. Board API (Backend)
+## 2. Board Model (Backend)
 
-**File**: `taskit/taskit-backend/tasks/views.py` (lines 502-612)
-**Serializers**: `taskit/taskit-backend/tasks/serializers.py` (lines 138-162)
+**File**: `taskit/taskit-backend/tasks/models.py`
+**Fields**: `id` (auto PK), `name` (CharField 255), `description` (TextField), `is_trial` (BooleanField), `created_at`, `updated_at`
+**Relations**: `memberships` (FK from BoardMembership), `tasks` (FK from Task), `specs` (FK from Spec)
+
+No `working_dir` field on the model. Project directory association is only in `.odin/config.yaml` and `~/.odin/boards.json`.
+
+---
+
+## 3. Board API (Backend)
+
+**File**: `taskit/taskit-backend/tasks/views.py` :: `BoardViewSet`
+**Serializers**: `taskit/taskit-backend/tasks/serializers.py`
 
 Endpoints:
 - `GET /api/boards/` — list (paginated, sortable, searchable)
@@ -25,118 +66,101 @@ Endpoints:
 - `POST /api/boards/{id}/members/remove/` — bulk remove + unassign tasks
 - `POST /api/boards/{id}/clear/` — delete all tasks and specs on board
 
-Serializer hierarchy:
-- `BoardSerializer` — base: id, name, description, is_trial, created_at, updated_at, member_ids
-- `BoardListSerializer` — adds member_count (annotated query)
-- `BoardDetailSerializer` — adds tasks (nested TaskSerializer)
-
----
-
-## 3. Board UI — Selector Dropdown
-
-**File**: `taskit/taskit-frontend/src/components/AppHeader.tsx` (lines 73-104)
-**Constant**: `ALL_BOARDS_ID = '__ALL__'` (line 18)
-
-Structure:
-- Select component with `value={selectedBoard}` and `onValueChange={onBoardChange}`
-- First item: `SelectItem value={ALL_BOARDS_ID}` → "All Boards" (always present)
-- Separator (if boards exist)
-- Each board: `SelectItem value={board.id}` → `{board.name} ({id substring})`
-
-State management in App.tsx:
-- `selectedBoard = searchParams.get('board') || ALL_BOARDS_ID` (line 72)
-- `boardFilter = selectedBoard === ALL_BOARDS_ID ? undefined : selectedBoard` (line 73)
-- `handleBoardChange` updates URL param `?board=<value>` (line 253)
-- All page components receive `boardFilter` for API-level filtering
-
 ---
 
 ## 4. Board Creation (UI)
 
 **File**: `taskit/taskit-frontend/src/components/CreateBoardModal.tsx`
-**Trigger**: "+ Board" button in AppHeader (line 158)
+**Trigger**: "+ Board" button in AppHeader
 **Fields**: name (required), description (optional)
-**Handler**: App.tsx `handleCreateBoard` (lines 309-312) → `service.createBoard(name, description)` → `setRefreshKey(k => k + 1)`
+**Handler**: `App.tsx :: handleCreateBoard()` → `service.createBoard(name, description)` → refresh
 
-Post-creation: full shell data refresh, but user stays on "All Boards" view. No auto-select of new board.
-
----
-
-## 5. Fresh Install Behavior
-
-**File**: `taskit/taskit-frontend/src/components/AppHeader.tsx`, `App.tsx`
-
-When `boards = []`:
-- Dropdown shows only "All Boards" option
-- No separator rendered (line 92 checks `boards.length > 0`)
-- Task creation modal has empty board selector → form validation blocks submit
-- Overview page renders with zero-value KPI cards
-- Settings page shows "No boards found." message
-- No prompt or guidance to create a board
+Post-creation: full shell data refresh, user stays on "All Boards" view. No auto-select of new board.
 
 ---
 
-## 6. odin init (CLI)
+## 5. Board Selection (UI)
 
-**File**: `odin/src/odin/cli.py` (lines 172-296)
-**Command**: `odin init [--force]`
-**Working directory**: CWD where command is run
+**File**: `taskit/taskit-frontend/src/components/AppHeader.tsx`
+**Constant**: `ALL_BOARDS_ID = '__ALL__'`
 
-Creates:
-1. `.odin/config.yaml` — from `config/config.sample.yaml` template
-2. `.odin/tasks/`, `.odin/logs/`, `.odin/specs/` directories
-3. `.env.example` — auth template (ODIN_ADMIN_USER, ODIN_ADMIN_PASSWORD, ODIN_FIREBASE_API_KEY)
-4. MCP config files for each CLI (claude, gemini, qwen, codex, kilo, opencode)
-5. `.claude/claude.json` — Claude Code permissions
-
-Config defaults in generated `config.yaml`:
-- `base_agent: claude`
-- `agents:` with 6 CLI definitions
-- `model_routing:` priority list
-- `board_backend: taskit` (default)
-- `taskit.board_id:` placeholder
-- `taskit.base_url:` placeholder
-- `taskit.created_by:` placeholder
-
-Key: `odin init` runs in a project directory but does NOT create or link to a board. The user must manually set `taskit.board_id` in config after board exists.
+- Select dropdown: "All Boards" (always first) + separator + board list
+- State: `App.tsx :: selectedBoard = searchParams.get('board') || ALL_BOARDS_ID`
+- All page components receive `boardFilter` for API-level filtering
 
 ---
 
-## 7. Working Directory Resolution
+## 6. Config Loading (odin startup)
 
-**File**: `taskit/taskit-backend/tasks/execution/local.py` (lines 25-30)
+**File**: `odin/src/odin/config.py` :: `load_config()`
+
+Search order:
+1. Explicit `--config` path
+2. `.odin/config.yaml` (project-local, CWD)
+3. `~/.odin/config.yaml` (global)
+4. Built-in defaults (no config file)
+
+Key behavior: When loading from YAML, agents not mentioned get full built-in defaults injected. A minimal config with just `taskit` settings still has all 6 agents available.
+
+`load_dotenv(CWD/.env)` runs automatically on config load.
+
+---
+
+## 7. Worktree Manager Initialization (orchestrator)
+
+**File**: `odin/src/odin/orchestrator.py` (lines 161-172)
 
 ```python
-working_dir = (task.metadata or {}).get("working_dir")
-if not working_dir and task.spec_id:
-    working_dir = (task.spec.metadata or {}).get("working_dir")
-if not working_dir:
-    working_dir = getattr(settings, "ODIN_WORKING_DIR", None)
+self._worktree = None
+if self.config.worktree_enabled:
+    project_root = Path(self.config.task_storage).resolve().parent.parent
+    self._worktree = WorktreeManager(project_root, worktree_dir=self.config.worktree_dir)
 ```
 
-Three-tier fallback: task metadata → spec metadata → env var.
-No board-level working directory exists.
-
-**File**: `taskit/taskit-backend/config/settings.py` (lines 94-99)
-- `ODIN_WORKING_DIR = os.environ.get("ODIN_WORKING_DIR", None)`
-- `ODIN_CLI_PATH = os.environ.get("ODIN_CLI_PATH", "odin")`
+- `worktree_enabled` defaults to `True` in `OdinConfig`
+- `project_root` derived from `.odin/tasks` → up 2 levels → CWD
+- WorktreeManager init succeeds even without `.git/` — failure comes at `create_spec_branch()` time
+- Exception caught: worktree silently disabled if init fails
 
 ---
 
-## 8. Spec → Board Linkage
+## 8. Spec Branch Creation (plan time)
 
-**File**: `odin/src/odin/orchestrator.py` (lines 246-256)
-**File**: `odin/src/odin/backends/taskit.py`
+**File**: `odin/src/odin/orchestrator.py` (lines 357-367)
 
-Spec archived with `board_id` from `.odin/config.yaml → taskit.board_id`.
-Tasks created with same `board_id`.
-`board_id` is a config value — not validated against backend at init time.
+After spec archive saved, before task creation:
+```python
+if self._worktree:
+    branch = self._worktree.create_spec_branch(sid, base_branch=self.config.base_branch)
+    spec_archive.metadata["branch"] = branch
+    self._save_spec(spec_archive)
+```
 
-Spec model (backend): `taskit/taskit-backend/tasks/models.py`
-- `board = models.ForeignKey(Board, on_delete=CASCADE, related_name='specs')`
+Best-effort: exception caught, plan continues without worktree isolation.
+If no `.git/` exists, `create_spec_branch()` fails → no `metadata.branch` → UI shows `—` for branch.
 
-Task model (backend):
-- `board = models.ForeignKey(Board, on_delete=CASCADE, related_name='tasks')`
-- `spec = models.ForeignKey(Spec, on_delete=SET_NULL, null=True, related_name='tasks')`
+---
 
-Both spec and task carry `board_id` — the board is the grouping container but has no awareness of where the project lives on disk.
+## 9. Working Directory Resolution (execution time)
+
+**File**: `taskit/taskit-backend/tasks/execution/local.py`
+
+Three-tier fallback:
+1. `task.metadata.working_dir` (set by worktree creation or manually)
+2. `spec.metadata.working_dir` (set by `odin plan` to CWD)
+3. `settings.ODIN_WORKING_DIR` (env var)
+
+No board-level working directory exists in the current model.
+
+---
+
+## 10. Dual Instance (dev vs stable)
+
+**File**: `docs/solutions/dual-instance-setup.md`
+
+When dogfooding (harness-kit develops itself):
+- `odin` binary → stable (pipx frozen copy)
+- `odin-dev` binary → dev (pipx editable install with `--suffix='-dev'`)
+- Dev instance must always use `odin-dev` for all commands including `init`
+- Mistake signal: traceback path shows `pipx/venvs/odin/` (stable) vs dev checkout path
+- Config `taskit.base_url` differentiates: port 9100 (stable) vs 9101 (dev)

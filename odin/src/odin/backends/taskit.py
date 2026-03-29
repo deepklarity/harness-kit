@@ -376,13 +376,19 @@ class TaskItBackend(BoardBackend):
         if data.get("model_name"):
             metadata["selected_model"] = data["model_name"]
 
+        # Resolve spec_id: prefer odin_id over integer PK
+        spec_odin_id = data.get("spec_odin_id")
+        spec_pk = data.get("spec_id")
+        if spec_odin_id and spec_pk:
+            self._spec_pk_cache[spec_odin_id] = spec_pk
+
         return Task(
             id=str(data["id"]),
             title=data["title"],
             description=data.get("description", ""),
             status=self._status_from_taskit(data["status"]),
             assigned_agent=agent,
-            spec_id=str(data["spec_id"]) if data.get("spec_id") else None,
+            spec_id=spec_odin_id or (str(spec_pk) if spec_pk else None),
             depends_on=depends_on,
             metadata=metadata,
             skip_reflection=data.get("skip_reflection", False),

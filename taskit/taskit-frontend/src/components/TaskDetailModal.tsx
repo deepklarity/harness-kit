@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Task, Member, Label, TaskComment, TaskIdeOptions } from '../types';
 import { collectDownstreamTaskIds } from '../utils/dagUtils';
-import { formatDate, formatDuration, getStatusColor } from '../utils/transformer';
+import { formatDate, formatDuration, getStatusColor, formatMergeStatus, formatBranchDisplay, CopyButton, CopyableCommand } from '../utils/transformer';
 import { parseActor } from '../services/harness/HarnessTimeService';
 import { CountdownTimer } from './CountdownTimer';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -199,8 +199,12 @@ export function TaskDetailModal({
         return {
             model: task.modelName || (md.model ?? md.selected_model) as string | undefined,
             cwd: (md.working_dir ?? md.cwd) as string | undefined,
+            worktreePath: md.worktree_path as string | undefined,
             harness: md.harness as string | undefined,
             branch: md.branch as string | undefined,
+            mergeStatus: md.merge_status as string | undefined,
+            mergeError: md.merge_error as string | undefined,
+            diffStat: md.diff_stat as string | undefined,
         };
     }, [task.metadata, task.modelName]);
 
@@ -212,6 +216,13 @@ export function TaskDetailModal({
         });
         return map;
     }, [allTasks]);
+
+    // Compute tasks that this task blocks
+    const blockedTasks = useMemo(() => {
+        return allTasks?.filter(t =>
+            t.dependsOn?.includes(String(task.idShort)) || t.dependsOn?.includes(task.id)
+        ) || [];
+    }, [allTasks, task.idShort, task.id]);
 
     const boardTasks = useMemo(
         () => (allTasks || []).filter(t => t.boardId === task.boardId),
@@ -531,6 +542,7 @@ export function TaskDetailModal({
                         )}
                         <span className="opacity-40">/</span>
                         <span className="font-mono">#{task.idShort}</span>
+                        <CopyButton text={String(task.idShort)} />
                         <div className="flex-1" />
                     </div>
                     {ideOptions?.project_root && (
@@ -619,6 +631,55 @@ export function TaskDetailModal({
                                 </div>
                             </div>
 
+                            {/* Failure Reason — prominent banner for FAILED tasks */}
+                            {task.currentStatus === 'FAILED' && (
+                                <div className="rounded-md border border-red-500/20 bg-red-500/5 px-2.5 py-1.5 mb-1">
+                                    <div className="text-[10px] font-semibold text-red-400 uppercase tracking-wider mb-0.5">Failure</div>
+                                    <div className="flex items-start gap-1.5">
+                                        <div className="text-xs text-foreground/80 font-mono break-all leading-snug flex-1">
+                                            {(task.metadata as Record<string, unknown>)?.last_failure_reason as string || 'Unknown error — check task comments for details'}
+                                        </div>
+                                        <CopyButton text={(task.metadata as Record<string, unknown>)?.last_failure_reason as string || 'Unknown error — check task comments for details'} />
+                                    </div>
+                                    {(() => {
+                                        const metadata = task.metadata as Record<string, unknown> | undefined;
+                                        const lastFailureOrigin = metadata?.last_failure_origin;
+                                        return (lastFailureOrigin ? (
+                                            <div className="text-[10px] text-muted-foreground/60 mt-0.5">
+                                                Origin: {String(lastFailureOrigin)}
+                                            </div>
+                                        ) : null) as React.ReactNode;
+                                    })()}
+                                    {(() => {
+                                        const metadata = task.metadata as Record<string, unknown> | undefined;
+                                        const lastFailureType = metadata?.last_failure_type;
+                                        return (lastFailureType ? (
+                                            <Badge variant="outline" className="text-[9px] px-1 py-0 mt-1 bg-red-500/10 text-red-400 border-red-500/20">
+                                                {String(lastFailureType)}
+                                            </Badge>
+                                        ) : null) as React.ReactNode;
+                                    })()}
+                                    {(() => {
+                                        const metadata = task.metadata as Record<string, unknown> | undefined;
+                                        const failureDebug = metadata?.failure_debug;
+                                        return (failureDebug ? (
+                                            <div className="mt-1 max-h-[120px] overflow-y-auto text-[10px] font-mono text-muted-foreground/70 bg-red-500/5 rounded p-1.5 border border-red-500/10 whitespace-pre-wrap break-all">
+                                                {String(failureDebug)}
+                                            </div>
+                                        ) : null) as React.ReactNode;
+                                    })()}
+                                </div>
+                            )}
+
+                            {/* Suggested odin commands on failure */}
+                            {task.currentStatus === 'FAILED' && (
+                                <div className="space-y-1 mb-1">
+                                    <CopyableCommand command={`odin exec ${task.idShort}`} />
+                                    <CopyableCommand command="odin logs debug" />
+                                    {execContext.cwd && <CopyableCommand command={`cd ${execContext.cwd}`} />}
+                                </div>
+                            )}
+
                             {/* Pending Question Banner */}
                             {!!task.metadata?.has_pending_question && (
                                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/20 mb-1">
@@ -627,11 +688,12 @@ export function TaskDetailModal({
                                 </div>
                             )}
                             {isExecuting && (
-                                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 mb-1">
-                                    <Terminal className="size-3.5 text-blue-500 shrink-0" />
-                                    <span className="text-[11px] font-medium text-blue-600">
-                                        Execution active: status, assignee, and model are locked until stop.
-                                    </span>
+                                <div className="px-2 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 mb-1">
+                                    <div className="flex items-center gap-2">
+                                        <Terminal className="size-3.5 text-blue-500 shrink-0" />
+                                        <span className="text-[11px] font-medium text-blue-600">Executing</span>
+                                        <ExecutingTimer task={task} />
+                                    </div>
                                 </div>
                             )}
 
@@ -785,6 +847,78 @@ export function TaskDetailModal({
                                 <span className="text-xs font-mono text-muted-foreground">{task.createdAt ? formatDate(task.createdAt) : '\u2014'}</span>
                             </CompactRow>
 
+                            {/* Branch & Merge — always visible */}
+                            <CompactRow label="Branch" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />}>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-mono truncate" title={execContext.branch || undefined}>{formatBranchDisplay(execContext.branch)}</span>
+                                    {execContext.branch && <CopyButton text={execContext.branch} />}
+                                    <span
+                                        className={`text-[9px] font-semibold px-1 py-0.5 rounded shrink-0 ${
+                                            execContext.mergeStatus === 'merged' ? 'bg-emerald-500/20 text-emerald-400' :
+                                            execContext.mergeStatus === 'noop' ? 'bg-amber-500/20 text-amber-400' :
+                                            execContext.mergeStatus === 'conflict' ? 'bg-red-500/20 text-red-400' :
+                                            execContext.mergeStatus === 'error' ? 'bg-red-500/20 text-red-400' :
+                                            execContext.mergeStatus ? 'bg-yellow-500/20 text-yellow-400' :
+                                            'bg-muted/30 text-muted-foreground/50'
+                                        }`}
+                                        title={execContext.mergeError || undefined}
+                                    >
+                                        {formatMergeStatus(execContext.mergeStatus)}
+                                    </span>
+                                </div>
+                            </CompactRow>
+                            {execContext.worktreePath && (
+                                <CompactRow label="Worktree" icon={<FolderOpen className="size-2.5 text-muted-foreground/60" />}>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-xs font-mono truncate" title={execContext.worktreePath}>{execContext.worktreePath}</span>
+                                        <CopyButton text={execContext.worktreePath} />
+                                    </div>
+                                </CompactRow>
+                            )}
+
+                            {/* Diff stat — files changed by this task */}
+                            {execContext.diffStat && (
+                                <CompactRow label="Changes" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />}>
+                                    <pre className="text-[10px] font-mono text-muted-foreground whitespace-pre-wrap">{execContext.diffStat}</pre>
+                                </CompactRow>
+                            )}
+
+                            {/* Dependencies — Blocked by and Blocks */}
+                            {task.dependsOn && task.dependsOn.length > 0 && (
+                                <CompactRow label="Blocked by">
+                                    <div className="flex flex-wrap gap-1">
+                                        {task.dependsOn.map(dep => {
+                                            const depTask = taskMap.get(dep);
+                                            return (
+                                                <button key={dep}
+                                                    className="flex items-center gap-1 text-[10px] bg-secondary/60 rounded-full px-2 py-0.5 hover:bg-secondary/80 transition-colors"
+                                                    onClick={() => depTask && onSelectTask?.(depTask.id)}>
+                                                    <span className="size-1.5 rounded-full" style={{ background: depTask ? getStatusColor(depTask.currentStatus) : 'var(--muted-foreground)' }} />
+                                                    <span className="font-mono">#{dep}</span>
+                                                    <span className="truncate max-w-[100px]">{depTask?.title || depTask?.name || ''}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </CompactRow>
+                            )}
+
+                            {blockedTasks.length > 0 && (
+                                <CompactRow label="Blocks">
+                                    <div className="flex flex-wrap gap-1">
+                                        {blockedTasks.map(bt => (
+                                            <button key={bt.id}
+                                                className="flex items-center gap-1 text-[10px] bg-secondary/60 rounded-full px-2 py-0.5 hover:bg-secondary/80 transition-colors"
+                                                onClick={() => onSelectTask?.(bt.id)}>
+                                                <span className="size-1.5 rounded-full" style={{ background: getStatusColor(bt.currentStatus) }} />
+                                                <span className="font-mono">#{bt.idShort}</span>
+                                                <span className="truncate max-w-[100px]">{bt.title || bt.name || ''}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </CompactRow>
+                            )}
+
                             {task.scheduleSummary ? (
                                 <div className="py-2 border-b border-border/30">
                                     <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-semibold mb-2">Scheduling</div>
@@ -907,19 +1041,23 @@ export function TaskDetailModal({
 
                                     {execContext.cwd && (
                                         <CompactRow label="CWD" icon={<FolderOpen className="size-2.5 text-muted-foreground/60" />} noBorder>
-                                            <span className="text-[10px] font-mono text-muted-foreground break-all bg-secondary/50 px-1 py-0.5 rounded">{execContext.cwd}</span>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-[10px] font-mono text-muted-foreground break-all bg-secondary/50 px-1 py-0.5 rounded">{execContext.cwd}</span>
+                                                <CopyButton text={execContext.cwd} />
+                                            </div>
                                         </CompactRow>
                                     )}
+
+                                    <CompactRow label="Editor" icon={<Code className="size-2.5 text-muted-foreground/60" />} noBorder>
+                                        {execContext.worktreePath
+                                            ? <EditorLink cwd={execContext.worktreePath} />
+                                            : <span className="text-[10px] text-muted-foreground/50">{'\u2014'}</span>
+                                        }
+                                    </CompactRow>
 
                                     {execContext.harness && (
                                         <CompactRow label="Harness" noBorder>
                                             <span className="text-xs font-mono">{execContext.harness}</span>
-                                        </CompactRow>
-                                    )}
-
-                                    {execContext.branch && (
-                                        <CompactRow label="Branch" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />} noBorder>
-                                            <span className="text-xs font-mono">{execContext.branch}</span>
                                         </CompactRow>
                                     )}
 
@@ -1943,8 +2081,8 @@ function CompactRow({ label, icon, children, noBorder }: { label: string; icon?:
 }
 
 /** Collapsible section for secondary information */
-function CollapsibleSection({ label, icon, children }: { label: string; icon?: React.ReactNode; children: React.ReactNode }) {
-    const [isOpen, setIsOpen] = useState(false);
+function CollapsibleSection({ label, icon, children, defaultOpen = true }: { label: string; icon?: React.ReactNode; children: React.ReactNode; defaultOpen?: boolean }) {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
     return (
         <div className="border-b border-border/30">
             <button
@@ -2048,6 +2186,54 @@ function JsonViewer({ data }: { data: any }) {
                     </div>
                 </div>
             ))}
+        </div>
+    );
+}
+
+function ExecutingTimer({ task }: { task: Task }) {
+    const [now, setNow] = useState(Date.now());
+    useEffect(() => {
+        const id = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(id);
+    }, []);
+
+    // Elapsed from EXECUTING time-in-statuses + time since last status change
+    const lastStatusMutation = [...task.mutations].reverse().find(m => m.fieldName === 'status' && m.newValue === 'EXECUTING');
+    const startedAt = lastStatusMutation ? new Date(lastStatusMutation.date).getTime() : 0;
+    const elapsed = startedAt ? now - startedAt : (task.timeInStatuses?.['EXECUTING'] || 0);
+
+    // Last comment timestamp
+    const lastComment = task.comments[task.comments.length - 1];
+    const lastActivity = lastComment ? Math.floor((now - new Date(lastComment.createdAt).getTime()) / 1000) : null;
+
+    return (
+        <span className="text-[10px] font-mono text-blue-400 ml-auto flex items-center gap-2">
+            <span>{formatDuration(elapsed)}</span>
+            {lastActivity !== null && lastActivity < 3600 && (
+                <span className="text-muted-foreground/60">upd {lastActivity}s ago</span>
+            )}
+        </span>
+    );
+}
+
+function EditorLink({ cwd }: { cwd: string }) {
+    const [editor, setEditor] = useState<'cursor' | 'vscode'>(() => {
+        return (localStorage.getItem('preferred-editor') as 'cursor' | 'vscode') || 'cursor';
+    });
+    const toggle = () => {
+        const next = editor === 'cursor' ? 'vscode' : 'cursor';
+        localStorage.setItem('preferred-editor', next);
+        setEditor(next);
+    };
+    const uri = `${editor}://file${cwd}`;
+    return (
+        <div className="flex items-center gap-1.5">
+            <a href={uri} className="text-[10px] font-mono text-primary hover:underline truncate">
+                Open in {editor === 'cursor' ? 'Cursor' : 'VS Code'}
+            </a>
+            <button onClick={toggle} className="text-[9px] text-muted-foreground/50 hover:text-muted-foreground transition-colors" title="Switch editor">
+                ({editor === 'cursor' ? 'vsc' : 'cur'})
+            </button>
         </div>
     );
 }

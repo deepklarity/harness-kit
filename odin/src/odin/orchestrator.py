@@ -158,12 +158,96 @@ class Orchestrator:
         # Spec backend: delegate to board backend when available
         self._spec_backend = self._backend
 
+        # Worktree manager (conditional on config)
+        self._worktree = None
+        self._worktree_disabled_reason = None
+        self._worktree_project_root = None
+        if self.config.worktree_enabled:
+            try:
+                from odin.worktree import WorktreeManager
+                project_root = Path(self.config.task_storage).resolve().parent.parent
+                self._worktree_project_root = project_root
+                self._worktree = WorktreeManager(
+                    project_root,
+                    worktree_dir=self.config.worktree_dir,
+                )
+            except ValueError as exc:
+                self._worktree_disabled_reason = str(exc)
+                self._log.warning("WorktreeManager init failed (no git repo): %s", exc)
+            except Exception:
+                self._worktree_disabled_reason = "unexpected error during WorktreeManager init"
+                self._log.warning("Failed to initialize WorktreeManager, worktree isolation disabled", exc_info=True)
+
         # Cost tracking — load pricing table for cost estimation
         self.cost_store = CostStore(self.config.cost_storage)
         pricing = self._load_pricing_table()
         self.cost_tracker = CostTracker(self.cost_store, pricing=pricing)
         # Availability cache to avoid redundant is_available() calls during planning
         self._availability_cache: Dict[str, bool] = {}
+
+    def _ensure_git_repo(self) -> bool:
+        """Lazy auto-init git repo when worktree is enabled but no .git exists.
+
+        Returns True if worktree is now available, False otherwise.
+        """
+        if self._worktree is not None:
+            return True
+        if not self.config.worktree_enabled or not self._worktree_project_root:
+            return False
+
+        project_root = self._worktree_project_root
+
+        # Maybe .git appeared since __init__ (another process created it)
+        if (project_root / ".git").exists():
+            try:
+                from odin.worktree import WorktreeManager
+                self._worktree = WorktreeManager(
+                    project_root, worktree_dir=self.config.worktree_dir,
+                )
+                self._worktree_disabled_reason = None
+                self._log.info("Git repo detected on retry, worktree enabled")
+                return True
+            except Exception:
+                self._log.warning("WorktreeManager retry failed", exc_info=True)
+                return False
+
+        # Auto-init: create git repo
+        import subprocess as _sp
+        try:
+            self._log.info("Auto-initializing git repo at %s", project_root)
+            _sp.run(
+                ["git", "init", "-b", "main"],
+                cwd=project_root, check=True, capture_output=True,
+            )
+            gitignore = project_root / ".gitignore"
+            if not gitignore.exists():
+                gitignore.write_text(
+                    "# Odin internals\n"
+                    ".odin/worktrees/\n"
+                    ".odin/locks/\n"
+                    ".odin/logs/\n"
+                    ".odin/costs/\n"
+                    ".env\n"
+                )
+            _sp.run(
+                ["git", "add", "-A"],
+                cwd=project_root, check=True, capture_output=True,
+            )
+            _sp.run(
+                ["git", "commit", "-m", "Initial commit (odin auto-init)"],
+                cwd=project_root, check=True, capture_output=True,
+            )
+            from odin.worktree import WorktreeManager
+            self._worktree = WorktreeManager(
+                project_root, worktree_dir=self.config.worktree_dir,
+            )
+            self._worktree_disabled_reason = None
+            self._log.info("Auto-initialized git repo and enabled worktree")
+            return True
+        except Exception as exc:
+            self._worktree_disabled_reason = f"Auto-init failed: {exc}"
+            self._log.warning("Failed to auto-init git repo: %s", exc)
+            return False
 
     def _forced_provider(self) -> Tuple[Optional[str], Optional[str]]:
         return self.config.forced_base_provider, self.config.forced_base_model
@@ -181,25 +265,6 @@ class Orchestrator:
         if not base_cfg:
             raise RuntimeError(f"Base agent '{base_name}' not found in config")
         return base_name, base_cfg.premium_model or base_cfg.default_model
-
-    def _enforce_forced_execution_target(
-        self,
-        agent_name: str,
-        model: Optional[str],
-    ) -> Tuple[str, Optional[str]]:
-        """Validate that the assigned agent's CLI is available on this machine."""
-        import shutil
-
-        cfg = self.config.agents.get(agent_name)
-        if not cfg:
-            raise RuntimeError(f"Agent '{agent_name}' not found in config")
-        cli = cfg.cli_command or agent_name
-        if not shutil.which(cli):
-            raise RuntimeError(
-                f"Agent '{agent_name}' CLI '{cli}' not found on PATH. "
-                f"Cannot execute task assigned to unavailable agent."
-            )
-        return agent_name, model
 
     @staticmethod
     def _load_pricing_table() -> Optional[Dict]:
@@ -230,6 +295,56 @@ class Orchestrator:
         if self._spec_backend:
             self._spec_backend.save_spec(spec)
         self.spec_store.save(spec)
+
+    def _update_spec_metadata(self, spec_id: str, updates: Dict[str, Any]) -> None:
+        """Update specific metadata fields on a spec (local + backend)."""
+        spec_obj = self.spec_store.load(spec_id)
+        if not spec_obj:
+            self._log.warning("Cannot update metadata — spec %s not found", spec_id)
+            return
+        spec_obj.metadata.update(updates)
+        self._save_spec(spec_obj)
+
+    def finalize_spec(self, spec_id: str) -> Optional[str]:
+        """Finalize a spec: clean up worktrees, create PR.
+
+        Returns the PR URL on success, None otherwise.
+        """
+        if not self._worktree:
+            self._log.info("Worktree not enabled, skipping finalization for %s", spec_id)
+            return None
+
+        spec_obj = self.spec_store.load(spec_id)
+        if not spec_obj:
+            self._log.warning("Spec %s not found for finalization", spec_id)
+            return None
+
+        # Clean up worktrees
+        self._worktree.finalize_spec(spec_id)
+
+        # Gather task summaries for PR body
+        tasks = self.task_mgr.list_tasks(spec_id=spec_id)
+        task_summaries = [
+            f"#{t.id[:8]} — {t.title} ({t.status.value})"
+            for t in tasks
+        ]
+
+        # Create PR
+        pr_url = self._worktree.create_spec_pr(
+            spec_id, spec_obj.title, task_summaries
+        )
+
+        # Update spec metadata only when PR was actually created
+        if pr_url:
+            from datetime import datetime, timezone
+            updates: Dict[str, Any] = {
+                "finalized_at": datetime.now(timezone.utc).isoformat(),
+                "pr_url": pr_url,
+            }
+            self._update_spec_metadata(spec_id, updates)
+
+        self._log.info("Finalized spec %s: pr_url=%s", spec_id, pr_url)
+        return pr_url
 
     def _save_plan_json(self, spec_id: str, sub_tasks: List[Dict[str, Any]]) -> Path:
         """Write plan sub-tasks JSON to .odin/plans/ for auditability.
@@ -293,6 +408,32 @@ class Orchestrator:
             metadata={"working_dir": wd},
         )
         self._save_spec(spec_archive)
+
+        # 1b. Create spec branch for worktree isolation (best-effort)
+        if self._worktree:
+            try:
+                branch = self._worktree.create_spec_branch(
+                    sid, base_branch=self.config.base_branch,
+                )
+                spec_archive.metadata["branch"] = branch
+                self._save_spec(spec_archive)
+                self._log.info("Created spec branch: %s", branch)
+
+                # Create a spec-level worktree so the "Open in editor" link
+                # points at the spec branch code (not a task branch).
+                try:
+                    spec_wt_path = self._worktree.create_spec_worktree(
+                        sid,
+                        post_hooks=self.config.worktree_post_hooks,
+                        symlinks=self.config.worktree_symlinks,
+                    )
+                    spec_archive.metadata["worktree_path"] = str(spec_wt_path)
+                    self._save_spec(spec_archive)
+                    self._log.info("Created spec worktree: %s", spec_wt_path)
+                except Exception:
+                    self._log.warning("Failed to create spec worktree for %s", sid, exc_info=True)
+            except Exception:
+                self._log.warning("Failed to create spec branch for %s, continuing without worktree isolation", sid, exc_info=True)
 
         # 2. Derive plan_path — agent writes plan JSON here
         plans_dir = Path(self.config.task_storage).parent / "plans"
@@ -862,10 +1003,125 @@ Write your final plan as a JSON array to: `{plan_path}`"""
                 image_block += f"- {rp}\n"
             desc = f"{image_block}\n---\n\n{desc}"
 
+        # Create task worktree if enabled
+        # Skip if the DAG executor already created the worktree (worktree_path
+        # or branch already present in metadata — avoids nested worktree inside
+        # the cwd that the DAG executor set to the worktree path).
+        worktree_path = None
+        dag_already_created = task.metadata.get("worktree_path") or task.metadata.get("branch")
+        if task.spec_id and not mock and not dag_already_created and (self._worktree or self.config.worktree_enabled):
+            # Try auto-init if worktree manager isn't ready yet
+            if not self._worktree:
+                self._ensure_git_repo()
+
+            if self._worktree:
+                try:
+                    self._worktree.create_spec_branch(
+                        task.spec_id, base_branch=self.config.base_branch,
+                    )
+                    worktree_path = self._worktree.create_task_worktree(
+                        spec_id=task.spec_id,
+                        task_id=full_id,
+                        post_hooks=self.config.worktree_post_hooks,
+                        symlinks=self.config.worktree_symlinks,
+                    )
+                    working_dir = str(worktree_path)
+                    task_branch = f"task/{task.spec_id}/{full_id}"
+                    task.metadata["branch"] = task_branch
+                    task.metadata["worktree_path"] = str(worktree_path)
+                    self.task_mgr.update_task(task)
+                    self._log.info("[task:%s] Using worktree: %s", full_id, worktree_path)
+                    self.task_mgr.add_comment(
+                        task_id=full_id,
+                        author="odin",
+                        content=f"Git isolation active — working in branch `{task_branch}`",
+                        comment_type="status_update",
+                    )
+                except Exception as exc:
+                    self._log.warning(
+                        "[task:%s] Failed to create worktree, continuing without isolation",
+                        full_id, exc_info=True,
+                    )
+                    task = self.task_mgr.get_task(full_id) or task
+                    task.metadata["worktree_status"] = "failed"
+                    task.metadata["worktree_error"] = str(exc)
+                    self.task_mgr.update_task(task)
+                    self.task_mgr.add_comment(
+                        task_id=full_id,
+                        author="odin",
+                        content=(
+                            f"Worktree creation failed: {exc}\n\n"
+                            "Task will run without git isolation in the project root."
+                        ),
+                        comment_type="status_update",
+                    )
+                    worktree_path = None
+            else:
+                reason = self._worktree_disabled_reason or "unknown"
+                self.task_mgr.add_comment(
+                    task_id=full_id,
+                    author="odin",
+                    content=(
+                        f"Git isolation unavailable: {reason}\n\n"
+                        "Task will run without git isolation. "
+                        "Run `odin init` in the project directory to enable worktree isolation."
+                    ),
+                    comment_type="status_update",
+                )
+
         sem = asyncio.Semaphore(1)
-        return await self._execute_task(
+        result = await self._execute_task(
             full_id, task.assigned_agent, desc, working_dir, sem, mock=mock
         )
+
+        # Auto-commit and defer merge to reflection pass
+        # Merge happens in views.py:_merge_task_on_reflection_pass() when
+        # reflection approves the work (REVIEW → TESTING). This ensures
+        # reflection-driven re-executions are captured before merging.
+        if worktree_path and task.spec_id:
+            task_branch = f"task/{task.spec_id}/{full_id}"
+            try:
+                if result.get("success"):
+                    # Auto-commit any uncommitted work so it's on the task branch
+                    self._worktree._auto_commit_worktree(task.spec_id, full_id, task.title or "")
+                    task = self.task_mgr.get_task(full_id) or task
+                    task.metadata["merge_status"] = "deferred"
+                    self.task_mgr.update_task(task)
+                    self.task_mgr.add_comment(
+                        task_id=full_id,
+                        author="odin",
+                        content=(
+                            f"Work committed on branch `{task_branch}` — "
+                            "merge deferred until reflection passes"
+                        ),
+                        comment_type="status_update",
+                    )
+                else:
+                    task = self.task_mgr.get_task(full_id) or task
+                    task.metadata["merge_status"] = "pending"
+                    self.task_mgr.update_task(task)
+                    self.task_mgr.add_comment(
+                        task_id=full_id,
+                        author="odin",
+                        content=f"Task failed — branch `{task_branch}` preserved (not merged)",
+                        comment_type="status_update",
+                    )
+            except Exception as exc:
+                self._log.warning(
+                    "[task:%s] Post-execution auto-commit failed", full_id, exc_info=True,
+                )
+                self.task_mgr.add_comment(
+                    task_id=full_id,
+                    author="odin",
+                    content=f"Post-execution auto-commit error: {exc}",
+                    comment_type="status_update",
+                )
+
+            # Worktree is preserved after merge so the user can open it
+            # in their editor to inspect the work. Cleanup happens at
+            # spec finalization (finalize_spec) or manually.
+
+        return result
 
     # ------------------------------------------------------------------
     # run() — convenience plan-only
@@ -2567,7 +2823,7 @@ SUCCESS or FAILED
             selected_model = None
             if task_obj and task_obj.metadata:
                 selected_model = task_obj.metadata.get("selected_model")
-            agent_name, model = self._enforce_forced_execution_target(agent_name, selected_model)
+            model = selected_model
 
             # Transition to EXECUTING unless already there (Celery path) or mock
             if not mock:
@@ -2592,8 +2848,11 @@ SUCCESS or FAILED
             cfg = self.config.agents[agent_name]
             harness = get_harness(agent_name, cfg)
 
-            # Compute output file path for live tailing
-            log_dir = Path(self.config.log_dir)
+            # Compute output file path for live tailing.
+            # Must be absolute — tmux sessions run with cwd=working_dir
+            # (possibly a worktree), so relative paths would resolve to the
+            # wrong location when the orchestrator reads them back.
+            log_dir = Path(self.config.log_dir).resolve()
             output_file = str(log_dir / f"task_{task_id}.out")
             trace_file = str(log_dir / f"task_{task_id}.trace.jsonl")
 
@@ -2772,6 +3031,25 @@ SUCCESS or FAILED
                     payload_metadata["estimated_cost_usd"] = estimated_cost_usd
                 if task_run_token:
                     payload_metadata["taskit_run_token"] = task_run_token
+                # Add structured failure fields so the UI can show
+                # actionable failure details (type, origin) — not just a
+                # bare error string.
+                failure_fields: Dict[str, str] = {}
+                if not result.success and result.error:
+                    error_lower = result.error.lower()
+                    if "timed out" in error_lower or "timeout" in error_lower:
+                        f_type = "timeout"
+                    elif "not found on path" in error_lower:
+                        f_type = "cli_not_found"
+                    elif "exited with code" in error_lower:
+                        f_type = "agent_execution_failure"
+                    else:
+                        f_type = "agent_execution_failure"
+                    failure_fields = {
+                        "failure_type": f_type,
+                        "failure_origin": f"orchestrator:task_execution",
+                    }
+
                 self.task_mgr.record_execution_result(
                     task_id=task_id,
                     execution_result={
@@ -2782,6 +3060,7 @@ SUCCESS or FAILED
                         "duration_ms": result.duration_ms,
                         "agent": result.agent or agent_name,
                         "metadata": payload_metadata,
+                        **failure_fields,
                     },
                     status=new_status,
                     actor_email=self.task_mgr._format_actor_email(agent_name, model),

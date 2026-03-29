@@ -13,10 +13,11 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 | `task-proof-submission/` | Agent proof output → screenshots → TaskIt backend → frontend rendering |
 | `intelligent-agent-routing/` | Task routing: tier-based distribution, premium model upgrade, routing reasoning, config visibility in UI |
 | `trace-data-pipeline/` | Trace capture (harness JSONL) -> backend ingestion -> cost/token computation -> frontend TraceViewer. Covers all 6 harness formats, snapshot golden data, and regression testing gaps |
-| `board-project-lifecycle/` | Board creation → project directory linkage → spec/task execution. Current flow + PROPOSED.md for board-as-project refactor (working_dir on Board, odin init via API, UI-first onboarding) |
+| `board-project-lifecycle/` | Board creation → `odin init` → git repo setup → worktree integration → spec planning. Covers CLI-first and UI-first paths, config loading, dual-instance (odin vs odin-dev), and common init/plan mistakes |
 | `prompt-presets/` | Prompt presets in CreateTaskModal: static JSON data → backend endpoint → PresetPicker component → form auto-population. 5 categories, 27 templates for code review, UI audit, documentation, analysis, and quality process tasks |
 | `notification-system/` | Full notification flow: 6 backend triggers → notify() filtering → DB bulk_create → 30s frontend poll → bell badge + sound + desktop popup. Also covers Web Push path (VAPID → service worker → push delivery) |
 | `task-preset-tdd-enforcement/` | **PROPOSED** — Task presets (test, implement, scaffold, integrate, verify, standalone) with context isolation and verification gates. Embeds TDD philosophy into odin plan/exec so projects built by odin inherit fail-first testing |
+| `git-worktree-isolation/` | Git worktree per task, spec branch per spec. Merge deferred to reflection pass (not task completion). File-locked merge serialization. Spec = single PR to main. Covers branch model, worktree lifecycle (spec + task worktrees), merge timing, conflict handling, lazy git init, config, CLI commands, and metadata tracking |
 
 ## Quick navigation
 
@@ -36,7 +37,11 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 - **Board has no working directory?** → `board-project-lifecycle/DEBUG.md`
 - **odin exec fails with "no such directory"?** → `board-project-lifecycle/DEBUG.md`
 - **board_id mismatch between CLI config and UI?** → `board-project-lifecycle/DEBUG.md`
-- **Fresh install — where to start?** → `board-project-lifecycle/PROPOSED.md` (onboarding flow)
+- **Fresh install — where to start?** → `board-project-lifecycle/FLOW.md` (Flow 1: CLI-first)
+- **Spec branch shows `—` in UI?** → `board-project-lifecycle/DEBUG.md` (no git repo at plan time)
+- **Used wrong odin binary (stable vs dev)?** → `board-project-lifecycle/DEBUG.md` (Common mistakes table)
+- **odin init didn't create git repo?** → `board-project-lifecycle/DEBUG.md` (check `.git/` exists)
+- **Config missing agents after YAML load?** → `board-project-lifecycle/DETAILS.md` §6 (config loading)
 - **Notifications not appearing?** → `notification-system/DEBUG.md`
 - **Bell badge stuck at 0?** → `notification-system/DEBUG.md`
 - **Push notifications not delivering?** → `notification-system/DEBUG.md`
@@ -48,3 +53,11 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 - **Test preset agent has implementation context (shouldn't)?** → `task-preset-tdd-enforcement/DEBUG.md` (context isolation leaks)
 - **Verification gate rejecting valid work?** → `task-preset-tdd-enforcement/DEBUG.md` (gate parsing)
 - **How do task presets work?** → `task-preset-tdd-enforcement/FLOW.md` (proposed design)
+- **Task running in project root instead of worktree?** → `git-worktree-isolation/DEBUG.md` (check `worktree_status` metadata)
+- **Merge conflict on task completion?** → `git-worktree-isolation/DEBUG.md` (merge happens on reflection pass, not completion)
+- **Downstream task missing upstream work?** → `git-worktree-isolation/DEBUG.md` (check spec branch for merge commit)
+- **Spec branch not created?** → `git-worktree-isolation/DEBUG.md` (check `_ensure_git_repo` and base_branch config)
+- **How does worktree isolation work?** → `git-worktree-isolation/FLOW.md`
+- **Merge never attempted after task succeeded?** → `git-worktree-isolation/DEBUG.md` (merge deferred to REVIEW → TESTING)
+- **Worktree config options?** → `git-worktree-isolation/DETAILS.md` §2 (Configuration)
+- **odin worktree list/status/clean?** → `git-worktree-isolation/DETAILS.md` §10 (CLI Commands)

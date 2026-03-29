@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import type { Spec, SpecComment, Task } from '../types';
+import type { Spec, SpecComment, SpecCommit, Task } from '../types';
 import { useService } from '../contexts/ServiceContext';
 import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '../services/harness/HarnessTimeService';
@@ -21,8 +21,8 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Separator } from '@/components/ui/separator';
-import { getStatusColor, formatDuration, formatTokens, shortModelName } from '../utils/transformer';
-import { ArrowLeft, AlertTriangle, FileText, Clock, Code2, FolderOpen, Trash2, Bug, DollarSign, ChevronDown, ChevronRight, Brain, Route, Activity, Pencil } from 'lucide-react';
+import { getStatusColor, formatDuration, formatTokens, shortModelName, CopyButton, CopyableCommand, getMergeStatusDotColor } from '../utils/transformer';
+import { ArrowLeft, AlertTriangle, FileText, Clock, Code2, FolderOpen, Trash2, Bug, DollarSign, ChevronDown, ChevronRight, Brain, Route, Activity, GitBranch, GitCommitHorizontal, ExternalLink, CheckCircle2, Loader2, GitPullRequest } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { TraceViewer } from './TraceViewer';
 import { parseCommentBody } from '../utils/commentParser';
@@ -48,6 +48,11 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
     const [showRoutingConfig, setShowRoutingConfig] = useState(false);
     const [showContent, setShowContent] = useState(false);
     const [showMetadata, setShowMetadata] = useState(false);
+    const [isCreatingPr, setIsCreatingPr] = useState(false);
+    const [prError, setPrError] = useState<string | null>(null);
+    const [createdPrUrl, setCreatedPrUrl] = useState<string | null>(null);
+    const [showCommits, setShowCommits] = useState(false);
+    const [commits, setCommits] = useState<SpecCommit[]>([]);
 
     // Sort tasks by id ascending
     const sortedTasks = useMemo(() => {
@@ -63,6 +68,11 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
         }), 1),
         [spec?.tasks]
     );
+
+    // Read spec worktree path directly from spec metadata (set by odin plan).
+    const specWorktreePath = useMemo(() => {
+        return spec?.metadata?.worktree_path as string | undefined;
+    }, [spec?.metadata]);
 
     useEffect(() => {
         if (cachedSpec) {
@@ -83,6 +93,14 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
             })
             .finally(() => setLoading(false));
     }, [specId, cachedSpec, service]);
+
+    useEffect(() => {
+        const branch = spec?.metadata?.branch;
+        if (!branch || !service.fetchSpecCommits) return;
+        service.fetchSpecCommits(spec!.id)
+            .then(setCommits)
+            .catch(() => setCommits([]));
+    }, [spec?.id, spec?.metadata?.branch, service]);
 
     if (loading) {
         return (
@@ -135,6 +153,9 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
     const costSummary = spec.costSummary;
 
     const routingConfig = spec.metadata?.model_routing as Array<{ agent: string; model: string }> | undefined;
+    const specBranch = spec.metadata?.branch as string | undefined;
+    const prUrl = spec.metadata?.pr_url as string | undefined;
+    const finalizedAt = spec.metadata?.finalized_at as string | undefined;
 
     return (
         <div>
@@ -179,6 +200,7 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                         <div>
                             <div className="flex items-center gap-2 mb-2">
                                 <Badge variant="outline" className="font-mono text-xs">#{spec.id}</Badge>
+                                <CopyButton text={spec.id} />
                                 {spec.abandoned && (
                                     <Badge variant="destructive" className="gap-1 text-xs">
                                         <AlertTriangle className="size-3" /> Abandoned
@@ -201,7 +223,124 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                         <div className="flex items-center gap-1.5">
                             <FolderOpen className="size-3.5" /> CWD: {spec.cwd || '\u2014'}
                         </div>
+                        {specWorktreePath && (
+                            <div className="flex items-center gap-1.5">
+                                <Code2 className="size-3.5" />
+                                <EditorLink cwd={specWorktreePath} />
+                            </div>
+                        )}
+                        <div className="flex items-center gap-1.5">
+                            <GitBranch className="size-3.5" />
+                            <span className="font-mono font-medium text-foreground">{specBranch || '\u2014'}</span>
+                            {specBranch && <CopyButton text={specBranch} />}
+                            {specWorktreePath && (
+                                <>
+                                    <span className="text-muted-foreground/40 mx-0.5">·</span>
+                                    <FolderOpen className="size-3" />
+                                    <span className="font-mono text-xs text-muted-foreground" title={specWorktreePath}>{specWorktreePath}</span>
+                                    <CopyButton text={specWorktreePath} />
+                                </>
+                            )}
+                        </div>
+                        {(prUrl || createdPrUrl) ? (
+                            <a href={(prUrl || createdPrUrl)!} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 transition-colors">
+                                <ExternalLink className="size-3.5" /> View PR
+                            </a>
+                        ) : (
+                            <div className="flex items-center gap-1.5 text-muted-foreground/50">
+                                <ExternalLink className="size-3.5" /> PR: {'\u2014'}
+                            </div>
+                        )}
+                        {finalizedAt ? (
+                            <div className="flex items-center gap-1.5 text-emerald-400">
+                                <CheckCircle2 className="size-3.5" /> Finalized {new Date(finalizedAt).toLocaleDateString()}
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-1.5 text-muted-foreground/50">
+                                <Clock className="size-3.5" /> Finalized: {'\u2014'}
+                            </div>
+                        )}
                     </div>
+
+                    {!(prUrl || createdPrUrl) && specBranch && (spec?.tasks?.length ?? 0) > 0 && (
+                        <div className="flex flex-col gap-1.5 mt-2">
+                            <div className="flex items-center gap-3">
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={isCreatingPr}
+                                    className="gap-1.5 text-xs border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                                    onClick={async () => {
+                                        if (!service.finalizeSpec) return;
+                                        setIsCreatingPr(true);
+                                        setPrError(null);
+                                        try {
+                                            const res = await service.finalizeSpec(specId);
+                                            if (res.pr_url) setCreatedPrUrl(res.pr_url);
+                                            const updated = await service.fetchSpecDetail!(specId);
+                                            setSpec(updated);
+                                        } catch (err) {
+                                            if (err instanceof ApiError) {
+                                                const body = err.body as Record<string, unknown> | undefined;
+                                                const msg = (body?.error as string) || err.message;
+                                                if (body?.pr_url) {
+                                                    setCreatedPrUrl(body.pr_url as string);
+                                                    const updated = await service.fetchSpecDetail!(specId);
+                                                    setSpec(updated);
+                                                } else {
+                                                    setPrError(msg);
+                                                }
+                                            } else {
+                                                setPrError(err instanceof Error ? err.message : 'Failed to create PR');
+                                            }
+                                        } finally {
+                                            setIsCreatingPr(false);
+                                        }
+                                    }}
+                                >
+                                    {isCreatingPr ? (
+                                        <><Loader2 className="size-3 animate-spin" /> Creating PR...</>
+                                    ) : (
+                                        <><GitPullRequest className="size-3" /> {finalizedAt ? 'Retry PR' : 'Create PR'}</>
+                                    )}
+                                </Button>
+                                <span className="text-[10px] text-muted-foreground/50">
+                                    {finalizedAt ? 'Spec finalized but no PR was created' : 'Merges task branches and creates a GitHub PR'}
+                                </span>
+                            </div>
+                            {prError && (
+                                <div className="flex items-center gap-2 text-xs text-red-400">
+                                    <AlertTriangle className="size-3 shrink-0" />
+                                    <span>{prError}</span>
+                                    <button className="text-muted-foreground hover:text-foreground ml-1" onClick={() => setPrError(null)}>&times;</button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {finalizedAt && (
+                        <div className="flex items-center gap-4 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+                            <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-semibold">
+                                Finalized
+                            </Badge>
+                            {(prUrl || createdPrUrl) && (
+                                <a href={(prUrl || createdPrUrl)!} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-medium">
+                                    <ExternalLink className="size-3" /> View PR
+                                </a>
+                            )}
+                            <span className="text-xs font-mono text-muted-foreground">
+                                {(spec?.tasks?.filter(t => t.currentStatus === 'DONE').length ?? 0)}/{spec?.taskCount ?? 0} completed
+                                {(spec?.tasks?.filter(t => t.currentStatus === 'FAILED').length ?? 0) > 0 && (
+                                    <>, <span className="text-red-400">{spec?.tasks?.filter(t => t.currentStatus === 'FAILED').length} failed</span></>
+                                )}
+                            </span>
+                            {costSummary && ((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0)) > 0 && (
+                                <span className="text-xs font-mono text-emerald-400">
+                                    {formatCost((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0))}
+                                </span>
+                            )}
+                        </div>
+                    )}
 
                     {spec.content && (
                         <>
@@ -314,8 +453,9 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Tasks</h3>
                     <div className="rounded-lg border border-border overflow-hidden">
                         {/* Header */}
-                        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold items-center">
+                        <div className="grid grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 bg-muted/40 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold items-center">
                             <span>#</span>
+                            <span title="Merge status"></span>
                             <span>Task</span>
                             <span>Status</span>
                             <span className="hidden sm:block">Model</span>
@@ -334,7 +474,8 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                             />
                         ))}
                         {/* Totals */}
-                        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 bg-muted/20 border-t border-border text-xs font-semibold items-center">
+                        <div className="grid grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 bg-muted/20 border-t border-border text-xs font-semibold items-center">
+                            <span />
                             <span />
                             <span className="text-muted-foreground">{sortedTasks.length} tasks</span>
                             <span />
@@ -414,6 +555,37 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                 );
             })()}
 
+            {/* Branch Commits */}
+            {spec.metadata?.branch && commits.length > 0 && (
+                <Card className="border-border mb-6">
+                    <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowCommits(v => !v)}>
+                        <CardTitle className="text-sm flex items-center gap-1.5">
+                            <GitCommitHorizontal className="size-3.5" />
+                            Branch Commits
+                            <Badge variant="secondary" className="text-[10px] h-4 px-1.5 ml-1">{commits.length}</Badge>
+                            {showCommits
+                                ? <ChevronDown className="size-3.5 ml-auto" />
+                                : <ChevronRight className="size-3.5 ml-auto" />
+                            }
+                        </CardTitle>
+                    </CardHeader>
+                    {showCommits && (
+                        <CardContent className="space-y-1">
+                            {commits.map(c => (
+                                <div key={c.hash} className="flex items-start gap-2 text-xs">
+                                    <code className="text-[10px] text-amber-400/80 shrink-0">{c.short_hash}</code>
+                                    <span className="truncate font-medium">{c.message}</span>
+                                    <span className="text-muted-foreground shrink-0 ml-auto">{c.author}</span>
+                                    <span className="text-muted-foreground/60 shrink-0 text-[10px]">
+                                        {new Date(c.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                </div>
+                            ))}
+                        </CardContent>
+                    )}
+                </Card>
+            )}
+
         </div>
     );
 }
@@ -437,10 +609,18 @@ function TaskTableRow({ task, maxActiveTime, onClick }: { task: Task; maxActiveT
 
     return (
         <div
-            className="grid grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 border-t border-border/50 hover:bg-muted/30 cursor-pointer items-center transition-colors"
+            className="grid grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_3.5rem_3.5rem] sm:grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_3.5rem_3.5rem] md:grid-cols-[2.5rem_2rem_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_minmax(0,6rem)_3.5rem_3.5rem] gap-x-2 px-3 py-1.5 border-t border-border/50 hover:bg-muted/30 cursor-pointer items-center transition-colors"
             onClick={onClick}
         >
             <span className="text-[10px] font-mono text-muted-foreground">#{task.idShort}</span>
+            <span className="flex items-center justify-center">
+                {(() => {
+                    const mergeStatus = task.metadata?.merge_status as string | undefined;
+                    const dotColor = getMergeStatusDotColor(mergeStatus);
+                    if (!dotColor) return null;
+                    return <span className="size-2 rounded-full" style={{ background: dotColor }} title={mergeStatus} />;
+                })()}
+            </span>
             <span className="text-xs font-medium truncate">{task.title || task.name}</span>
             <span className="flex items-center gap-1.5 text-[10px]">
                 <span className="size-1.5 rounded-full shrink-0" style={{ background: color }} />
@@ -604,6 +784,28 @@ function PlanningCommentItem({ comment }: { comment: SpecComment }) {
                     {showFullTrace && <TraceViewer traceText={traceData} />}
                 </div>
             )}
+        </div>
+    );
+}
+
+function EditorLink({ cwd }: { cwd: string }) {
+    const [editor, setEditor] = useState<'cursor' | 'vscode'>(() => {
+        return (localStorage.getItem('preferred-editor') as 'cursor' | 'vscode') || 'cursor';
+    });
+    const toggle = () => {
+        const next = editor === 'cursor' ? 'vscode' : 'cursor';
+        localStorage.setItem('preferred-editor', next);
+        setEditor(next);
+    };
+    const uri = `${editor}://file${cwd}`;
+    return (
+        <div className="flex items-center gap-1.5">
+            <a href={uri} className="text-sm text-primary hover:underline truncate">
+                Open in {editor === 'cursor' ? 'Cursor' : 'VS Code'}
+            </a>
+            <button onClick={toggle} className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors" title="Switch editor">
+                ({editor === 'cursor' ? 'vsc' : 'cur'})
+            </button>
         </div>
     );
 }

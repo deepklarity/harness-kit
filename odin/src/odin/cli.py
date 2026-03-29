@@ -258,6 +258,35 @@ class OdinCLI:
             d.mkdir(parents=True, exist_ok=True)
             console.print(f"[green]Created[/green] {d}/")
 
+        # Ensure git repo exists (required for worktree isolation)
+        if not (Path.cwd() / ".git").exists():
+            try:
+                import subprocess
+                subprocess.run(["git", "init", "-b", "main"], cwd=Path.cwd(), check=True, capture_output=True)
+                # Create .gitignore for odin internals
+                gitignore_path = Path.cwd() / ".gitignore"
+                if not gitignore_path.exists():
+                    gitignore_path.write_text(
+                        "# Odin internals\n"
+                        ".odin/worktrees/\n"
+                        ".odin/locks/\n"
+                        ".odin/logs/\n"
+                        ".odin/costs/\n"
+                        ".env\n"
+                    )
+                    console.print(f"[green]Created[/green] {gitignore_path}")
+                subprocess.run(
+                    ["git", "add", "-A"], cwd=Path.cwd(), check=True, capture_output=True,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", "Initial commit (odin init)"],
+                    cwd=Path.cwd(), check=True, capture_output=True,
+                )
+                console.print("[green]Initialized[/green] git repository with initial commit")
+            except Exception as exc:
+                console.print(f"[bold red]Error:[/bold red] Could not initialize git repo: {exc}")
+                console.print("[dim]Worktree isolation will not work without a git repository.[/dim]")
+
         # Create MCP config files for all 6 agent CLIs
         cfg = self._get_config()
         taskit_env = {"TASKIT_URL": cfg.taskit.base_url} if cfg.taskit else {}
@@ -1519,9 +1548,14 @@ class OdinCLI:
                 console.print("[red]Usage: odin spec abandon <spec_id>[/red]")
                 return
             self._spec_abandon(spec_id)
+        elif action == "finalize":
+            if not spec_id:
+                console.print("[red]Usage: odin spec finalize <spec_id>[/red]")
+                return
+            self._spec_finalize(spec_id)
         else:
             console.print(f"[red]Unknown spec action: {action}[/red]")
-            console.print("[dim]Available: show, abandon[/dim]")
+            console.print("[dim]Available: show, abandon, finalize[/dim]")
 
     def _spec_show(self, spec_id: str):
         """Show spec details and its tasks."""
@@ -1598,6 +1632,152 @@ class OdinCLI:
             f"[yellow]Abandoned[/yellow] spec [cyan]{resolved}[/cyan] — \"{spec_obj.title}\""
         )
         console.print("[dim]Tasks are preserved as historical evidence.[/dim]")
+
+    def _spec_finalize(self, spec_id: str):
+        """Finalize a spec: clean up worktrees and create a PR."""
+        from odin.orchestrator import Orchestrator
+        cfg = self._get_config()
+        orch = Orchestrator(config=cfg)
+        spec_store = self._get_spec_store()
+
+        resolved = spec_store.resolve_spec_id(spec_id) or spec_id
+        spec_obj = spec_store.load(resolved)
+        if not spec_obj:
+            console.print(f"[red]Spec not found: {spec_id}[/red]")
+            return
+
+        if not cfg.worktree_enabled:
+            console.print("[yellow]Worktree isolation is disabled — nothing to finalize.[/yellow]")
+            return
+
+        try:
+            with console.status("[bold green]Finalizing spec..."):
+                pr_url = orch.finalize_spec(resolved)
+        except RuntimeError as exc:
+            console.print(f"[red]PR creation failed:[/red] {exc}")
+            raise SystemExit(1)
+
+        if pr_url:
+            console.print(f"[green]Finalized[/green] spec [cyan]{resolved}[/cyan]")
+            console.print(f"  PR: [link={pr_url}]{pr_url}[/link]")
+        else:
+            console.print(f"[yellow]Finalized[/yellow] spec [cyan]{resolved}[/cyan] (no PR created)")
+            console.print("[dim]gh CLI may not be installed or authenticated.[/dim]")
+            raise SystemExit(1)
+
+    # ------------------------------------------------------------------
+    # worktree
+    # ------------------------------------------------------------------
+
+    def worktree(self, action: str, spec_id: Optional[str] = None):
+        """Git worktree management subcommands.
+
+        Examples:
+            odin worktree list                List all active worktrees
+            odin worktree status <spec_id>    Show branch/merge status per task
+            odin worktree clean <spec_id>     Remove worktrees for a spec
+            odin worktree clean --all         Remove all worktrees
+
+        Args:
+            action: One of 'list', 'status', 'clean'.
+            spec_id: Spec ID (required for status/clean, or '--all' for clean).
+        """
+        if action == "list":
+            self._worktree_list()
+        elif action == "status":
+            if not spec_id:
+                console.print("[red]Usage: odin worktree status <spec_id>[/red]")
+                return
+            self._worktree_status(spec_id)
+        elif action == "clean":
+            self._worktree_clean(spec_id)
+        else:
+            console.print(f"[red]Unknown worktree action: {action}[/red]")
+            console.print("[dim]Available: list, status, clean[/dim]")
+
+    def _worktree_list(self):
+        """List all active git worktrees."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["git", "worktree", "list"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                console.print(result.stdout.strip())
+            else:
+                console.print(f"[red]git worktree list failed: {result.stderr.strip()}[/red]")
+        except FileNotFoundError:
+            console.print("[red]git not found on PATH[/red]")
+
+    def _worktree_status(self, spec_id: str):
+        """Show branch and merge status for all tasks in a spec."""
+        mgr = self._get_task_manager()
+        spec_store = self._get_spec_store()
+
+        resolved = spec_store.resolve_spec_id(spec_id) or spec_id
+        spec_obj = spec_store.load(resolved)
+        if not spec_obj:
+            console.print(f"[red]Spec not found: {spec_id}[/red]")
+            return
+
+        spec_branch = spec_obj.metadata.get("branch", "—")
+        console.print(f"\n[bold]Spec {resolved}[/bold] — branch: [cyan]{spec_branch}[/cyan]")
+
+        tasks = mgr.list_tasks(spec_id=resolved)
+        if not tasks:
+            console.print("[dim]No tasks.[/dim]")
+            return
+
+        table = Table()
+        table.add_column("Task", style="cyan")
+        table.add_column("Title")
+        table.add_column("Branch")
+        table.add_column("Merge Status")
+
+        merge_colors = {
+            "pending": "yellow",
+            "merged": "green",
+            "conflict": "red",
+            "error": "red",
+        }
+
+        for t in tasks:
+            md = t.metadata or {}
+            branch = md.get("branch", "—")
+            merge = md.get("merge_status", "—")
+            color = merge_colors.get(merge, "dim")
+            table.add_row(
+                t.id[:8],
+                t.title[:40],
+                branch,
+                f"[{color}]{merge}[/{color}]",
+            )
+
+        console.print(table)
+
+    def _worktree_clean(self, spec_id: Optional[str]):
+        """Remove worktrees for a spec or all specs."""
+        from odin.worktree import WorktreeManager
+        cfg = self._get_config()
+
+        if not cfg.worktree_enabled:
+            console.print("[yellow]Worktree isolation is disabled.[/yellow]")
+            return
+
+        project_root = Path(cfg.task_storage).resolve().parent.parent
+        wt = WorktreeManager(project_root, worktree_dir=cfg.worktree_dir)
+
+        if spec_id == "--all":
+            wt.cleanup_all()
+            console.print("[green]Cleaned up all worktrees.[/green]")
+        elif spec_id:
+            spec_store = self._get_spec_store()
+            resolved = spec_store.resolve_spec_id(spec_id) or spec_id
+            wt.finalize_spec(resolved)
+            console.print(f"[green]Cleaned up worktrees for spec {resolved}.[/green]")
+        else:
+            console.print("[red]Usage: odin worktree clean <spec_id> or odin worktree clean --all[/red]")
 
     # ------------------------------------------------------------------
     # label

@@ -126,6 +126,21 @@ def poll_and_execute():
                 changed_by="odin+dag-executor@system",
             )
 
+        # Create worktree if spec has a branch (worktree isolation)
+        if locked_task.spec and (locked_task.spec.metadata or {}).get("branch"):
+            try:
+                worktree_path = _create_task_worktree(locked_task)
+                if worktree_path:
+                    metadata = dict(locked_task.metadata or {})
+                    metadata["working_dir"] = str(worktree_path)
+                    metadata["worktree_path"] = str(worktree_path)
+                    metadata["branch"] = f"task/{locked_task.spec.odin_id}/{locked_task.id}"
+                    metadata["merge_status"] = "pending"
+                    locked_task.metadata = metadata
+                    locked_task.save(update_fields=["metadata"])
+            except Exception:
+                logger.exception("Worktree creation failed for task %s, running in project root", locked_task.id)
+
         logger.info("Task %s: IN_PROGRESS → EXECUTING, firing execution", task.id)
         async_result = execute_single_task.delay(task.id, run_token)
         latest = Task.objects.get(id=task.id)
@@ -243,9 +258,16 @@ def execute_single_task(task_id, run_token=None):
         changed_by="odin+dag-executor@system",
     )
 
+    # Merge is deferred until reflection passes (REVIEW → TESTING) so that
+    # reflection-driven re-executions are included in the spec branch.
+    # See views.py _merge_task_on_reflection_pass().
+
     if new_status == TaskStatus.REVIEW:
         from .views import _trigger_auto_reflection
         _trigger_auto_reflection(task)
+
+    # On failure, preserve the worktree so a human can inspect it.
+    # The branch is already preserved by not merging.
 
     if new_status == TaskStatus.FAILED:
         failure_type = metadata.get("last_failure_type", "agent_execution_failure")
@@ -463,6 +485,153 @@ def execute_reflection(report_id):
         logger.info("Reflection %s completed with status: %s", report_id, report.status)
 
 
+@shared_task(name="tasks.dag_executor.merge_task_on_reflection")
+def merge_task_on_reflection(task_id):
+    """Merge a task branch into its spec branch, then advance REVIEW → TESTING.
+
+    Runs in the Celery worker where odin is importable.
+    Called after reflection passes.  The status transition is deferred to
+    *after* the merge so that downstream tasks never fork from a spec
+    branch that is missing upstream code.
+    """
+    from .models import CommentType
+
+    try:
+        task = Task.objects.select_related("spec", "board").get(id=task_id)
+    except Task.DoesNotExist:
+        logger.error("merge_task_on_reflection: Task %s not found", task_id)
+        return
+
+    branch = (task.metadata or {}).get("branch")
+    if not branch:
+        # No branch — nothing to merge, but still advance status.
+        _advance_task_to_testing(task)
+        return
+
+    if (task.metadata or {}).get("merge_status") == "merged":
+        # Already merged (duplicate dispatch) — ensure status is advanced.
+        _advance_task_to_testing(task)
+        return
+
+    try:
+        merge_result = _merge_task_branch(task)
+        metadata = dict(task.metadata or {})
+        if merge_result.success and merge_result.noop:
+            metadata["merge_status"] = "noop"
+        elif merge_result.success:
+            metadata["merge_status"] = "merged"
+        elif merge_result.conflict:
+            metadata["merge_status"] = "conflict"
+        else:
+            metadata["merge_status"] = "error"
+        if merge_result.error:
+            metadata["merge_error"] = merge_result.error
+        if merge_result.diff_stat:
+            metadata["diff_stat"] = merge_result.diff_stat
+        task.metadata = metadata
+        task.save(update_fields=["metadata"])
+        logger.info("[task:%s] Post-reflection merge: %s", task.id, metadata["merge_status"])
+
+        # Post a comment so the merge result is visible in the task timeline
+        spec_branch = f"spec/{task.spec.odin_id}" if task.spec else "spec branch"
+        if merge_result.success and not merge_result.noop:
+            comment_text = f"Merged `{branch}` into `{spec_branch}`"
+            if merge_result.diff_stat:
+                comment_text += f"\n```\n{merge_result.diff_stat}\n```"
+        elif merge_result.success and merge_result.noop:
+            comment_text = (
+                f"No changes to merge from `{branch}` "
+                f"(branch already up to date with `{spec_branch}`)"
+            )
+        elif merge_result.conflict:
+            comment_text = (
+                f"Merge conflict merging `{branch}` into `{spec_branch}`: "
+                f"{merge_result.error or 'see logs'}"
+            )
+        else:
+            comment_text = (
+                f"Merge failed for `{branch}` into `{spec_branch}`: "
+                f"{merge_result.error or 'unknown error'}"
+            )
+        TaskComment.objects.create(
+            task=task,
+            schedule_run=task.current_schedule_run,
+            author_email="system@taskit",
+            author_label="system",
+            content=comment_text,
+            comment_type=CommentType.STATUS_UPDATE,
+        )
+
+        # Update spec worktree to reflect the merged code
+        if merge_result.success and not merge_result.noop:
+            try:
+                wt = _get_worktree_manager(task)
+                if wt:
+                    wt.update_spec_worktree(task.spec.odin_id)
+            except Exception:
+                logger.warning(
+                    "Failed to update spec worktree after merge for task %s",
+                    task.id, exc_info=True,
+                )
+
+        # Advance REVIEW → TESTING only after merge succeeds (or noop).
+        # On conflict/error the task stays in REVIEW so the user can
+        # resolve the issue before downstream tasks fork.
+        if merge_result.success:
+            _advance_task_to_testing(task)
+        else:
+            logger.warning(
+                "Task %s stays in REVIEW — merge %s: %s",
+                task.id, metadata["merge_status"], merge_result.error,
+            )
+    except Exception as exc:
+        logger.exception("Post-reflection merge failed for task %s", task.id)
+        metadata = dict(task.metadata or {})
+        metadata["merge_status"] = "error"
+        task.metadata = metadata
+        task.save(update_fields=["metadata"])
+        TaskComment.objects.create(
+            task=task,
+            schedule_run=task.current_schedule_run,
+            author_email="system@taskit",
+            author_label="system",
+            content=f"Post-reflection merge failed: {exc}",
+            comment_type=CommentType.STATUS_UPDATE,
+        )
+
+
+def _advance_task_to_testing(task):
+    """Transition task REVIEW → TESTING and record history.
+
+    Called by merge_task_on_reflection after a successful merge (or when
+    no merge is needed).  Idempotent — skips if task is no longer REVIEW.
+    """
+    task.refresh_from_db(fields=["status"])
+    if task.status != TaskStatus.REVIEW:
+        logger.info(
+            "Task %s already moved from REVIEW (now %s) — skipping advance",
+            task.id, task.status,
+        )
+        return
+
+    old_status = task.status
+    task.status = TaskStatus.TESTING
+    task.save(update_fields=["status"])
+    TaskHistory.objects.create(
+        task=task,
+        schedule_run=task.current_schedule_run,
+        field_name="status",
+        old_value=old_status,
+        new_value=TaskStatus.TESTING,
+        changed_by="system@taskit",
+    )
+    maybe_finalize_schedule_run(task, TaskStatus.TESTING)
+    logger.info(
+        "Advanced task %s from REVIEW → TESTING (post-merge)",
+        task.id,
+    )
+
+
 def _append_summary(log_file, task, exit_code):
     """Append a human-readable summary to the end of a task log file."""
     try:
@@ -500,13 +669,20 @@ def _sanitize_ansi(text: str) -> str:
 
 
 def _extract_actionable_reason(excerpt: str) -> str:
-    """Pick the most actionable line from the fallback log excerpt."""
+    """Pick the most actionable line from the fallback log excerpt.
+
+    Priority order:
+    1. Known prefix patterns (auth errors, explicit failure/reason lines)
+    2. Python exception lines (last line starting with an exception class name)
+    3. Empty string (caller falls back to generic message)
+    """
     if not excerpt:
         return ""
     lines = [ln.strip() for ln in excerpt.splitlines() if ln.strip()]
     if not lines:
         return ""
 
+    # 1. Known prefixes — scan bottom-up for explicit failure messages
     prefixes = (
         "authentication error:",
         "taskit returned 401 unauthorized",
@@ -523,7 +699,77 @@ def _extract_actionable_reason(excerpt: str) -> str:
             return line
         if "401 unauthorized" in low:
             return line
+
+    # 2. Python exception — last line matching ExceptionClass: message
+    for line in reversed(lines):
+        if "Error:" in line or "Exception:" in line:
+            return line
     return ""
+
+
+def _get_worktree_manager(task):
+    """Instantiate a WorktreeManager from the project root (board working dir).
+
+    Uses board.working_dir (the actual git project root) rather than
+    resolve_working_dir() which may return a task-level worktree path.
+    Falls back to resolve_working_dir() if no board working dir is available.
+    """
+    board = getattr(task, "board", None)
+    working_dir = (board.working_dir if board and board.working_dir else None) or resolve_working_dir(task)
+    if not working_dir:
+        return None
+    try:
+        from odin.worktree import WorktreeManager
+        project_root = Path(working_dir)
+        return WorktreeManager(project_root)
+    except ImportError:
+        logger.warning("odin.worktree not available — cannot manage worktrees")
+        return None
+
+
+def _create_task_worktree(task):
+    """Create a worktree for a task. Returns the worktree path or None."""
+    wt = _get_worktree_manager(task)
+    if not wt:
+        return None
+    spec_id = task.spec.odin_id
+    return wt.create_task_worktree(spec_id, str(task.id))
+
+
+def _merge_task_branch(task):
+    """Merge a task's branch into its spec branch. Returns MergeResult."""
+    wt = _get_worktree_manager(task)
+    if not wt:
+        try:
+            from odin.worktree import MergeResult
+        except ImportError:
+            # Fallback: define a simple result struct when odin is not available
+            class MergeResult:
+                def __init__(self, success, error=None, conflict=False, noop=False, diff_stat=None):
+                    self.success = success
+                    self.error = error
+                    self.conflict = conflict
+                    self.noop = noop
+                    self.diff_stat = diff_stat
+        return MergeResult(success=False, error="WorktreeManager not available")
+    spec_id = task.spec.odin_id
+    return wt.merge_task_into_spec(spec_id, str(task.id), task.title)
+
+
+def _cleanup_task_worktree(task):
+    """Remove a task's worktree and branch."""
+    wt = _get_worktree_manager(task)
+    if wt:
+        spec_id = task.spec.odin_id
+        wt.cleanup_task_worktree(spec_id, str(task.id))
+
+
+def _remove_task_worktree(task):
+    """Remove a task's worktree but preserve its branch for recovery."""
+    wt = _get_worktree_manager(task)
+    if wt:
+        spec_id = task.spec.odin_id
+        wt.remove_task_worktree(spec_id, str(task.id))
 
 
 def _classify_failure(exit_code: int, failure_stage: str, excerpt: str) -> tuple[str, str]:

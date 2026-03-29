@@ -1,7 +1,10 @@
+import { useState, useEffect, useCallback } from 'react';
 import {
     ClipboardList, Wrench, CheckCircle2, FlaskConical, Pin, Zap,
+    Copy, Check,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { createElement } from 'react';
 
 const STATUS_KEYWORDS: Record<string, string[]> = {
     backlog: ['backlog'],
@@ -72,6 +75,80 @@ export function formatTokens(count: number | undefined): string {
 export function shortModelName(full: string | undefined): string {
     if (!full) return '—'
     return full.replace(/^claude-/, '').replace(/-\d{8,}$/, '')
+}
+
+export function formatMergeStatus(status: string | undefined | null): string {
+    if (!status) return '\u2014';
+    switch (status) {
+        case 'merged': return 'Merged to spec';
+        case 'noop': return 'No changes';
+        case 'conflict': return 'Merge conflict';
+        case 'error': return 'Merge failed';
+        case 'pending': return 'Pending merge';
+        default: return status;
+    }
+}
+
+export function formatBranchDisplay(branch: string | undefined | null): string {
+    if (!branch) return '\u2014';
+    return branch;
+}
+
+/** Tiny inline copy button — clipboard icon swaps to checkmark for 1.4s */
+export function CopyButton({ text, className = '' }: { text: string; className?: string }) {
+    const [copied, setCopied] = useState(false);
+
+    useEffect(() => {
+        if (!copied) return;
+        const t = window.setTimeout(() => setCopied(false), 1400);
+        return () => window.clearTimeout(t);
+    }, [copied]);
+
+    const handleCopy = useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+        } catch { /* ignore */ }
+    }, [text]);
+
+    return createElement(
+        'button',
+        {
+            onClick: handleCopy,
+            className: `inline-flex items-center justify-center size-5 rounded hover:bg-muted/60 transition-colors shrink-0 ${className}`,
+            title: copied ? 'Copied!' : 'Copy to clipboard',
+            type: 'button' as const,
+        },
+        copied
+            ? createElement(Check, { className: 'size-3 text-emerald-400' })
+            : createElement(Copy, { className: 'size-3 text-muted-foreground/50 hover:text-muted-foreground' })
+    );
+}
+
+/** Copyable monospace command line — text + copy button */
+export function CopyableCommand({ command, className = '' }: { command: string; className?: string }) {
+    return createElement(
+        'div',
+        { className: `flex items-center gap-1.5 group ${className}` },
+        createElement('code', {
+            className: 'text-[10px] font-mono text-muted-foreground bg-secondary/50 px-1.5 py-0.5 rounded truncate',
+        }, command),
+        createElement(CopyButton, { text: command, className: 'opacity-0 group-hover:opacity-100' })
+    );
+}
+
+/** Merge status dot color for task table */
+export function getMergeStatusDotColor(status: string | undefined | null): string | null {
+    if (!status) return null;
+    switch (status) {
+        case 'merged': return '#22c55e';
+        case 'noop': return '#f59e0b';
+        case 'pending': return '#9ca3af';
+        case 'conflict':
+        case 'error': return '#ef4444';
+        default: return '#9ca3af';
+    }
 }
 
 export function getStatusIcon(status: string): LucideIcon {

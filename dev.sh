@@ -36,7 +36,7 @@ PIDS=()
 cleanup() {
     echo ""
     log "Shutting down..."
-    for pid in "${PIDS[@]}"; do
+    for pid in ${PIDS[@]+"${PIDS[@]}"}; do
         kill "$pid" 2>/dev/null || true
     done
     wait 2>/dev/null || true
@@ -62,21 +62,29 @@ fi
 
 # --- Provision (idempotent, each step skips if already done) ---
 
-if [ ! -d "$ROOT_DIR/.venv" ]; then
+if [ ! -f "$ROOT_DIR/.venv/bin/activate" ]; then
     log "Creating virtual environment..."
     python3 -m venv "$ROOT_DIR/.venv"
 fi
 # shellcheck disable=SC1091
 source "$ROOT_DIR/.venv/bin/activate"
 
-if ! command -v odin &>/dev/null; then
-    log "Installing odin..."
-    pip install -e "$ODIN_DIR" --quiet
-fi
-
 if ! python -c "import rest_framework" 2>/dev/null; then
     log "Installing backend deps..."
     pip install -r "$BACKEND_DIR/requirements.txt" --quiet
+fi
+
+# odin must install AFTER backend deps — installing requirements.txt first
+# ensures shared dependencies (httpx, pydantic, etc.) are resolved before
+# odin's editable install layers on top without conflicts.
+if ! python -c "from odin.worktree import WorktreeManager" 2>/dev/null; then
+    log "Installing odin..."
+    pip install -e "$ODIN_DIR" --quiet
+    # Verify — fail fast if install didn't work
+    python -c "from odin.worktree import WorktreeManager" || {
+        echo "ERROR: odin install failed. Run: pip install -e $ODIN_DIR"
+        exit 1
+    }
 fi
 
 if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
@@ -101,6 +109,9 @@ mkdir -p "$LOG_DIR"
 export CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS:-http://localhost:$FRONTEND_PORT}"
 export VITE_HARNESS_TIME_API_URL="${VITE_HARNESS_TIME_API_URL:-http://localhost:$BACKEND_PORT}"
 export VITE_INSTANCE="${INSTANCE}"
+if [ "$INSTANCE" = "dev" ]; then
+    export ODIN_CLI_PATH="${ODIN_CLI_PATH:-odin-dev}"
+fi
 
 python "$BACKEND_DIR/manage.py" runserver 0.0.0.0:$BACKEND_PORT > "$LOG_DIR/backend.log" 2>&1 &
 PIDS+=($!)

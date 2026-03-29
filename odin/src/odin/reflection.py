@@ -40,6 +40,20 @@ def build_reflection_prompt(task_context: dict, custom_prompt: str = "") -> str:
 {custom_prompt}
 """
 
+    screenshot_section = ""
+    screenshot_paths = task_context.get("screenshot_paths", [])
+    if screenshot_paths:
+        screenshot_section = "\n## [CTX:screenshots] Proof Screenshots\n\n"
+        screenshot_section += (
+            "The agent submitted these screenshots as proof of work. "
+            "**Read each image file** and verify the screenshots actually show "
+            "the feature working correctly. Do NOT assume screenshots prove "
+            "correctness just because they exist — visually inspect them for "
+            "errors, broken UI, error messages, or missing functionality.\n\n"
+        )
+        for path in screenshot_paths:
+            screenshot_section += f"- {path}\n"
+
     return f"""You are auditing a task executed by an AI agent.
 
 ## CONSTRAINTS
@@ -63,7 +77,7 @@ Duration: {task_context.get('duration_ms', 'N/A')}ms | Tokens: {task_context.get
 
 ## [CTX:comments] Comments & Proof
 {task_context.get('comments', 'No comments.')}
-
+{screenshot_section}
 ## [CTX:dependencies] Dependent Tasks
 {task_context.get('dependencies', 'No dependencies.')}
 
@@ -150,6 +164,57 @@ def _strip_odin_envelopes(text: str) -> str:
     if idx == -1:
         return text
     return text[:idx].rstrip()
+
+
+def _extract_screenshot_urls(comments: list[dict]) -> list[str]:
+    """Extract screenshot URLs from comment attachments.
+
+    Scans proof comments for screenshot URLs in their attachments array.
+    Returns a flat list of URLs.
+    """
+    urls = []
+    for comment in comments:
+        for attachment in comment.get("attachments") or []:
+            if isinstance(attachment, dict):
+                for url in attachment.get("screenshots") or []:
+                    if url and isinstance(url, str):
+                        urls.append(url)
+    return urls
+
+
+def _download_screenshots(
+    urls: list[str],
+    task_id: str,
+    taskit_url: str,
+    headers: dict,
+) -> list[str]:
+    """Download screenshot images to a temp directory.
+
+    Returns list of local file paths. Silently skips images that fail to download.
+    """
+    if not urls:
+        return []
+
+    import tempfile
+    img_dir = Path(tempfile.mkdtemp(prefix=f"odin_reflect_screenshots_{task_id}_"))
+
+    paths = []
+    for url in urls:
+        # Extract filename from URL
+        filename = url.rsplit("/", 1)[-1] if "/" in url else f"screenshot_{len(paths)}.png"
+        try:
+            resp = httpx.get(url, follow_redirects=True, timeout=30, headers=headers)
+            resp.raise_for_status()
+            dest = img_dir / filename
+            dest.write_bytes(resp.content)
+            paths.append(str(dest))
+            logger.info("Downloaded proof screenshot for task %s: %s", task_id, filename)
+        except Exception:
+            logger.warning(
+                "Failed to download proof screenshot for task %s: %s",
+                task_id, url, exc_info=True,
+            )
+    return paths
 
 
 def parse_reflection_report(raw_output: str) -> dict:
@@ -401,6 +466,9 @@ def reflect_task(
 
         comments_text = "\n".join(filtered_comments)
 
+        # Extract screenshot URLs from proof comment attachments
+        screenshot_urls = _extract_screenshot_urls(comments_list)
+
         deps_list = task_data.get("depends_on") or []
         deps_text = "\n".join(
             f"- {dep}" for dep in deps_list
@@ -440,6 +508,13 @@ def reflect_task(
             "dependencies": deps_text,
             "metadata_summary": metadata_summary,
         }
+
+        # Download proof screenshots so the reviewer can visually inspect them
+        screenshot_paths = _download_screenshots(
+            screenshot_urls, task_id, taskit_url, headers,
+        )
+        if screenshot_paths:
+            task_context["screenshot_paths"] = screenshot_paths
 
         # Log context sizes for verification
         context_sizes = {

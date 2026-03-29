@@ -11,6 +11,7 @@ import type {
     PresetsResponse,
     Spec,
     SpecComment,
+    SpecCommit,
     SpecListQuery,
     Task as DashTask,
     TaskComment,
@@ -1226,6 +1227,10 @@ export class HarnessTimeService implements IntegrationService {
         return this.transformSpec(raw);
     }
 
+    async fetchSpecCommits(specId: string): Promise<SpecCommit[]> {
+        return this.get<SpecCommit[]>(`/api/specs/${Number(specId)}/commits/`);
+    }
+
     private buildQuery(params: Record<string, unknown>): string {
         const searchParams = new URLSearchParams();
         Object.entries(params).forEach(([key, value]) => {
@@ -1521,6 +1526,10 @@ export class HarnessTimeService implements IntegrationService {
     async cloneSpec(specId: string): Promise<Spec> {
         const raw = await this.post<HarnessSpec>(`/api/specs/${Number(specId)}/clone/`, {});
         return this.transformSpec(raw);
+    }
+
+    async finalizeSpec(specId: string): Promise<{ pr_url?: string; finalized_at?: string; error?: string }> {
+        return this.post(`/api/specs/${Number(specId)}/finalize/`, {});
     }
 
     async summarizeTask(taskId: string): Promise<void> {

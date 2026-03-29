@@ -62,6 +62,7 @@ class TaskSerializer(serializers.ModelSerializer):
         queryset=Board.objects.all(), source="board",
     )
     spec_id = serializers.IntegerField(required=False, allow_null=True)
+    spec_odin_id = serializers.SerializerMethodField()
     estimated_cost_usd = serializers.SerializerMethodField()
     reflection_cost_usd = serializers.SerializerMethodField()
     usage = serializers.SerializerMethodField()
@@ -76,7 +77,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "id", "board_id", "title", "description", "dev_eta_seconds",
             "assignee_id", "assignee", "priority", "status", "created_by",
             "created_at", "last_updated_at", "labels", "kanban_position",
-            "spec_id", "depends_on",
+            "spec_id", "spec_odin_id", "depends_on",
             "complexity", "metadata", "model_name", "skip_reflection",
             "board_skip_reflection",
             "estimated_cost_usd", "reflection_cost_usd", "usage", "time_in_statuses",
@@ -84,6 +85,9 @@ class TaskSerializer(serializers.ModelSerializer):
             "schedule_summary",
         ]
         read_only_fields = ["id", "created_at", "last_updated_at", "kanban_position"]
+
+    def get_spec_odin_id(self, obj):
+        return obj.spec.odin_id if obj.spec_id else None
 
     def get_board_skip_reflection(self, obj):
         return obj.board.skip_reflection if obj.board_id else False

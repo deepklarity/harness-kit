@@ -196,11 +196,13 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
     # Merge built-in defaults for fields the YAML didn't set.
     # The YAML config is a sparse overlay (cli_command, api_key, etc.);
     # metadata like models, default_model, premium_model comes from defaults.
+    # Agents not mentioned in YAML at all get the full built-in default.
     builtin_defaults = _default_config("builtin").agents
-    for name, yaml_cfg in agents.items():
-        default_cfg = builtin_defaults.get(name)
-        if default_cfg is None:
+    for name, default_cfg in builtin_defaults.items():
+        if name not in agents:
+            agents[name] = default_cfg
             continue
+        yaml_cfg = agents[name]
         if not yaml_cfg.models:
             yaml_cfg.models = default_cfg.models
         if yaml_cfg.default_model is None:
@@ -235,6 +237,15 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
     if raw_cd and isinstance(raw_cd, dict):
         chrome_devtools_cfg = ChromeDevToolsConfig(**raw_cd)
 
+    # Parse worktree config section (or top-level keys)
+    raw_worktree = raw.get("worktree", {}) or {}
+    worktree_enabled = raw_worktree.get("enabled", raw.get("worktree_enabled", True))
+    base_branch = raw_worktree.get("base_branch", raw.get("base_branch", "main"))
+    worktree_dir = raw_worktree.get("dir", raw.get("worktree_dir", ".odin/worktrees"))
+    worktree_post_hooks = raw_worktree.get("post_hooks", raw.get("worktree_post_hooks", []))
+    worktree_symlinks = raw_worktree.get("symlinks", raw.get("worktree_symlinks", []))
+    auto_finalize = raw_worktree.get("auto_finalize", raw.get("auto_finalize", True))
+
     cfg = OdinConfig(
         base_agent=raw.get("base_agent", "claude"),
         agents=agents,
@@ -249,6 +260,12 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
         chrome_devtools=chrome_devtools_cfg,
         mcps=raw.get("mcps", ["taskit", "mobile", "chrome-devtools"]),
         execution_timeout_seconds=raw.get("execution_timeout_seconds", 1800),
+        worktree_enabled=worktree_enabled,
+        base_branch=base_branch,
+        worktree_dir=worktree_dir,
+        worktree_post_hooks=worktree_post_hooks,
+        worktree_symlinks=worktree_symlinks,
+        auto_finalize=auto_finalize,
     )
     return _apply_forced_provider_env(cfg)
 
