@@ -365,12 +365,22 @@ function App() {
         }, { replace: true });
     }, [setSearchParams]);
 
-    // Auto-select first board when on board view and no board param is set
+    // Auto-select board when on board view and no board param is set
+    // Prefer last-visited board from localStorage, fall back to first board
     useEffect(() => {
         if (viewMode === 'board' && !loadingShell && boards.length > 0 && selectedBoard === ALL_BOARDS_ID && !searchParams.get('board')) {
-            updateSearchParam('board', boards[0].id);
+            const lastBoard = localStorage.getItem('taskit-last-board');
+            const targetBoard = lastBoard && boards.some(b => b.id === lastBoard) ? lastBoard : boards[0].id;
+            updateSearchParam('board', targetBoard);
         }
     }, [viewMode, loadingShell, boards, selectedBoard, searchParams, updateSearchParam]);
+
+    // Persist selected board to localStorage
+    useEffect(() => {
+        if (selectedBoard !== ALL_BOARDS_ID) {
+            localStorage.setItem('taskit-last-board', selectedBoard);
+        }
+    }, [selectedBoard]);
 
     const markTaskSignalsSeen = useCallback((task: Task) => {
         markCommentsSeen(task.id, task.comments?.length ?? 0);
