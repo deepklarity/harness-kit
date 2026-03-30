@@ -2900,6 +2900,20 @@ class SpecViewSet(viewsets.ModelViewSet):
     def clone(self, request, pk=None):
         from django.db import transaction
 
+        # Keys in metadata that are tied to a specific execution/worktree
+        # and must NOT carry over to the clone.
+        SPEC_METADATA_STRIP_KEYS = {
+            "branch", "worktree_path", "planning_trace", "pr_url",
+            "finalized_at",
+        }
+        TASK_METADATA_STRIP_KEYS = {
+            "branch", "worktree_path", "working_dir", "merge_status",
+            "started_at", "tmux_session", "last_duration_ms", "full_output",
+            "taskit_id", "diff_stat", "subprocess_pid", "trace_file",
+            "active_execution", "worktree_status", "worktree_error",
+            "last_failure_type", "last_failure_reason", "last_failure_origin",
+        }
+
         with transaction.atomic():
             spec = get_object_or_404(Spec, pk=pk)
 
@@ -2912,6 +2926,11 @@ class SpecViewSet(viewsets.ModelViewSet):
             if Spec.objects.filter(odin_id=new_odin_id).exists():
                 new_odin_id = f"{spec.odin_id}_{timestamp}_2"
 
+            clean_spec_metadata = {
+                k: v for k, v in (spec.metadata or {}).items()
+                if k not in SPEC_METADATA_STRIP_KEYS
+            }
+
             new_spec = Spec.objects.create(
                 odin_id=new_odin_id,
                 title=f"{spec.title} (CLONE)",
@@ -2919,7 +2938,7 @@ class SpecViewSet(viewsets.ModelViewSet):
                 content=spec.content,
                 abandoned=False,  # Reset abandoned status
                 board=spec.board,
-                metadata=spec.metadata,
+                metadata=clean_spec_metadata,
             )
 
             # 2. Clone associated Tasks
@@ -2932,7 +2951,15 @@ class SpecViewSet(viewsets.ModelViewSet):
                 if first_task and first_task.created_by:
                     created_by = first_task.created_by
 
+            old_id_to_new_id = {}
+            new_tasks_needing_remap = []
+
             for task in tasks:
+                clean_task_metadata = {
+                    k: v for k, v in (task.metadata or {}).items()
+                    if k not in TASK_METADATA_STRIP_KEYS
+                }
+
                 new_task = Task.objects.create(
                     board=task.board,
                     title=f"(CLONE) {task.title}",
@@ -2943,11 +2970,15 @@ class SpecViewSet(viewsets.ModelViewSet):
                     status="TODO",
                     created_by=created_by,
                     spec=new_spec,
-                    depends_on=task.depends_on,
+                    depends_on=[],
                     complexity=task.complexity,
-                    metadata=task.metadata,
+                    metadata=clean_task_metadata,
                     skip_reflection=task.skip_reflection,
                 )
+                old_id_to_new_id[str(task.id)] = str(new_task.id)
+                if task.depends_on:
+                    new_tasks_needing_remap.append((new_task, task.depends_on))
+
                 # Copy M2M labels
                 new_task.labels.set(task.labels.all())
 
@@ -2959,6 +2990,15 @@ class SpecViewSet(viewsets.ModelViewSet):
                     new_value=f"Task cloned from {task.id}",
                     changed_by=created_by,
                 )
+
+            # Remap depends_on: replace original task IDs with cloned IDs.
+            # IDs not in the map (external deps) are preserved as-is.
+            for new_task, original_deps in new_tasks_needing_remap:
+                new_task.depends_on = [
+                    old_id_to_new_id.get(dep_id, dep_id)
+                    for dep_id in original_deps
+                ]
+                new_task.save(update_fields=["depends_on"])
 
         return Response(SpecSerializer(new_spec).data, status=status.HTTP_201_CREATED)
 

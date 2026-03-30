@@ -1016,9 +1016,22 @@ Write your final plan as a JSON array to: `{plan_path}`"""
 
             if self._worktree:
                 try:
-                    self._worktree.create_spec_branch(
+                    spec_branch = self._worktree.create_spec_branch(
                         task.spec_id, base_branch=self.config.base_branch,
                     )
+                    # Ensure the spec metadata has the branch key (may be
+                    # missing for cloned specs whose plan step was skipped).
+                    # Try local store first, fall back to backend API for
+                    # specs that only exist in taskit (e.g. clones).
+                    spec_obj = self.spec_store.load(task.spec_id)
+                    if not spec_obj and self._spec_backend:
+                        spec_obj = self._spec_backend.load_spec(task.spec_id)
+                        if spec_obj:
+                            self.spec_store.save(spec_obj)
+                            self._log.info("[task:%s] Synced spec %s from backend to local store", full_id, task.spec_id)
+                    if spec_obj and not spec_obj.metadata.get("branch"):
+                        self._update_spec_metadata(task.spec_id, {"branch": spec_branch})
+                        self._log.info("[task:%s] Backfilled spec branch metadata: %s", full_id, spec_branch)
                     worktree_path = self._worktree.create_task_worktree(
                         spec_id=task.spec_id,
                         task_id=full_id,

@@ -13,7 +13,7 @@ These tests go beyond CRUD to cover:
 from unittest.mock import patch
 
 from .base import APITestCase
-from tasks.models import BoardMembership, Task, TaskHistory
+from tasks.models import BoardMembership, Spec, Task, TaskHistory
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -527,7 +527,7 @@ class TestSpecCloning(APITestCase):
         self.task2 = self.make_task(
             self.board, title="Implement API", spec=self.spec,
             status="FAILED", complexity="HIGH",
-            depends_on=["task_1"], metadata={"agent": "claude"},
+            depends_on=[str(self.task1.id)], metadata={"agent": "claude"},
         )
 
     def test_clone_creates_new_spec(self):
@@ -556,8 +556,9 @@ class TestSpecCloning(APITestCase):
         self.assertEqual(new_tasks[0]["priority"], "HIGH")
         self.assertEqual(len(new_tasks[0]["labels"]), 1)
 
-        # Second task keeps depends_on, complexity, metadata
-        self.assertEqual(new_tasks[1]["depends_on"], ["task_1"])
+        # Second task keeps complexity, metadata; depends_on is remapped
+        cloned_task1_id = str(new_tasks[0]["id"])
+        self.assertEqual(new_tasks[1]["depends_on"], [cloned_task1_id])
         self.assertEqual(new_tasks[1]["complexity"], "HIGH")
         self.assertEqual(new_tasks[1]["metadata"], {"agent": "claude"})
 
@@ -588,6 +589,100 @@ class TestSpecCloning(APITestCase):
         original_count = Task.objects.count()
         self.client.post(f"/specs/{self.spec.id}/clone/")
         self.assertEqual(Task.objects.count(), original_count + 2)
+
+    def test_clone_strips_worktree_metadata(self):
+        """Cloned spec/tasks must not carry over worktree-specific metadata."""
+        # Simulate a spec that has been executed (worktree metadata present)
+        self.spec.metadata = {
+            "branch": "spec/sp_auth",
+            "worktree_path": ".odin/worktrees/sp_auth/_spec",
+            "planning_trace": {"steps": 3},
+            "pr_url": "https://github.com/org/repo/pull/42",
+            "finalized_at": "2025-01-15T10:00:00Z",
+            "custom_key": "should_survive",
+        }
+        self.spec.save()
+
+        self.task2.metadata = {
+            "agent": "claude",
+            "branch": "task/sp_auth/tsk_002",
+            "worktree_path": ".odin/worktrees/sp_auth/tsk_002",
+            "working_dir": "/tmp/worktree",
+            "merge_status": "merged",
+            "started_at": "2025-01-15T10:00:00Z",
+            "tmux_session": "odin_sp_auth_tsk_002",
+            "last_duration_ms": 45000,
+            "full_output": "lots of output text...",
+            "taskit_id": "99",
+            "diff_stat": "+10 -3",
+            "subprocess_pid": 12345,
+            "trace_file": "/tmp/trace.json",
+            "active_execution": True,
+            "worktree_status": "ready",
+            "worktree_error": None,
+            "last_failure_type": "timeout",
+            "last_failure_reason": "exceeded 5m limit",
+            "last_failure_origin": "executor",
+        }
+        self.task2.save()
+
+        resp = self.client.post(f"/specs/{self.spec.id}/clone/")
+        self.assertEqual(resp.status_code, 201)
+
+        new_spec = Spec.objects.get(id=resp.data["id"])
+        # Execution keys stripped
+        for key in ("branch", "worktree_path", "planning_trace", "pr_url",
+                     "finalized_at"):
+            self.assertNotIn(key, new_spec.metadata)
+        # Non-execution keys preserved
+        self.assertEqual(new_spec.metadata["custom_key"], "should_survive")
+
+        new_tasks = sorted(resp.data["tasks"], key=lambda t: t["id"])
+        cloned_task2 = Task.objects.get(id=new_tasks[1]["id"])
+        # Execution keys stripped
+        for key in ("branch", "worktree_path", "working_dir", "merge_status",
+                     "started_at", "tmux_session", "last_duration_ms",
+                     "full_output", "taskit_id", "diff_stat", "subprocess_pid",
+                     "trace_file", "active_execution", "worktree_status",
+                     "worktree_error", "last_failure_type",
+                     "last_failure_reason", "last_failure_origin"):
+            self.assertNotIn(key, cloned_task2.metadata)
+        # Non-execution keys preserved
+        self.assertEqual(cloned_task2.metadata["agent"], "claude")
+
+    def test_clone_remaps_depends_on(self):
+        """Cloned tasks' depends_on must reference cloned IDs, not originals."""
+        # Setup: task_a (no deps), task_b depends on task_a, task_c depends
+        # on task_b + an external ID outside the spec.
+        spec = self.make_spec(self.board, odin_id="sp_deps")
+        task_a = self.make_task(self.board, title="A", spec=spec)
+        task_b = self.make_task(
+            self.board, title="B", spec=spec,
+            depends_on=[str(task_a.id)],
+        )
+        task_c = self.make_task(
+            self.board, title="C", spec=spec,
+            depends_on=[str(task_b.id), "9999"],
+        )
+
+        resp = self.client.post(f"/specs/{spec.id}/clone/")
+        self.assertEqual(resp.status_code, 201)
+
+        cloned = sorted(resp.data["tasks"], key=lambda t: t["id"])
+        cloned_a, cloned_b, cloned_c = cloned
+
+        # A has no deps
+        self.assertEqual(cloned_a["depends_on"], [])
+
+        # B depends on cloned A (not original A)
+        self.assertEqual(cloned_b["depends_on"], [str(cloned_a["id"])])
+        self.assertNotEqual(cloned_b["depends_on"], [str(task_a.id)])
+
+        # C depends on cloned B + external "9999" preserved as-is
+        self.assertEqual(
+            cloned_c["depends_on"],
+            [str(cloned_b["id"]), "9999"],
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
