@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import React from 'react';
-import type { AgentConfig, Board, DetectedIde, Member } from '../types';
+import type { Board, DetectedIde, Member } from '../types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useService } from '../contexts/ServiceContext';
 import { Button } from '@/components/ui/button';
@@ -17,9 +17,9 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X, SettingsIcon,Moon, Sun, Keyboard } from 'lucide-react';
+import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X, SettingsIcon, Moon, Sun, Keyboard, Bell } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
 import { IdeBadge, IdeSetupModal } from './IdeSetupModal';
 
@@ -31,6 +31,7 @@ import {
 
 import { NotificationSettings } from './NotificationSettings';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const isMac = () => navigator.platform.toUpperCase().includes('MAC');
 
@@ -110,10 +111,31 @@ interface SettingsViewProps {
     onToggleDark: () => void;
 }
 
+const TAB_IDS = ['board', 'boards', 'ide', 'appearance', 'notifications', 'shortcuts'] as const;
+type TabId = typeof TAB_IDS[number];
+
 export function SettingsView({ members, currentBoard, onDataChange, onCreateBoard, onDeleteBoard, dark, onToggleDark }: SettingsViewProps) {
     const service = useService();
     const { toast } = useToast();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // Tab state from URL
+    const rawTab = searchParams.get('tab');
+    const activeTab: TabId = (rawTab && TAB_IDS.includes(rawTab as TabId)) ? rawTab as TabId : 'board';
+
+    const handleTabChange = useCallback((value: string) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            if (value === 'board') {
+                next.delete('tab');
+            } else {
+                next.set('tab', value);
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
     const [boardToClear, setBoardToClear] = useState<Board | null>(null);
     const [clearing, setClearing] = useState(false);
     const [forcedProvider, setForcedProvider] = useState<{ provider: string | null; model: string | null } | null>(null);
@@ -399,439 +421,600 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
     const isAgentUser = (member: Member) => member.email.endsWith('@odin.agent');
 
     return (
-        <div className="space-y-8">
-            {currentBoard && (
-                <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-3">Reflection Settings</h3>
-                    <div className="border border-border rounded-md p-4 flex flex-col gap-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <div className="text-sm font-medium">{currentBoard.name}</div>
-                                <div className="text-xs text-muted-foreground mt-0.5">Skip reflection for all tasks in this board</div>
-                            </div>
-                            <Switch
-                                checked={currentSkip}
-                                onCheckedChange={v => handleCurrentBoardReflection({ skip_reflection: v })}
-                            />
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="text-sm text-muted-foreground shrink-0">Reflection model</span>
-                            <Select
-                                value={currentModel || ''}
-                                onValueChange={v => handleCurrentBoardReflection({ reflection_model: v })}
-                            >
-                                <SelectTrigger className="h-8 text-xs font-mono flex-1">
-                                    <SelectValue placeholder="claude-sonnet-4-5-20250929" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {allModels.map(m => (
-                                        <SelectItem key={m.name} value={m.name}>
-                                            <span className="font-mono">{m.name}</span>
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                </div>
-            )}
-            {currentBoard && (
-                <div>
-                    <h3 className="text-sm font-medium text-muted-foreground mb-3">Proof Settings</h3>
-                    <div className="border border-border rounded-md p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <div className="text-sm font-medium">{currentBoard.name}</div>
-                                <div className="text-xs text-muted-foreground mt-0.5">Skip proof for all tasks in this board</div>
-                            </div>
-                            <Switch
-                                checked={currentSkipProof}
-                                onCheckedChange={v => handleCurrentBoardProof(v)}
-                            />
-                        </div>
-                    </div>
-                </div>
-            )}
-            {forcedProvider?.provider && (
-                <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-                    <div className="text-xs font-medium text-muted-foreground">Forced AI Provider</div>
-                    <div className="mt-1 text-sm">
-                        <span className="font-mono">{forcedProvider.provider}</span>
-                        {forcedProvider.model && <span className="text-muted-foreground"> / <span className="font-mono">{forcedProvider.model}</span></span>}
-                    </div>
-                </div>
-            )}
-            <div className="rounded-lg border border-border bg-muted/20 px-4 py-4">
-                <div className="flex items-center justify-between gap-4">
-                    <div>
-                        <div className="flex items-center gap-2">
-                            <SettingsIcon className="size-4 text-muted-foreground" />
-                            <h3 className="text-sm font-medium">IDE Configuration</h3>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                            Choose the IDE used by Open Project for Odin-initialized board roots.
-                        </p>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => setShowIdeSetup(true)}>
-                        {preferredIde ? 'Change IDE' : 'Configure IDE'}
-                    </Button>
-                </div>
+        <div className="space-y-6">
+            <div>
+                <h2 className="text-lg font-semibold tracking-tight">Settings</h2>
+                <p className="text-sm text-muted-foreground mt-1">Manage your boards, appearance, and preferences.</p>
+            </div>
 
-                <div className="mt-3">
-                    {loadingIdeOptions ? (
-                        <div className="text-xs text-muted-foreground">Detecting supported IDEs...</div>
-                    ) : detectedIdes.length === 0 ? (
-                        <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
-                            No supported IDEs detected. Install or expose one of these CLIs on this machine: Cursor, VS Code, Zed.
-                        </div>
-                    ) : preferredIde ? (
-                        <div className="flex items-center gap-3">
-                            <IdeBadge ide={preferredIde} />
-                            <span className="text-xs text-muted-foreground">Configured for Open Project</span>
+            <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="min-h-[500px]">
+                <TabsList variant="line" className="min-w-[180px] border-r border-border pr-4 shrink-0 self-start sticky top-6">
+                    <TabsTrigger value="board" className="gap-2 justify-start px-3 py-2">
+                        <Sparkles className="size-4" />
+                        <span>Board</span>
+                        {currentBoard && (
+                            <span className="ml-auto size-1.5 rounded-full bg-primary" />
+                        )}
+                    </TabsTrigger>
+                    <TabsTrigger value="boards" className="gap-2 justify-start px-3 py-2">
+                        <Layout className="size-4" />
+                        <span>Boards</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="ide" className="gap-2 justify-start px-3 py-2">
+                        <SettingsIcon className="size-4" />
+                        <span>IDE & Tools</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="appearance" className="gap-2 justify-start px-3 py-2">
+                        {dark ? <Moon className="size-4" /> : <Sun className="size-4" />}
+                        <span>Appearance</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="notifications" className="gap-2 justify-start px-3 py-2">
+                        <Bell className="size-4" />
+                        <span>Notifications</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="shortcuts" className="gap-2 justify-start px-3 py-2">
+                        <Keyboard className="size-4" />
+                        <span>Shortcuts</span>
+                    </TabsTrigger>
+                </TabsList>
+
+                {/* ── Board Tab ── */}
+                <TabsContent value="board" className="mt-0">
+                    {currentBoard ? (
+                        <div className="space-y-6">
+                            <Card>
+                                <CardHeader className="pb-3">
+                                    <div className="flex items-center gap-3">
+                                        <Sparkles className="size-4 text-muted-foreground" />
+                                        <div>
+                                            <CardTitle className="text-base">{currentBoard.name}</CardTitle>
+                                            <p className="text-xs text-muted-foreground mt-0.5">Settings for the currently selected board</p>
+                                        </div>
+                                        {currentBoard.isTrial && (
+                                            <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600 ml-auto">
+                                                <FlaskConical className="size-2.5" /> Trial
+                                            </Badge>
+                                        )}
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="space-y-6">
+                                    {/* Reflection sub-section */}
+                                    <div>
+                                        <div className="text-sm font-medium mb-3">Reflection</div>
+                                        <div className="space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <div className="text-sm">Skip reflection</div>
+                                                    <div className="text-xs text-muted-foreground mt-0.5">Skip reflection for all tasks in this board</div>
+                                                </div>
+                                                <Switch
+                                                    checked={currentSkip}
+                                                    onCheckedChange={v => handleCurrentBoardReflection({ skip_reflection: v })}
+                                                />
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-sm text-muted-foreground shrink-0">Model</span>
+                                                <Select
+                                                    value={currentModel || ''}
+                                                    onValueChange={v => handleCurrentBoardReflection({ reflection_model: v })}
+                                                >
+                                                    <SelectTrigger className="h-8 text-xs font-mono flex-1">
+                                                        <SelectValue placeholder="claude-sonnet-4-5-20250929" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {allModels.map(m => (
+                                                            <SelectItem key={m.name} value={m.name}>
+                                                                <span className="font-mono">{m.name}</span>
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px bg-border" />
+
+                                    {/* Proof sub-section */}
+                                    <div>
+                                        <div className="text-sm font-medium mb-3">Proof</div>
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <div className="text-sm">Skip proof</div>
+                                                <div className="text-xs text-muted-foreground mt-0.5">Skip proof for all tasks in this board</div>
+                                            </div>
+                                            <Switch
+                                                checked={currentSkipProof}
+                                                onCheckedChange={v => handleCurrentBoardProof(v)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Forced provider sub-section */}
+                                    {forcedProvider?.provider && (
+                                        <>
+                                            <div className="h-px bg-border" />
+                                            <div>
+                                                <div className="text-sm font-medium mb-3">AI Provider</div>
+                                                <div className="rounded-md border border-border bg-muted/30 px-4 py-3">
+                                                    <div className="text-xs font-medium text-muted-foreground">Forced Provider</div>
+                                                    <div className="mt-1 text-sm">
+                                                        <span className="font-mono">{forcedProvider.provider}</span>
+                                                        {forcedProvider.model && <span className="text-muted-foreground"> / <span className="font-mono">{forcedProvider.model}</span></span>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </CardContent>
+                            </Card>
                         </div>
                     ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                            {detectedIdes.map(ide => <IdeBadge key={ide.id} ide={ide} muted />)}
-                        </div>
+                        <Card>
+                            <CardContent className="py-12 text-center">
+                                <Sparkles className="size-8 text-muted-foreground mx-auto mb-3 opacity-50" />
+                                <p className="text-sm text-muted-foreground">Select a board to configure its settings.</p>
+                            </CardContent>
+                        </Card>
                     )}
-                </div>
-            </div>
-            {/* Boards Section */}
-            <div>
-                <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-medium text-muted-foreground">Boards</h3>
-                    <div className="flex items-center gap-2">
-                        <div className="relative w-64">
-                            <form onSubmit={(e) => {
-                                e.preventDefault();
-                                setCurrentPage(1);
-                            }}>
-                                <Search className="absolute left-2 top-2 size-3.5 text-muted-foreground" />
-                                <Input
-                                    placeholder="Search boards by ID or name..."
-                                    className="h-8 pl-8 pr-8 text-xs bg-background"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                />
-                                {searchQuery && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setSearchQuery('')}
-                                        className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
-                                    >
-                                        <X className="size-3.5" />
-                                    </button>
-                                )}
-                            </form>
-                        </div>
-                        <Button variant="outline" size="sm" className="gap-1.5" onClick={onCreateBoard}>
-                            <Plus className="size-3.5" />
-                            Create Board
-                        </Button>
-                    </div>
-                </div>
-                
-                <div className="border border-border rounded-md overflow-hidden text-sm">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-muted/30 border-b border-border text-xs text-muted-foreground">
-                                <tr>
-                                    <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('id')}>
-                                        <div className="flex items-center gap-1">ID {sortConfig.key === 'id' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
-                                    </th>
-                                    <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('name')}>
-                                        <div className="flex items-center gap-1">Board {sortConfig.key === 'name' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
-                                    </th>
-                                    <th className="px-3 py-2 font-medium">Status</th>
-                                    <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('tasks')}>
-                                        <div className="flex items-center gap-1">Tasks {sortConfig.key === 'tasks' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
-                                    </th>
-                                    <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('members')}>
-                                        <div className="flex items-center gap-1">Members {sortConfig.key === 'members' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
-                                    </th>
-                                    <th className="px-3 py-2 font-medium">Agents</th>
-                                    <th className="px-3 py-2 font-medium text-center w-24">Manage</th>
-                                    <th className="px-3 py-2 font-medium text-center w-24">Details</th>
-                                    <th className="px-3 py-2 w-10"></th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border/50">
-                                {isLoadingTable ? (
-                                    <tr>
-                                        <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground">
-                                            <Layout className="h-8 w-8 text-muted-foreground mx-auto mb-3 animate-pulse" />
-                                            Loading...
-                                        </td>
-                                    </tr>
-                                ) : tableBoards.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground">
-                                            <Layout className="h-8 w-8 text-muted-foreground mx-auto mb-3 opacity-50" />
-                                            No boards found matching your search.
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    tableBoards.map(board => {
-                                        const boardMembers = membersByBoard[board.id] || board.members;
-                                        const humanMembers = boardMembers.filter(m => !isAgentUser(m));
-                                        const bAgents = board.agents || [];
-                                        const activeAgentMembers = boardMembers.filter(m => isAgentUser(m));
-                                        const hasAgentConfigs = bAgents.length > 0;
-                                        const hasAnyMembers = humanMembers.length > 0 || activeAgentMembers.length > 0 || bAgents.length > 0;
-                                        const isExpanded = expandedBoardId === board.id;
+                </TabsContent>
 
-                                        const enabledAgents = hasAgentConfigs ? bAgents.filter(a => a.enabled).length : activeAgentMembers.length;
-                                        
-                                        return (
-                                            <React.Fragment key={board.id}>
-                                                <tr className={`hover:bg-muted/10 transition-colors ${isExpanded ? 'bg-muted/10' : ''}`}>
-                                                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{board.id}</td>
-                                                    <td className="px-3 py-2 font-medium">{board.name}</td>
-                                                    <td className="px-3 py-2">
-                                                        {board.isTrial && (
-                                                            <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600">
-                                                                <FlaskConical className="size-2.5" /> Trial
-                                                            </Badge>
-                                                        )}
-                                                        {board.odinInitialized ? (
-                                                            <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-emerald-600 border-emerald-300 dark:text-emerald-400 dark:border-emerald-600 whitespace-nowrap">
-                                                                <CheckCircle2 className="size-2.5" /> Initialized
-                                                            </Badge>
-                                                        ) : board.workingDir ? (
-                                                            <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600 whitespace-nowrap">
-                                                                <AlertCircle className="size-2.5" /> Not Init
-                                                            </Badge>
-                                                        ) : null}
-                                                    </td>
-                                                    <td className="px-3 py-2 text-muted-foreground">{board.taskCount ?? 0}</td>
-                                                    <td className="px-3 py-2 text-muted-foreground">{board.memberCount ?? boardMembers.length}</td>
-                                                    <td className="px-3 py-2 text-muted-foreground">{enabledAgents}</td>
-                                                    <td className="px-3 py-2 text-center">
-                                                        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setManagingBoard(board)}>
-                                                            <Users className="size-3.5 mr-1.5" /> Manage
-                                                        </Button>
-                                                    </td>
-                                                    <td className="px-3 py-2 text-center">
-                                                        <Button 
-                                                            variant="ghost" 
-                                                            size="sm" 
-                                                            className={`h-7 px-2 ${isExpanded ? 'bg-muted' : ''}`}
-                                                            onClick={() => setExpandedBoardId(isExpanded ? null : board.id)}
-                                                        >
-                                                            <FileText className="size-3.5 mr-1" /> View
-                                                        </Button>
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        <Popover>
-                                                            <PopoverTrigger asChild>
-                                                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 ml-auto flex">
-                                                                    <MoreVertical className="size-4" />
-                                                                </Button>
-                                                            </PopoverTrigger>
-                                                            <PopoverContent align="end" className="w-56 p-1">
-                                                                {board.workingDir && !board.odinInitialized && (
-                                                                    <Button
-                                                                        variant="ghost"
-                                                                        size="sm"
-                                                                        className="w-full justify-start gap-2"
-                                                                        disabled={initializingBoard === board.id}
-                                                                        onClick={() => handleInitOdin(board)}
-                                                                    >
-                                                                        <Zap className="size-4" />
-                                                                        {initializingBoard === board.id ? 'Initializing...' : 'Initialize Odin'}
-                                                                    </Button>
-                                                                )}
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="w-full justify-start gap-2"
-                                                                    onClick={() => navigate(`/reflections?board=${board.id}`)}
-                                                                >
-                                                                    <Sparkles className="size-4" /> Reflections
-                                                                </Button>
-                                                                <div className="h-px bg-border my-1 mx-2" />
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                                    onClick={() => setBoardToClear(board)}
-                                                                >
-                                                                    <Trash2 className="size-4" /> Clear Board
-                                                                </Button>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                                    onClick={() => { setBoardToDelete(board); setDeleteConfirmStep(1); setDeleteConfirmName(''); }}
-                                                                >
-                                                                    <Trash2 className="size-4" /> Delete Board
-                                                                </Button>
-                                                            </PopoverContent>
-                                                        </Popover>
-                                                    </td>
-                                                </tr>
-                                                {isExpanded && (
-                                                    <tr className="bg-muted/20 border-b border-border">
-                                                        <td colSpan={9} className="p-0">
-                                                            <div className="p-4 flex gap-6 text-sm flex-col">
-                                                                <div className="flex gap-2">
-                                                                    <FolderOpen className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-                                                                    <div>
-                                                                        <div className="font-medium mb-0.5">Project Directory</div>
-                                                                        {board.workingDir ? (
-                                                                            <div className="text-xs font-mono text-foreground/80">{board.workingDir}</div>
-                                                                        ) : (
-                                                                            <div className="text-xs text-muted-foreground/60">No project directory set</div>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                                
-                                                                {hasAnyMembers && (
-                                                                    <div className={"grid grid-cols-[100px_1fr] gap-4 items-start"}>
-                                                                        <div className="font-medium text-xs text-muted-foreground uppercase tracking-wider mt-1">People</div>
-                                                                        {humanMembers.length === 0 ? (
-                                                                            <span className="text-xs text-muted-foreground/60 mt-1">None</span>
-                                                                        ) : (
-                                                                            <div className="flex flex-wrap gap-1.5">
-                                                                                {humanMembers.map(member => (
-                                                                                    <div key={member.id} className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-background border border-border">
-                                                                                        <div className="size-4 rounded-full flex items-center justify-center text-[8px] font-medium text-white shrink-0" style={{ backgroundColor: member.color }}>
-                                                                                            {member.initials}
-                                                                                        </div>
-                                                                                        <span className="text-xs">{member.fullName}</span>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-
-                                                                        <div className="font-medium text-xs text-muted-foreground uppercase tracking-wider mt-1">Agents</div>
-                                                                        {hasAgentConfigs ? (
-                                                                            <div className="flex flex-wrap gap-1.5">
-                                                                                {bAgents.map(agent => (
-                                                                                    <div key={agent.name} className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${agent.enabled ? 'bg-blue-500/10 border-blue-300/30' : 'bg-background border-border opacity-50'}`}>
-                                                                                        <Bot className={`size-3 ${agent.enabled ? 'text-blue-500' : 'text-muted-foreground/50'}`} />
-                                                                                        <span className={`text-xs ${agent.enabled ? '' : 'text-muted-foreground line-through'}`}>{agent.name}</span>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        ) : activeAgentMembers.length > 0 ? (
-                                                                            <div className="flex flex-wrap gap-1.5">
-                                                                                {activeAgentMembers.map(member => (
-                                                                                    <div key={member.id} className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-500/10 border border-blue-300/30">
-                                                                                        <Bot className="size-3 text-blue-500" />
-                                                                                        <span className="text-xs">{member.fullName}</span>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        ) : (
-                                                                            <span className="text-xs text-muted-foreground/60 mt-1">None</span>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-                                                                <div className="flex gap-2">
-                                                                    <Sparkles className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-                                                                    <div className="flex-1">
-                                                                        <div className="font-medium mb-2">Reflection Settings</div>
-                                                                        <div className="flex flex-col gap-3">
-                                                                            <div className="flex items-center justify-between">
-                                                                                <span className="text-xs text-muted-foreground">Skip reflection for all tasks in this board</span>
-                                                                                <Switch
-                                                                                    checked={!!board.skipReflection}
-                                                                                    onCheckedChange={v => handleUpdateBoardReflection(board.id, { skip_reflection: v })}
-                                                                                />
-                                                                            </div>
-                                                                            <div className="flex items-center gap-2">
-                                                                                <Select
-                                                                                    value={reflectionModelEdits[board.id] !== undefined ? reflectionModelEdits[board.id] : (board.reflectionModel || '')}
-                                                                                    onValueChange={val => {
-                                                                                        setReflectionModelEdits(prev => ({ ...prev, [board.id]: val }));
-                                                                                        handleUpdateBoardReflection(board.id, { reflection_model: val });
-                                                                                    }}
-                                                                                >
-                                                                                    <SelectTrigger className="h-7 text-xs font-mono flex-1">
-                                                                                        <SelectValue placeholder="claude-sonnet-4-5-20250929" />
-                                                                                    </SelectTrigger>
-                                                                                    <SelectContent>
-                                                                                        {allModels.map(m => (
-                                                                                            <SelectItem key={m.name} value={m.name}>
-                                                                                                <span className="font-mono">{m.name}</span>
-                                                                                            </SelectItem>
-                                                                                        ))}
-                                                                                    </SelectContent>
-                                                                                </Select>
-                                                                                <span className="text-xs text-muted-foreground whitespace-nowrap">Reflection model</span>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="flex gap-2">
-                                                                    <FileText className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-                                                                    <div className="flex-1">
-                                                                        <div className="font-medium mb-2">Proof Settings</div>
-                                                                        <div className="flex items-center justify-between">
-                                                                            <span className="text-xs text-muted-foreground">Skip proof for all tasks in this board</span>
-                                                                            <Switch
-                                                                                checked={!!(board as Board & { skipProof?: boolean }).skipProof}
-                                                                                onCheckedChange={v => handleUpdateBoardProof(board.id, v)}
-                                                                            />
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </React.Fragment>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                {/* Pagination Controls */}
-                {totalFiltered > PAGE_SIZE && (
-                    <div className="flex items-center justify-between mt-4">
-                        <div className="text-xs text-muted-foreground">
-                            Showing {Math.min((currentPage - 1) * PAGE_SIZE + 1, totalFiltered)}–{Math.min(currentPage * PAGE_SIZE, totalFiltered)} of {totalFiltered} board{totalFiltered !== 1 ? 's' : ''}
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-8" 
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                            >
-                                Previous
-                            </Button>
-                            <div className="flex items-center gap-1 px-2">
-                                {Array.from({ length: totalPages }).map((_, i) => (
-                                    <Button
-                                        key={i + 1}
-                                        variant={currentPage === i + 1 ? 'default' : 'ghost'}
-                                        size="sm"
-                                        className="h-8 w-8 p-0"
-                                        onClick={() => setCurrentPage(i + 1)}
-                                    >
-                                        {i + 1}
-                                    </Button>
-                                ))}
+                {/* ── Boards Tab ── */}
+                <TabsContent value="boards" className="mt-0">
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="text-base font-medium">Board Management</h3>
+                                <p className="text-xs text-muted-foreground mt-0.5">Create, configure, and manage your boards.</p>
                             </div>
-                            <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-8" 
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                            >
-                                Next
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <div className="relative w-64">
+                                    <form onSubmit={(e) => {
+                                        e.preventDefault();
+                                        setCurrentPage(1);
+                                    }}>
+                                        <Search className="absolute left-2 top-2 size-3.5 text-muted-foreground" />
+                                        <Input
+                                            placeholder="Search boards by ID or name..."
+                                            className="h-8 pl-8 pr-8 text-xs bg-background"
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                        />
+                                        {searchQuery && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setSearchQuery('')}
+                                                className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                                            >
+                                                <X className="size-3.5" />
+                                            </button>
+                                        )}
+                                    </form>
+                                </div>
+                                <Button variant="outline" size="sm" className="gap-1.5" onClick={onCreateBoard}>
+                                    <Plus className="size-3.5" />
+                                    Create Board
+                                </Button>
+                            </div>
                         </div>
+
+                        <div className="border border-border rounded-md overflow-hidden text-sm">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead className="bg-muted/30 border-b border-border text-xs text-muted-foreground">
+                                        <tr>
+                                            <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('id')}>
+                                                <div className="flex items-center gap-1">ID {sortConfig.key === 'id' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
+                                            </th>
+                                            <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('name')}>
+                                                <div className="flex items-center gap-1">Board {sortConfig.key === 'name' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
+                                            </th>
+                                            <th className="px-3 py-2 font-medium">Status</th>
+                                            <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('tasks')}>
+                                                <div className="flex items-center gap-1">Tasks {sortConfig.key === 'tasks' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
+                                            </th>
+                                            <th className="px-3 py-2 font-medium cursor-pointer hover:text-foreground" onClick={() => handleSort('members')}>
+                                                <div className="flex items-center gap-1">Members {sortConfig.key === 'members' && (sortConfig.dir === 'asc' ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}</div>
+                                            </th>
+                                            <th className="px-3 py-2 font-medium">Agents</th>
+                                            <th className="px-3 py-2 font-medium text-center w-24">Manage</th>
+                                            <th className="px-3 py-2 font-medium text-center w-24">Details</th>
+                                            <th className="px-3 py-2 w-10"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/50">
+                                        {isLoadingTable ? (
+                                            <tr>
+                                                <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground">
+                                                    <Layout className="h-8 w-8 text-muted-foreground mx-auto mb-3 animate-pulse" />
+                                                    Loading...
+                                                </td>
+                                            </tr>
+                                        ) : tableBoards.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={9} className="px-6 py-12 text-center text-muted-foreground">
+                                                    <Layout className="h-8 w-8 text-muted-foreground mx-auto mb-3 opacity-50" />
+                                                    No boards found matching your search.
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            tableBoards.map(board => {
+                                                const boardMembers = membersByBoard[board.id] || board.members;
+                                                const humanMembers = boardMembers.filter(m => !isAgentUser(m));
+                                                const bAgents = board.agents || [];
+                                                const activeAgentMembers = boardMembers.filter(m => isAgentUser(m));
+                                                const hasAgentConfigs = bAgents.length > 0;
+                                                const hasAnyMembers = humanMembers.length > 0 || activeAgentMembers.length > 0 || bAgents.length > 0;
+                                                const isExpanded = expandedBoardId === board.id;
+
+                                                const enabledAgents = hasAgentConfigs ? bAgents.filter(a => a.enabled).length : activeAgentMembers.length;
+
+                                                return (
+                                                    <React.Fragment key={board.id}>
+                                                        <tr className={`hover:bg-muted/10 transition-colors ${isExpanded ? 'bg-muted/10' : ''}`}>
+                                                            <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{board.id}</td>
+                                                            <td className="px-3 py-2 font-medium">{board.name}</td>
+                                                            <td className="px-3 py-2">
+                                                                {board.isTrial && (
+                                                                    <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600">
+                                                                        <FlaskConical className="size-2.5" /> Trial
+                                                                    </Badge>
+                                                                )}
+                                                                {board.odinInitialized ? (
+                                                                    <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-emerald-600 border-emerald-300 dark:text-emerald-400 dark:border-emerald-600 whitespace-nowrap">
+                                                                        <CheckCircle2 className="size-2.5" /> Initialized
+                                                                    </Badge>
+                                                                ) : board.workingDir ? (
+                                                                    <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600 whitespace-nowrap">
+                                                                        <AlertCircle className="size-2.5" /> Not Init
+                                                                    </Badge>
+                                                                ) : null}
+                                                            </td>
+                                                            <td className="px-3 py-2 text-muted-foreground">{board.taskCount ?? 0}</td>
+                                                            <td className="px-3 py-2 text-muted-foreground">{board.memberCount ?? boardMembers.length}</td>
+                                                            <td className="px-3 py-2 text-muted-foreground">{enabledAgents}</td>
+                                                            <td className="px-3 py-2 text-center">
+                                                                <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setManagingBoard(board)}>
+                                                                    <Users className="size-3.5 mr-1.5" /> Manage
+                                                                </Button>
+                                                            </td>
+                                                            <td className="px-3 py-2 text-center">
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className={`h-7 px-2 ${isExpanded ? 'bg-muted' : ''}`}
+                                                                    onClick={() => setExpandedBoardId(isExpanded ? null : board.id)}
+                                                                >
+                                                                    <FileText className="size-3.5 mr-1" /> View
+                                                                </Button>
+                                                            </td>
+                                                            <td className="px-3 py-2">
+                                                                <Popover>
+                                                                    <PopoverTrigger asChild>
+                                                                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 ml-auto flex">
+                                                                            <MoreVertical className="size-4" />
+                                                                        </Button>
+                                                                    </PopoverTrigger>
+                                                                    <PopoverContent align="end" className="w-56 p-1">
+                                                                        {board.workingDir && !board.odinInitialized && (
+                                                                            <Button
+                                                                                variant="ghost"
+                                                                                size="sm"
+                                                                                className="w-full justify-start gap-2"
+                                                                                disabled={initializingBoard === board.id}
+                                                                                onClick={() => handleInitOdin(board)}
+                                                                            >
+                                                                                <Zap className="size-4" />
+                                                                                {initializingBoard === board.id ? 'Initializing...' : 'Initialize Odin'}
+                                                                            </Button>
+                                                                        )}
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            className="w-full justify-start gap-2"
+                                                                            onClick={() => navigate(`/reflections?board=${board.id}`)}
+                                                                        >
+                                                                            <Sparkles className="size-4" /> Reflections
+                                                                        </Button>
+                                                                        <div className="h-px bg-border my-1 mx-2" />
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                            onClick={() => setBoardToClear(board)}
+                                                                        >
+                                                                            <Trash2 className="size-4" /> Clear Board
+                                                                        </Button>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                            onClick={() => { setBoardToDelete(board); setDeleteConfirmStep(1); setDeleteConfirmName(''); }}
+                                                                        >
+                                                                            <Trash2 className="size-4" /> Delete Board
+                                                                        </Button>
+                                                                    </PopoverContent>
+                                                                </Popover>
+                                                            </td>
+                                                        </tr>
+                                                        {isExpanded && (
+                                                            <tr className="bg-muted/20 border-b border-border">
+                                                                <td colSpan={9} className="p-0">
+                                                                    <div className="p-4 flex gap-6 text-sm flex-col">
+                                                                        <div className="flex gap-2">
+                                                                            <FolderOpen className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                                                                            <div>
+                                                                                <div className="font-medium mb-0.5">Project Directory</div>
+                                                                                {board.workingDir ? (
+                                                                                    <div className="text-xs font-mono text-foreground/80">{board.workingDir}</div>
+                                                                                ) : (
+                                                                                    <div className="text-xs text-muted-foreground/60">No project directory set</div>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {hasAnyMembers && (
+                                                                            <div className={"grid grid-cols-[100px_1fr] gap-4 items-start"}>
+                                                                                <div className="font-medium text-xs text-muted-foreground uppercase tracking-wider mt-1">People</div>
+                                                                                {humanMembers.length === 0 ? (
+                                                                                    <span className="text-xs text-muted-foreground/60 mt-1">None</span>
+                                                                                ) : (
+                                                                                    <div className="flex flex-wrap gap-1.5">
+                                                                                        {humanMembers.map(member => (
+                                                                                            <div key={member.id} className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-background border border-border">
+                                                                                                <div className="size-4 rounded-full flex items-center justify-center text-[8px] font-medium text-white shrink-0" style={{ backgroundColor: member.color }}>
+                                                                                                    {member.initials}
+                                                                                                </div>
+                                                                                                <span className="text-xs">{member.fullName}</span>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                )}
+
+                                                                                <div className="font-medium text-xs text-muted-foreground uppercase tracking-wider mt-1">Agents</div>
+                                                                                {hasAgentConfigs ? (
+                                                                                    <div className="flex flex-wrap gap-1.5">
+                                                                                        {bAgents.map(agent => (
+                                                                                            <div key={agent.name} className={`flex items-center gap-1.5 px-2 py-1 rounded-full border ${agent.enabled ? 'bg-blue-500/10 border-blue-300/30' : 'bg-background border-border opacity-50'}`}>
+                                                                                                <Bot className={`size-3 ${agent.enabled ? 'text-blue-500' : 'text-muted-foreground/50'}`} />
+                                                                                                <span className={`text-xs ${agent.enabled ? '' : 'text-muted-foreground line-through'}`}>{agent.name}</span>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                ) : activeAgentMembers.length > 0 ? (
+                                                                                    <div className="flex flex-wrap gap-1.5">
+                                                                                        {activeAgentMembers.map(member => (
+                                                                                            <div key={member.id} className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-500/10 border border-blue-300/30">
+                                                                                                <Bot className="size-3 text-blue-500" />
+                                                                                                <span className="text-xs">{member.fullName}</span>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <span className="text-xs text-muted-foreground/60 mt-1">None</span>
+                                                                                )}
+                                                                            </div>
+                                                                        )}
+                                                                        <div className="flex gap-2">
+                                                                            <Sparkles className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                                                                            <div className="flex-1">
+                                                                                <div className="font-medium mb-2">Reflection Settings</div>
+                                                                                <div className="flex flex-col gap-3">
+                                                                                    <div className="flex items-center justify-between">
+                                                                                        <span className="text-xs text-muted-foreground">Skip reflection for all tasks in this board</span>
+                                                                                        <Switch
+                                                                                            checked={!!board.skipReflection}
+                                                                                            onCheckedChange={v => handleUpdateBoardReflection(board.id, { skip_reflection: v })}
+                                                                                        />
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <Select
+                                                                                            value={reflectionModelEdits[board.id] !== undefined ? reflectionModelEdits[board.id] : (board.reflectionModel || '')}
+                                                                                            onValueChange={val => {
+                                                                                                setReflectionModelEdits(prev => ({ ...prev, [board.id]: val }));
+                                                                                                handleUpdateBoardReflection(board.id, { reflection_model: val });
+                                                                                            }}
+                                                                                        >
+                                                                                            <SelectTrigger className="h-7 text-xs font-mono flex-1">
+                                                                                                <SelectValue placeholder="claude-sonnet-4-5-20250929" />
+                                                                                            </SelectTrigger>
+                                                                                            <SelectContent>
+                                                                                                {allModels.map(m => (
+                                                                                                    <SelectItem key={m.name} value={m.name}>
+                                                                                                        <span className="font-mono">{m.name}</span>
+                                                                                                    </SelectItem>
+                                                                                                ))}
+                                                                                            </SelectContent>
+                                                                                        </Select>
+                                                                                        <span className="text-xs text-muted-foreground whitespace-nowrap">Reflection model</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex gap-2">
+                                                                            <FileText className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                                                                            <div className="flex-1">
+                                                                                <div className="font-medium mb-2">Proof Settings</div>
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <span className="text-xs text-muted-foreground">Skip proof for all tasks in this board</span>
+                                                                                    <Switch
+                                                                                        checked={!!(board as Board & { skipProof?: boolean }).skipProof}
+                                                                                        onCheckedChange={v => handleUpdateBoardProof(board.id, v)}
+                                                                                    />
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Pagination Controls */}
+                        {totalFiltered > PAGE_SIZE && (
+                            <div className="flex items-center justify-between mt-4">
+                                <div className="text-xs text-muted-foreground">
+                                    Showing {Math.min((currentPage - 1) * PAGE_SIZE + 1, totalFiltered)}–{Math.min(currentPage * PAGE_SIZE, totalFiltered)} of {totalFiltered} board{totalFiltered !== 1 ? 's' : ''}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8"
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                    >
+                                        Previous
+                                    </Button>
+                                    <div className="flex items-center gap-1 px-2">
+                                        {Array.from({ length: totalPages }).map((_, i) => (
+                                            <Button
+                                                key={i + 1}
+                                                variant={currentPage === i + 1 ? 'default' : 'ghost'}
+                                                size="sm"
+                                                className="h-8 w-8 p-0"
+                                                onClick={() => setCurrentPage(i + 1)}
+                                            >
+                                                {i + 1}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8"
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                    >
+                                        Next
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
                     </div>
-                )}
-            </div>
+                </TabsContent>
+
+                {/* ── IDE & Tools Tab ── */}
+                <TabsContent value="ide" className="mt-0">
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <SettingsIcon className="size-4 text-muted-foreground" />
+                                    <div>
+                                        <CardTitle className="text-base">IDE Configuration</CardTitle>
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                            Choose the IDE used by Open Project for Odin-initialized board roots.
+                                        </p>
+                                    </div>
+                                </div>
+                                <Button variant="outline" size="sm" onClick={() => setShowIdeSetup(true)}>
+                                    {preferredIde ? 'Change IDE' : 'Configure IDE'}
+                                </Button>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {loadingIdeOptions ? (
+                                <div className="text-xs text-muted-foreground">Detecting supported IDEs...</div>
+                            ) : detectedIdes.length === 0 ? (
+                                <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
+                                    No supported IDEs detected. Install or expose one of these CLIs on this machine: Cursor, VS Code, Zed.
+                                </div>
+                            ) : preferredIde ? (
+                                <div className="flex items-center gap-3">
+                                    <IdeBadge ide={preferredIde} />
+                                    <span className="text-xs text-muted-foreground">Configured for Open Project</span>
+                                </div>
+                            ) : (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {detectedIdes.map(ide => <IdeBadge key={ide.id} ide={ide} muted />)}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* ── Appearance Tab ── */}
+                <TabsContent value="appearance" className="mt-0">
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <CardTitle className="text-base">Theme</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="size-10 rounded-md bg-muted flex items-center justify-center">
+                                        {dark ? <Sun className="size-5" /> : <Moon className="size-5" />}
+                                    </div>
+                                    <div>
+                                        <div className="font-medium">Theme</div>
+                                        <div className="text-sm text-muted-foreground">
+                                            Toggle between light and dark mode
+                                        </div>
+                                    </div>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-2"
+                                    onClick={onToggleDark}
+                                >
+                                    {dark ? (
+                                        <>
+                                            <Sun className="size-4" />
+                                            <span>Light Mode</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Moon className="size-4" />
+                                            <span>Dark Mode</span>
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* ── Notifications Tab ── */}
+                <TabsContent value="notifications" className="mt-0">
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <div className="flex items-center gap-2">
+                                <Bell className="size-4 text-muted-foreground" />
+                                <CardTitle className="text-base">Notification Preferences</CardTitle>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <NotificationSettings />
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* ── Shortcuts Tab ── */}
+                <TabsContent value="shortcuts" className="mt-0">
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <div className="flex items-center gap-2">
+                                <Keyboard className="size-4 text-muted-foreground" />
+                                <CardTitle className="text-base">Available Shortcuts</CardTitle>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <KeyboardShortcutsContent />
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+            </Tabs>
+
+            {/* ── Dialogs (rendered outside tabs) ── */}
 
             {/* Clear Board Confirmation */}
             <AlertDialog open={!!boardToClear} onOpenChange={(open) => !open && setBoardToClear(null)}>
@@ -922,55 +1105,6 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                 </AlertDialogContent>
             </AlertDialog>
 
-            {/* Appearance Section */}
-            <div id="appearance" className="mt-8">
-                <h2 className="text-lg font-semibold mb-4">Appearance</h2>
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="size-10 rounded-md bg-muted flex items-center justify-center">
-                                    {dark ? <Sun className="size-5" /> : <Moon className="size-5" />}
-                                </div>
-                                <div>
-                                    <div className="font-medium">Theme</div>
-                                    <div className="text-sm text-muted-foreground">
-                                        Toggle between light and dark mode
-                                    </div>
-                                </div>
-                            </div>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="gap-2"
-                                onClick={onToggleDark}
-                            >
-                                {dark ? (
-                                    <>
-                                        <Sun className="size-4" />
-                                        <span>Light Mode</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Moon className="size-4" />
-                                        <span>Dark Mode</span>
-                                    </>
-                                )}
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Keyboard Shortcuts Section */}
-
-
-            {/* Notification Settings */}
-            <div id="notifications" className="mt-8">
-                <h2 className="text-lg font-semibold mb-4">Notifications</h2>
-                <NotificationSettings />
-            </div>
-
             {/* Manage Members Modal */}
             {managingBoard && (
                 <ManageMembersModal
@@ -983,22 +1117,6 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                 />
             )}
 
-
-                        <div id="keyboard-shortcuts" className="mt-8">
-                <h2 className="text-lg font-semibold mb-4">Keyboard Shortcuts</h2>
-                <Card>
-                    <CardHeader className="pb-3">
-                        <div className="flex items-center gap-2">
-                            <Keyboard className="size-4 text-muted-foreground" />
-                            <CardTitle className="text-base">Available Shortcuts</CardTitle>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <KeyboardShortcutsContent />
-                    </CardContent>
-                </Card>
-            </div>
-
             <IdeSetupModal
                 open={showIdeSetup}
                 onOpenChange={setShowIdeSetup}
@@ -1007,7 +1125,6 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                 saving={savingIde}
                 onSave={handleSaveIde}
             />
-
         </div>
     );
 }

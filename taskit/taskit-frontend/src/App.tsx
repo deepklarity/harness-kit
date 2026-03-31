@@ -762,18 +762,15 @@ function App() {
                         } />
                         <Route path="/notifications" element={<NotificationsPage />} />
                         <Route path="/settings" element={
-                            <>
-                                <SectionHeader title="Settings" />
-                                <SettingsView
-                                    members={members}
-                                    currentBoard={currentBoard}
-                                    onDataChange={() => setRefreshKey(k => k + 1)}
-                                    onCreateBoard={() => setShowCreateBoard(true)}
-                                    onDeleteBoard={handleDeleteBoard}
-                                    dark={dark}
-                                    onToggleDark={() => setDark(d => !d)}
-                                />
-                            </>
+                            <SettingsView
+                                members={members}
+                                currentBoard={currentBoard}
+                                onDataChange={() => setRefreshKey(k => k + 1)}
+                                onCreateBoard={() => setShowCreateBoard(true)}
+                                onDeleteBoard={handleDeleteBoard}
+                                dark={dark}
+                                onToggleDark={() => setDark(d => !d)}
+                            />
                         } />
                         <Route path="*" element={<Navigate to="/board" replace />} />
                     </Routes>
