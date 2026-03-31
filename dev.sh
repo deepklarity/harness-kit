@@ -119,6 +119,9 @@ PIDS+=($!)
 (cd "$FRONTEND_DIR" && npm run dev -- --port $FRONTEND_PORT) > "$LOG_DIR/frontend.log" 2>&1 &
 PIDS+=($!)
 
+# Kill stale celery workers from previous runs (crashed terminals, forgotten tabs, etc.)
+pkill -f "celery.*worker" 2>/dev/null && sleep 1 || true
+
 (cd "$BACKEND_DIR" && celery -A config worker --beat --loglevel=info --concurrency=3 --pool=prefork) > "$LOG_DIR/celery.log" 2>&1 &
 PIDS+=($!)
 
