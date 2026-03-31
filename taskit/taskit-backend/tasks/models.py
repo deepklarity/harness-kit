@@ -87,6 +87,7 @@ class Board(models.Model):
     timezone = models.CharField(max_length=64, default="UTC")
     odin_initialized = models.BooleanField(default=False)
     skip_reflection = models.BooleanField(default=False)
+    skip_proof = models.BooleanField(default=False)
     reflection_model = models.CharField(max_length=255, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

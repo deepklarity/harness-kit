@@ -64,6 +64,7 @@ interface HarnessBoard {
     timezone?: string;
     odin_initialized?: boolean;
     skip_reflection?: boolean;
+    skip_proof?: boolean;
     reflection_model?: string | null;
     member_ids?: number[];
     agents?: AgentConfig[];
@@ -131,6 +132,7 @@ interface HarnessTask {
     reference_images?: Array<Record<string, unknown>>;
     skip_reflection?: boolean;
     board_skip_reflection?: boolean;
+    board_skip_proof?: boolean;
     schedule_summary?: {
         id: number;
         kind: 'ONE_TIME' | 'RECURRING';
@@ -465,6 +467,7 @@ export class HarnessTimeService implements IntegrationService {
                     modelName: task.model_name || undefined,
                     skipReflection: task.skip_reflection ?? false,
                     boardSkipReflection: task.board_skip_reflection ?? false,
+                    boardSkipProof: task.board_skip_proof ?? false,
                     commentCount: task.comment_count ?? 0,
                     estimatedCostUsd: task.estimated_cost_usd ?? undefined,
                     reflectionCostUsd: task.reflection_cost_usd ?? undefined,
@@ -497,6 +500,7 @@ export class HarnessTimeService implements IntegrationService {
                 totalActions: allTasks.reduce((sum, t) => sum + t.mutations.length, 0),
                 createdAt: b.created_at || new Date().toISOString(),
                 skipReflection: b.skip_reflection ?? false,
+                skipProof: b.skip_proof ?? false,
                 reflectionModel: b.reflection_model || null,
             });
         }
@@ -600,6 +604,7 @@ export class HarnessTimeService implements IntegrationService {
             dependsOn: raw.depends_on && raw.depends_on.length > 0 ? raw.depends_on : undefined,
             modelName: raw.model_name || undefined,
             skipReflection: raw.skip_reflection ?? false,
+            boardSkipProof: (raw as HarnessTask).board_skip_proof ?? false,
             commentCount: comments.length,
             estimatedCostUsd: raw.estimated_cost_usd ?? undefined,
             reflectionCostUsd: raw.reflection_cost_usd ?? undefined,
@@ -710,6 +715,7 @@ export class HarnessTimeService implements IntegrationService {
                 timezone: b.timezone || 'UTC',
                 odinInitialized: b.odin_initialized || false,
                 skipReflection: b.skip_reflection ?? false,
+                skipProof: b.skip_proof ?? false,
                 reflectionModel: b.reflection_model || null,
                 memberIds: boardMemberIds,
                 agents: (b as { agents?: AgentConfig[] }).agents,
@@ -1348,6 +1354,7 @@ export class HarnessTimeService implements IntegrationService {
             dependsOn: task.depends_on && task.depends_on.length > 0 ? task.depends_on : undefined,
             modelName: task.model_name || undefined,
             skipReflection: task.skip_reflection ?? false,
+            boardSkipProof: task.board_skip_proof ?? false,
             commentCount: task.comment_count ?? 0,
             estimatedCostUsd: task.estimated_cost_usd ?? undefined,
             reflectionCostUsd: task.reflection_cost_usd ?? undefined,

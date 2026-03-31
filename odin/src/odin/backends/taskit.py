@@ -382,6 +382,9 @@ class TaskItBackend(BoardBackend):
         if spec_odin_id and spec_pk:
             self._spec_pk_cache[spec_odin_id] = spec_pk
 
+        if data.get("board_skip_proof"):
+            metadata["board_skip_proof"] = True
+
         return Task(
             id=str(data["id"]),
             title=data["title"],

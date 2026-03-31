@@ -41,18 +41,27 @@ def build_reflection_prompt(task_context: dict, custom_prompt: str = "") -> str:
 """
 
     screenshot_section = ""
-    screenshot_paths = task_context.get("screenshot_paths", [])
-    if screenshot_paths:
-        screenshot_section = "\n## [CTX:screenshots] Proof Screenshots\n\n"
-        screenshot_section += (
-            "The agent submitted these screenshots as proof of work. "
-            "**Read each image file** and verify the screenshots actually show "
-            "the feature working correctly. Do NOT assume screenshots prove "
-            "correctness just because they exist — visually inspect them for "
-            "errors, broken UI, error messages, or missing functionality.\n\n"
-        )
-        for path in screenshot_paths:
-            screenshot_section += f"- {path}\n"
+    if task_context.get("skip_proof"):
+        screenshot_section = """
+## [CTX:proof] Proof Status
+
+Proof collection was **explicitly disabled** for this board.
+- Do NOT penalize for missing proof or screenshots
+- Judge the task on code quality, build results, and task completion only
+"""
+    else:
+        screenshot_paths = task_context.get("screenshot_paths", [])
+        if screenshot_paths:
+            screenshot_section = "\n## [CTX:screenshots] Proof Screenshots\n\n"
+            screenshot_section += (
+                "The agent submitted these screenshots as proof of work. "
+                "**Read each image file** and verify the screenshots actually show "
+                "the feature working correctly. Do NOT assume screenshots prove "
+                "correctness just because they exist — visually inspect them for "
+                "errors, broken UI, error messages, or missing functionality.\n\n"
+            )
+            for path in screenshot_paths:
+                screenshot_section += f"- {path}\n"
 
     return f"""You are auditing a task executed by an AI agent.
 
@@ -510,11 +519,15 @@ def reflect_task(
         }
 
         # Download proof screenshots so the reviewer can visually inspect them
-        screenshot_paths = _download_screenshots(
-            screenshot_urls, task_id, taskit_url, headers,
-        )
-        if screenshot_paths:
-            task_context["screenshot_paths"] = screenshot_paths
+        skip_proof = task_data.get("board_skip_proof", False)
+        if not skip_proof:
+            screenshot_paths = _download_screenshots(
+                screenshot_urls, task_id, taskit_url, headers,
+            )
+            if screenshot_paths:
+                task_context["screenshot_paths"] = screenshot_paths
+        else:
+            task_context["skip_proof"] = True
 
         # Log context sizes for verification
         context_sizes = {

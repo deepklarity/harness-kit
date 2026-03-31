@@ -111,6 +111,7 @@ export interface Task {
     modelName?: string;
     skipReflection?: boolean;
     boardSkipReflection?: boolean;
+    boardSkipProof?: boolean;
     commentCount?: number;
     estimatedCostUsd?: number | null;
     reflectionCostUsd?: number | null;
@@ -151,6 +152,7 @@ export interface Board {
     timezone?: string;
     odinInitialized?: boolean;
     skipReflection?: boolean;
+    skipProof?: boolean;
     reflectionModel?: string | null;
     memberIds: string[];
     agents?: AgentConfig[];

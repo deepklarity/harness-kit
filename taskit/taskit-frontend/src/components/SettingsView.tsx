@@ -148,9 +148,11 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
     // Current board reflection settings (top section)
     const [currentSkip, setCurrentSkip] = useState(currentBoard?.skipReflection ?? false);
     const [currentModel, setCurrentModel] = useState(currentBoard?.reflectionModel || '');
+    const [currentSkipProof, setCurrentSkipProof] = useState(currentBoard?.skipProof ?? false);
     useEffect(() => {
         setCurrentSkip(currentBoard?.skipReflection ?? false);
         setCurrentModel(currentBoard?.reflectionModel || '');
+        setCurrentSkipProof(currentBoard?.skipProof ?? false);
     }, [currentBoard?.id]);
 
     const allModels = useMemo(() => {
@@ -372,6 +374,28 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
         }
     };
 
+    const handleCurrentBoardProof = async (value: boolean) => {
+        if (!currentBoard) return;
+        setCurrentSkipProof(value);
+        try {
+            await service.updateBoard(currentBoard.id, { skip_proof: value });
+            toast({ title: 'Board updated' });
+        } catch {
+            setCurrentSkipProof(currentBoard.skipProof ?? false);
+            toast({ title: 'Error', description: 'Failed to update proof settings.', variant: 'destructive' });
+        }
+    };
+
+    const handleUpdateBoardProof = async (boardId: string, value: boolean) => {
+        try {
+            await service.updateBoard(boardId, { skip_proof: value });
+            setTableBoards(prev => prev.map(b => b.id === boardId ? { ...b, skipProof: value } : b));
+            toast({ title: 'Board updated' });
+        } catch {
+            toast({ title: 'Error', description: 'Failed to update board settings.', variant: 'destructive' });
+        }
+    };
+
     const isAgentUser = (member: Member) => member.email.endsWith('@odin.agent');
 
     return (
@@ -407,6 +431,23 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                                     ))}
                                 </SelectContent>
                             </Select>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {currentBoard && (
+                <div>
+                    <h3 className="text-sm font-medium text-muted-foreground mb-3">Proof Settings</h3>
+                    <div className="border border-border rounded-md p-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-sm font-medium">{currentBoard.name}</div>
+                                <div className="text-xs text-muted-foreground mt-0.5">Skip proof for all tasks in this board</div>
+                            </div>
+                            <Switch
+                                checked={currentSkipProof}
+                                onCheckedChange={v => handleCurrentBoardProof(v)}
+                            />
                         </div>
                     </div>
                 </div>
@@ -720,6 +761,19 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                                                                                 </Select>
                                                                                 <span className="text-xs text-muted-foreground whitespace-nowrap">Reflection model</span>
                                                                             </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex gap-2">
+                                                                    <FileText className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                                                                    <div className="flex-1">
+                                                                        <div className="font-medium mb-2">Proof Settings</div>
+                                                                        <div className="flex items-center justify-between">
+                                                                            <span className="text-xs text-muted-foreground">Skip proof for all tasks in this board</span>
+                                                                            <Switch
+                                                                                checked={!!(board as Board & { skipProof?: boolean }).skipProof}
+                                                                                onCheckedChange={v => handleUpdateBoardProof(board.id, v)}
+                                                                            />
                                                                         </div>
                                                                     </div>
                                                                 </div>

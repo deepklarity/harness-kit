@@ -69,6 +69,7 @@ class TaskSerializer(serializers.ModelSerializer):
     time_in_statuses = serializers.SerializerMethodField()
     reference_images = serializers.SerializerMethodField()
     board_skip_reflection = serializers.SerializerMethodField()
+    board_skip_proof = serializers.SerializerMethodField()
     schedule_summary = serializers.SerializerMethodField()
 
     class Meta:
@@ -79,7 +80,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "created_at", "last_updated_at", "labels", "kanban_position",
             "spec_id", "spec_odin_id", "depends_on",
             "complexity", "metadata", "model_name", "skip_reflection",
-            "board_skip_reflection",
+            "board_skip_reflection", "board_skip_proof",
             "estimated_cost_usd", "reflection_cost_usd", "usage", "time_in_statuses",
             "reference_images",
             "schedule_summary",
@@ -91,6 +92,9 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def get_board_skip_reflection(self, obj):
         return obj.board.skip_reflection if obj.board_id else False
+
+    def get_board_skip_proof(self, obj):
+        return obj.board.skip_proof if obj.board_id else False
 
     def get_usage(self, obj):
         from .execution_processing import compute_usage_from_trace
@@ -229,7 +233,7 @@ class BoardSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Board
-        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "skip_reflection", "reflection_model", "created_at", "updated_at", "member_ids", "agents"]
+        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "skip_reflection", "skip_proof", "reflection_model", "created_at", "updated_at", "member_ids", "agents"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_member_ids(self, obj):

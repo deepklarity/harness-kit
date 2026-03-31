@@ -2420,6 +2420,7 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         working_dir: Optional[str] = None,
         mcp_task_id: Optional[str] = None,
         mcps: Optional[List[str]] = None,
+        skip_proof: bool = False,
     ) -> str:
         """Append working directory, MCP guidance, and structured status envelope to a task prompt.
 
@@ -2434,6 +2435,28 @@ Write your final plan as a JSON array to: `{plan_path}`"""
 
         mcp_section = ""
         if mcp_task_id:
+            if skip_proof:
+                proof_step = (
+                    '4. **Proof**: Skip proof — proof collection is disabled for this board. '
+                    'Proceed directly to the ODIN-STATUS block.'
+                )
+                proof_rules = (
+                    'DO NOT post a separate "completed" status_update. '
+                    'Proof is disabled — output the ODIN-STATUS block after your build passes.'
+                )
+            else:
+                proof_step = (
+                    '4. **Proof**: call `taskit_add_comment` with comment_type="proof" and include:\n'
+                    '   - `file_paths`: list every file you created or modified\n'
+                    '   - A text summary describing what you did and how to verify it\n'
+                    '   - The build command you ran and its result (pass/fail)\n'
+                    '   THIS IS THE COMPLETION SIGNAL — a task without proof is incomplete and will be marked failed.'
+                )
+                proof_rules = (
+                    'DO NOT post a separate "completed" status_update. The proof comment IS your completion message.\n'
+                    'DO NOT skip step 3. You must call taskit_add_comment with comment_type="proof" before outputting ODIN-STATUS.'
+                )
+
             mcp_section = f"""
 
 ## TaskIt MCP Tools
@@ -2446,22 +2469,17 @@ You MUST follow this exact sequence — no steps may be skipped:
 1. **Start**: call `taskit_add_comment` with comment_type="status_update" — what you're about to do
 2. **Do your work** (write code, create files, etc.)
 3. **Build & verify**: run the project's build command (e.g. `npm run build`, `python -m py_compile`, `cargo build`) and confirm it succeeds with zero errors. If the build fails, fix the errors before proceeding. A task is NOT done until the build passes.
-4. **Proof**: call `taskit_add_comment` with comment_type="proof" and include:
-   - `file_paths`: list every file you created or modified
-   - A text summary describing what you did and how to verify it
-   - The build command you ran and its result (pass/fail)
-   THIS IS THE COMPLETION SIGNAL — a task without proof is incomplete and will be marked failed.
+{proof_step}
 5. Then output the ODIN-STATUS block below.
 
 If you are blocked and need human input, call `taskit_add_comment` with comment_type="question" — this pauses until a human replies.
 
-DO NOT post a separate "completed" status_update. The proof comment IS your completion message.
-DO NOT skip step 3. You must call taskit_add_comment with comment_type="proof" before outputting ODIN-STATUS.
+{proof_rules}
 
 """
 
         chrome_devtools_section = ""
-        if mcps and "chrome-devtools" in mcps:
+        if mcps and "chrome-devtools" in mcps and not skip_proof:
             chrome_devtools_section = """
 ## Chrome DevTools MCP — Visual Proof
 
@@ -2486,7 +2504,7 @@ You have access to browser automation via chrome-devtools-mcp (page navigation, 
 """
 
         mobile_section = ""
-        if mcps and "mobile" in mcps:
+        if mcps and "mobile" in mcps and not skip_proof:
             mobile_section = """
 ## Mobile MCP Tools
 
@@ -2919,10 +2937,13 @@ SUCCESS or FAILED
                     allowed.extend(claude_chrome_devtools_tool_names())
                 context["mcp_allowed_tools"] = allowed
 
+            skip_proof = bool(task_obj and task_obj.metadata.get("board_skip_proof"))
+
             wrapped = self._wrap_prompt(
                 prompt, working_dir,
                 mcp_task_id=task_id if mcp_available else None,
                 mcps=mcps if mcp_available else None,
+                skip_proof=skip_proof,
             )
 
             # Log effective input as debug comment for DAG debugging
@@ -2933,6 +2954,13 @@ SUCCESS or FAILED
                     content=f"Effective input (with upstream context):\n\n{wrapped[:8000]}",
                     attachments=["debug:effective_input"],
                 )
+
+                if skip_proof:
+                    self.task_mgr.add_comment(
+                        task_id=task_id,
+                        author="odin",
+                        content="Proof collection is disabled for this board. This task will not include screenshot proof or proof comments.",
+                    )
 
             # Try tmux-based execution for CLI harnesses
             try:
