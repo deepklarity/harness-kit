@@ -343,6 +343,10 @@ class Orchestrator:
             }
             self._update_spec_metadata(spec_id, updates)
 
+            # Transition all TESTING tasks to DONE in the backend
+            if self._backend and hasattr(self._backend, "finalize_spec_tasks"):
+                self._backend.finalize_spec_tasks(spec_id, pr_url)
+
         self._log.info("Finalized spec %s: pr_url=%s", spec_id, pr_url)
         return pr_url
 

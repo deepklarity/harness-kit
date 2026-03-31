@@ -40,7 +40,7 @@ from django.db import models, transaction
 from .dependencies import DepStatus, check_deps
 from .execution.utils import resolve_working_dir
 from .kanban_ordering import move_task
-from .models import Spec, Task, TaskComment, TaskHistory, TaskStatus
+from .models import Task, TaskComment, TaskHistory, TaskStatus
 from .scheduling import maybe_finalize_schedule_run
 from .utils.logger import setup_logger
 
@@ -630,7 +630,6 @@ def _advance_task_to_testing(task):
         "Advanced task %s from REVIEW → TESTING (post-merge)",
         task.id,
     )
-    _check_spec_ready_for_finalize(task)
 
 
 def _append_summary(log_file, task, exit_code):
@@ -773,12 +772,10 @@ def _remove_task_worktree(task):
         wt.remove_task_worktree(spec_id, str(task.id))
 
 
-COMPLETED_STATUSES = {TaskStatus.TESTING, TaskStatus.DONE}
-
-
 def _transition_spec_tasks_to_done(spec, pr_url):
     """Move all TESTING tasks in a spec to DONE with PR URL comment.
 
+    Called after the user creates a spec PR (via `odin spec finalize` or UI).
     Idempotent: only affects tasks still in TESTING.
     """
     from .models import CommentType
@@ -801,132 +798,11 @@ def _transition_spec_tasks_to_done(spec, pr_url):
             schedule_run=task.current_schedule_run,
             author_email="system@taskit",
             author_label="system",
-            content=f"Auto-finalized: PR {pr_url}",
+            content=f"Finalized: PR {pr_url}",
             comment_type=CommentType.STATUS_UPDATE,
         )
         maybe_finalize_schedule_run(task, TaskStatus.DONE)
-        logger.info("Task %s: TESTING → DONE (auto-finalize, pr=%s)", task.id, pr_url)
-
-
-def _check_spec_ready_for_finalize(task):
-    """Check if all spec tasks are complete and trigger auto-finalize if so.
-
-    Called at the end of _advance_task_to_testing(). Launches the
-    auto_finalize_spec Celery task asynchronously.
-    """
-    if not task.spec_id:
-        return
-
-    spec = task.spec
-    meta = spec.metadata or {}
-
-    # Already finalized
-    if meta.get("pr_url"):
-        return
-
-    # Opt-out
-    if meta.get("auto_finalize") is False:
-        return
-
-    total = Task.objects.filter(spec=spec).count()
-    completed = Task.objects.filter(spec=spec, status__in=COMPLETED_STATUSES).count()
-
-    if total > 0 and completed == total:
-        logger.info(
-            "All %d tasks complete for spec %s — triggering auto-finalize",
-            total, spec.id,
-        )
-        auto_finalize_spec.delay(spec.id)
-
-
-@shared_task(name="tasks.dag_executor.auto_finalize_spec")
-def auto_finalize_spec(spec_id):
-    """Auto-finalize a spec: clean up worktrees, create PR, transition tasks to DONE."""
-    from .models import SpecComment, CommentType
-
-    try:
-        spec = Spec.objects.select_related("board").get(id=spec_id)
-    except Spec.DoesNotExist:
-        logger.error("auto_finalize_spec: Spec %s not found", spec_id)
-        return
-
-    meta = spec.metadata or {}
-
-    # Idempotency: already finalized
-    if meta.get("pr_url"):
-        logger.info("Spec %s already has pr_url, skipping auto-finalize", spec_id)
-        return
-
-    # Re-verify all tasks are still complete (race guard)
-    total = Task.objects.filter(spec=spec).count()
-    completed = Task.objects.filter(spec=spec, status__in=COMPLETED_STATUSES).count()
-    if total == 0 or completed < total:
-        logger.warning(
-            "auto_finalize_spec: spec %s not fully complete (%d/%d), aborting",
-            spec_id, completed, total,
-        )
-        return
-
-    # Build task summaries for PR body
-    tasks = Task.objects.filter(spec=spec).order_by("id")
-    task_summaries = [f"#{t.id} — {t.title} ({t.status})" for t in tasks]
-
-    pr_url = None
-    try:
-        # Get a representative task for WorktreeManager resolution
-        sample_task = tasks.first()
-        if sample_task:
-            wt = _get_worktree_manager(sample_task)
-        else:
-            wt = None
-
-        if wt:
-            wt.finalize_spec(spec.odin_id)
-            pr_url = wt.create_spec_pr(spec.odin_id, spec.title, task_summaries)
-        else:
-            logger.warning("auto_finalize_spec: no WorktreeManager for spec %s", spec_id)
-    except Exception:
-        logger.exception("auto_finalize_spec: PR creation failed for spec %s", spec_id)
-        SpecComment.objects.create(
-            spec=spec,
-            author_email="system@taskit",
-            author_label="system",
-            content="Auto-finalize failed: could not create PR. Tasks remain in TESTING. "
-                    "Run `odin spec finalize` manually to retry.",
-            comment_type=CommentType.STATUS_UPDATE,
-        )
-        return
-
-    # Update spec metadata
-    from datetime import datetime, timezone as dt_tz
-    meta = dict(spec.metadata or {})
-    meta["finalized_by"] = "auto_finalize"
-    meta["finalized_at"] = datetime.now(dt_tz.utc).isoformat()
-    if pr_url:
-        meta["pr_url"] = pr_url
-    spec.metadata = meta
-    spec.save(update_fields=["metadata"])
-
-    if pr_url:
-        SpecComment.objects.create(
-            spec=spec,
-            author_email="system@taskit",
-            author_label="system",
-            content=f"Auto-finalized: PR created at {pr_url}",
-            comment_type=CommentType.STATUS_UPDATE,
-        )
-        _transition_spec_tasks_to_done(spec, pr_url)
-        logger.info("auto_finalize_spec: spec %s finalized, pr=%s", spec_id, pr_url)
-    else:
-        SpecComment.objects.create(
-            spec=spec,
-            author_email="system@taskit",
-            author_label="system",
-            content="Auto-finalize completed but no PR was created (gh CLI may not be available). "
-                    "Tasks remain in TESTING.",
-            comment_type=CommentType.STATUS_UPDATE,
-        )
-        logger.warning("auto_finalize_spec: spec %s finalized but no PR URL", spec_id)
+        logger.info("Task %s: TESTING → DONE (finalize, pr=%s)", task.id, pr_url)
 
 
 def _classify_failure(exit_code: int, failure_stage: str, excerpt: str) -> tuple[str, str]:
