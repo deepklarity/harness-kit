@@ -431,14 +431,14 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                 <TabsList variant="line" className="min-w-[180px] border-r border-border pr-4 shrink-0 self-start sticky top-6">
                     <TabsTrigger value="board" className="gap-2 justify-start px-3 py-2">
                         <Sparkles className="size-4" />
-                        <span>Board</span>
+                        <span>Current Board</span>
                         {currentBoard && (
                             <span className="ml-auto size-1.5 rounded-full bg-primary" />
                         )}
                     </TabsTrigger>
                     <TabsTrigger value="boards" className="gap-2 justify-start px-3 py-2">
                         <Layout className="size-4" />
-                        <span>Boards</span>
+                        <span>All Boards</span>
                     </TabsTrigger>
                     <TabsTrigger value="ide" className="gap-2 justify-start px-3 py-2">
                         <SettingsIcon className="size-4" />
