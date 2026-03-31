@@ -8,6 +8,8 @@ import { usePolling } from '../hooks/usePolling';
 import { playNotificationSound } from '../utils/notificationSound';
 import { toast } from '../hooks/use-toast';
 
+type IncomingNotificationListener = (notifications: Notification[]) => void;
+
 interface NotificationContextValue {
     notifications: Notification[];
     unreadCount: number;
@@ -23,6 +25,7 @@ interface NotificationContextValue {
     updatePreferences: (prefs: Partial<NotificationPreference>) => Promise<void>;
     enableDesktopNotifications: () => Promise<void>;
     disableDesktopNotifications: () => Promise<void>;
+    subscribeToIncoming: (listener: IncomingNotificationListener) => () => void;
 }
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -45,6 +48,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     const knownNotificationIdsRef = useRef<Set<number>>(new Set());
     const latestCreatedAtRef = useRef<string | null>(null);
+    const incomingListenersRef = useRef<Set<IncomingNotificationListener>>(new Set());
+
+    const subscribeToIncoming = useCallback((listener: IncomingNotificationListener) => {
+        incomingListenersRef.current.add(listener);
+        return () => { incomingListenersRef.current.delete(listener); };
+    }, []);
 
     const trackKnownNotifications = useCallback((items: Notification[]) => {
         if (items.length === 0) return;
@@ -157,6 +166,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
         if (preferences?.sound_enabled) {
             playNotificationSound(incoming[0].notification_type);
+        }
+
+        for (const listener of incomingListenersRef.current) {
+            try { listener(incoming); } catch { /* listener errors must not break notification flow */ }
         }
     }, [openNotificationTarget, preferences]);
 
@@ -282,6 +295,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
                 updatePreferences,
                 enableDesktopNotifications,
                 disableDesktopNotifications,
+                subscribeToIncoming,
             }}
         >
             {children}

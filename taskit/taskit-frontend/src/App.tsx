@@ -29,6 +29,7 @@ import { NotificationsPage } from './components/NotificationsPage';
 import { CommandPalette } from './components/CommandPalette';
 import { AnalyticsPage } from './components/analytics';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
+import { useTaskCardAutoRefresh } from '@/hooks/useTaskCardAutoRefresh';
 
 function pathToViewMode(pathname: string): ViewMode {
     const match = VIEW_ROUTES.find(r => r.path === pathname);
@@ -133,6 +134,7 @@ function App() {
     }), [navigate, searchParams]);
 
     useGlobalShortcuts(globalShortcutActions(), suppressSingleKeys);
+    useTaskCardAutoRefresh(selectedTask, setSelectedTask, service);
 
     const handleOpenCommandPalette = useCallback(() => {
         setCommandPaletteInitialQuery(undefined);
