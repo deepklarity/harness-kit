@@ -416,14 +416,29 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                                 </span>
                             </div>
                         )}
-                        <div className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground">Tokens</span>
-                            <span className="font-mono text-muted-foreground">
-                                {costSummary && costSummary.total_input_tokens > 0
-                                    ? `${formatTokens(costSummary.total_input_tokens)} in / ${formatTokens(costSummary.total_output_tokens)} out`
-                                    : '—'}
-                            </span>
-                        </div>
+                        {costSummary && costSummary.total_input_tokens > 0 ? (
+                            <div className="space-y-1 text-xs">
+                                <span className="text-muted-foreground">Tokens</span>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden flex">
+                                        <div
+                                            className="h-full bg-sky-400/70 rounded-l-full"
+                                            style={{ width: `${Math.round((costSummary.total_input_tokens / (costSummary.total_input_tokens + costSummary.total_output_tokens)) * 100)}%` }}
+                                        />
+                                        <div className="h-full bg-amber-400/70 flex-1 rounded-r-full" />
+                                    </div>
+                                </div>
+                                <div className="flex justify-between font-mono text-[10px] text-muted-foreground">
+                                    <span><span className="inline-block size-1.5 rounded-full bg-sky-400/70 mr-1 align-middle" />{formatTokens(costSummary.total_input_tokens)} in</span>
+                                    <span><span className="inline-block size-1.5 rounded-full bg-amber-400/70 mr-1 align-middle" />{formatTokens(costSummary.total_output_tokens)} out</span>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">Tokens</span>
+                                <span className="font-mono text-muted-foreground">—</span>
+                            </div>
+                        )}
                         {(costSummary?.tasks_with_unknown_cost ?? 0) > 0 && (
                             <div className="flex items-center justify-between text-xs">
                                 <span className="text-muted-foreground">Unknown</span>
@@ -439,8 +454,8 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                                     .sort(([, a], [, b]) => b - a)
                                     .map(([model, cost]) => (
                                         <div key={model} className="flex items-center justify-between text-xs">
-                                            <span className="font-mono text-muted-foreground">{shortModelName(model)}</span>
-                                            <span className="font-mono text-emerald-400">{formatCost(cost)}</span>
+                                            <span className="font-mono text-muted-foreground truncate mr-2">{shortModelName(model)}</span>
+                                            <span className="font-mono text-emerald-400 shrink-0">{formatCost(cost)}</span>
                                         </div>
                                     ))}
                             </>

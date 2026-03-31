@@ -16,7 +16,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Search, FileText, AlertTriangle, Eye, EyeOff, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, FileText, AlertTriangle, Eye, EyeOff, Trash2, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 
 interface SpecListViewProps {
     specs: Spec[];
@@ -158,6 +158,18 @@ export function SpecListView({ specs, onSpecClick, onDataChange }: SpecListViewP
                                 <div className="text-xs text-muted-foreground">
                                     Source: {spec.source}
                                 </div>
+                                {typeof spec.metadata?.pr_url === 'string' && (
+                                    <a
+                                        href={spec.metadata.pr_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 mt-1 transition-colors"
+                                    >
+                                        <ExternalLink className="size-3" />
+                                        View PR
+                                    </a>
+                                )}
                                 {spec.content && (
                                     <div className="text-xs text-muted-foreground mt-2 line-clamp-2">{spec.content}</div>
                                 )}

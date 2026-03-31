@@ -3203,6 +3203,42 @@ class SpecViewSet(viewsets.ModelViewSet):
             "finalized_at": refreshed_meta.get("finalized_at"),
         })
 
+    @action(detail=True, methods=["post"], url_path="finalize_tasks")
+    def finalize_tasks(self, request, pk=None):
+        """Transition all TESTING tasks to DONE after PR creation.
+
+        Called by odin orchestrator after creating the spec PR, or manually.
+        Accepts {"pr_url": "https://..."}.  Idempotent.
+        """
+        from .dag_executor import _transition_spec_tasks_to_done
+
+        spec = get_object_or_404(Spec, pk=pk)
+        pr_url = request.data.get("pr_url", "")
+        if not pr_url:
+            return Response(
+                {"error": "pr_url is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Update spec metadata
+        meta = dict(spec.metadata or {})
+        if not meta.get("pr_url"):
+            meta["pr_url"] = pr_url
+        if not meta.get("finalized_at"):
+            from datetime import datetime, timezone as dt_tz
+            meta["finalized_at"] = datetime.now(dt_tz.utc).isoformat()
+        if not meta.get("finalized_by"):
+            meta["finalized_by"] = "manual"
+        spec.metadata = meta
+        spec.save(update_fields=["metadata"])
+
+        _transition_spec_tasks_to_done(spec, pr_url)
+
+        return Response({
+            "status": "ok",
+            "pr_url": pr_url,
+        })
+
     @action(detail=True, methods=["get"])
     def commits(self, request, pk=None):
         """List commits on the spec branch since it diverged from main."""

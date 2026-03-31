@@ -17,7 +17,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Terminal, Trash2 } from 'lucide-react';
+import { ExternalLink, Plus, Terminal, Trash2 } from 'lucide-react';
 import { formatCost } from '@/utils/costEstimation';
 import { OdinGuideModal, OdinGuideContent } from '@/components/OdinGuideModal';
 import { FilterBar, MultiSelectFilter, PaginationControls, SearchBar, SortControl, DateRangeFilter } from '@/components/filters';
@@ -281,6 +281,18 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                                             <span className="text-violet-400">
                                                 +{formatCost(spec.costSummary?.reflection_cost_usd)} reflect
                                             </span>
+                                        )}
+                                        {typeof spec.metadata?.pr_url === 'string' && (
+                                            <a
+                                                href={spec.metadata.pr_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 transition-colors"
+                                            >
+                                                <ExternalLink className="size-2.5" />
+                                                View PR
+                                            </a>
                                         )}
                                     </div>
                                     <div className="text-xs text-muted-foreground line-clamp-2">{spec.content || 'No content'}</div>

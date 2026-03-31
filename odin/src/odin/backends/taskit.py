@@ -681,6 +681,30 @@ class TaskItBackend(BoardBackend):
         resp = self._client.delete(f"/specs/{taskit_id}/")
         return resp.status_code == 204
 
+    # -- Spec finalization --
+
+    def finalize_spec_tasks(self, spec_odin_id: str, pr_url: str) -> bool:
+        """Tell TaskIt to transition all TESTING tasks to DONE for a spec.
+
+        Called after PR creation to close the loop on spec tasks.
+        Returns True if the request succeeded.
+        """
+        taskit_pk = self._resolve_spec_pk(spec_odin_id)
+        if taskit_pk is None:
+            logger.warning("Cannot finalize spec tasks: spec %s not found", spec_odin_id)
+            return False
+        try:
+            resp = self._client.post(
+                f"/specs/{taskit_pk}/finalize_tasks/",
+                json={"pr_url": pr_url},
+            )
+            _raise_for_status(resp)
+            logger.info("Finalized spec tasks: spec=%s, pr_url=%s", spec_odin_id, pr_url)
+            return True
+        except Exception:
+            logger.exception("Failed to finalize spec tasks for %s", spec_odin_id)
+            return False
+
     # -- Label operations --
 
     def list_labels(self) -> List[dict]:
