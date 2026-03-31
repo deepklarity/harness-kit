@@ -74,6 +74,22 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
         return spec?.metadata?.worktree_path as string | undefined;
     }, [spec?.metadata]);
 
+    const hasAnyMergedTask = useMemo(() => {
+        return (spec?.tasks ?? []).some(t => {
+            const ms = (t.metadata as Record<string, unknown>)?.merge_status;
+            return ms === 'merged' || ms === 'noop';
+        });
+    }, [spec?.tasks]);
+
+    const mergeStatusSummary = useMemo(() => {
+        const tasks = spec?.tasks ?? [];
+        const merged = tasks.filter(t => {
+            const ms = (t.metadata as Record<string, unknown>)?.merge_status;
+            return ms === 'merged' || ms === 'noop';
+        }).length;
+        return { merged, total: tasks.length };
+    }, [spec?.tasks]);
+
     useEffect(() => {
         if (cachedSpec) {
             setSpec(cachedSpec);
@@ -265,47 +281,67 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                     {!(prUrl || createdPrUrl) && specBranch && (spec?.tasks?.length ?? 0) > 0 && (
                         <div className="flex flex-col gap-1.5 mt-2">
                             <div className="flex items-center gap-3">
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={isCreatingPr}
-                                    className="gap-1.5 text-xs border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                                    onClick={async () => {
-                                        if (!service.finalizeSpec) return;
-                                        setIsCreatingPr(true);
-                                        setPrError(null);
-                                        try {
-                                            const res = await service.finalizeSpec(specId);
-                                            if (res.pr_url) setCreatedPrUrl(res.pr_url);
-                                            const updated = await service.fetchSpecDetail!(specId);
-                                            setSpec(updated);
-                                        } catch (err) {
-                                            if (err instanceof ApiError) {
-                                                const body = err.body as Record<string, unknown> | undefined;
-                                                const msg = (body?.error as string) || err.message;
-                                                if (body?.pr_url) {
-                                                    setCreatedPrUrl(body.pr_url as string);
+                                <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={isCreatingPr || !hasAnyMergedTask}
+                                            className="gap-1.5 text-xs border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                                        >
+                                            {isCreatingPr ? (
+                                                <><Loader2 className="size-3 animate-spin" /> Creating PR...</>
+                                            ) : (
+                                                <><GitPullRequest className="size-3" /> {finalizedAt ? 'Retry PR' : 'Create PR'}</>
+                                            )}
+                                        </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Create Pull Request</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                                {mergeStatusSummary.merged}/{mergeStatusSummary.total} task branches merged into the spec branch.
+                                                This will finalize the spec and create a GitHub PR.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                            <AlertDialogAction onClick={async () => {
+                                                if (!service.finalizeSpec) return;
+                                                setIsCreatingPr(true);
+                                                setPrError(null);
+                                                try {
+                                                    const res = await service.finalizeSpec(specId);
+                                                    if (res.pr_url) setCreatedPrUrl(res.pr_url);
                                                     const updated = await service.fetchSpecDetail!(specId);
                                                     setSpec(updated);
-                                                } else {
-                                                    setPrError(msg);
+                                                } catch (err) {
+                                                    if (err instanceof ApiError) {
+                                                        const body = err.body as Record<string, unknown> | undefined;
+                                                        const msg = (body?.error as string) || err.message;
+                                                        if (body?.pr_url) {
+                                                            setCreatedPrUrl(body.pr_url as string);
+                                                            const updated = await service.fetchSpecDetail!(specId);
+                                                            setSpec(updated);
+                                                        } else {
+                                                            setPrError(msg);
+                                                        }
+                                                    } else {
+                                                        setPrError(err instanceof Error ? err.message : 'Failed to create PR');
+                                                    }
+                                                } finally {
+                                                    setIsCreatingPr(false);
                                                 }
-                                            } else {
-                                                setPrError(err instanceof Error ? err.message : 'Failed to create PR');
-                                            }
-                                        } finally {
-                                            setIsCreatingPr(false);
-                                        }
-                                    }}
-                                >
-                                    {isCreatingPr ? (
-                                        <><Loader2 className="size-3 animate-spin" /> Creating PR...</>
-                                    ) : (
-                                        <><GitPullRequest className="size-3" /> {finalizedAt ? 'Retry PR' : 'Create PR'}</>
-                                    )}
-                                </Button>
+                                            }}>Create PR</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
                                 <span className="text-[10px] text-muted-foreground/50">
-                                    {finalizedAt ? 'Spec finalized but no PR was created' : 'Merges task branches and creates a GitHub PR'}
+                                    {finalizedAt
+                                        ? 'Spec finalized but no PR was created'
+                                        : hasAnyMergedTask
+                                            ? `${mergeStatusSummary.merged}/${mergeStatusSummary.total} task branches merged \u2014 ready to create PR`
+                                            : 'Waiting for task branches to merge into spec branch'}
                                 </span>
                             </div>
                             {prError && (
