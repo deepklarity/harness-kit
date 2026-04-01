@@ -504,9 +504,13 @@ function App() {
         await service.createSchedule(payload);
         setRefreshKey(k => k + 1);
     };
-    const handleUpdateAssignees = async (taskId: string, memberIds: string[]) => {
+    const handleUpdateAssignees = async (taskId: string, memberIds: string[], defaultModel?: string) => {
         try {
             await service.updateTaskAssignees(taskId, memberIds);
+            // Update model atomically so the re-fetch below picks up both changes
+            if (defaultModel) {
+                await service.updateTask(taskId, { modelName: defaultModel } as Parameters<typeof service.updateTask>[1]);
+            }
             setRefreshKey(k => k + 1);
             if (selectedTask?.id === taskId) {
                 const detail = await service.fetchTaskDetail(taskId);

@@ -2,10 +2,11 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Task, Member, Label, TaskComment, TaskIdeOptions } from '../types';
 import { collectDownstreamTaskIds } from '../utils/dagUtils';
-import { formatDate, formatDuration, getStatusColor, formatMergeStatus, formatBranchDisplay, CopyButton, CopyableCommand } from '../utils/transformer';
+import { formatDate, formatDuration, getStatusColor, formatMergeStatus, formatBranchDisplay, CopyButton } from '../utils/transformer';
 import { parseActor } from '../services/harness/HarnessTimeService';
 import { CountdownTimer } from './CountdownTimer';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -31,7 +32,7 @@ import { MarkdownEditor } from './MarkdownEditor';
 import { TraceViewer } from './TraceViewer';
 import {
     Pencil, Search, Trash2, Eye, Code, FileText, FolderOpen,
-    GitBranch, Package, Terminal, User, ChevronRight,
+    GitBranch, Package, Terminal, User, ChevronRight, ChevronDown,
     HelpCircle, CornerDownRight, Send, ShieldCheck, Sparkles, Loader2,
     ZoomIn, ZoomOut, RotateCcw,
     Bot,
@@ -53,7 +54,7 @@ interface TaskDetailModalProps {
     allMembers: Member[];
     allTasks?: Task[];
     memberMap?: Map<string, Member>;
-    onUpdateAssignees: (taskId: string, memberIds: string[]) => void;
+    onUpdateAssignees: (taskId: string, memberIds: string[], defaultModel?: string) => void;
     onUpdateTask: (taskId: string, updates: Record<string, unknown>) => Promise<void> | void;
     onSelectTask?: (taskId: string) => void;
     availableStatuses: string[];
@@ -97,6 +98,7 @@ export function TaskDetailModal({
     const [showIdeSetup, setShowIdeSetup] = useState(false);
     const [savingIde, setSavingIde] = useState(false);
     const [openingProject, setOpeningProject] = useState(false);
+    const [openEditorDropdown, setOpenEditorDropdown] = useState(false);
 
     const [showAllHistory, setShowAllHistory] = useState(false);
     const [showAllComments, setShowAllComments] = useState(false);
@@ -371,7 +373,7 @@ export function TaskDetailModal({
     const preferredIde = ideOptions?.detected_ides.find(ide => ide.id === ideOptions.preferred_ide_id) || null;
     const routingReasoning = typeof task.metadata?.routing_reasoning === 'string' ? task.metadata.routing_reasoning : null;
 
-    const hasExecContext = !!(execContext.model || execContext.cwd || execContext.harness || execContext.branch || task.complexity || task.dependsOn?.length || task.currentStatus === 'TODO');
+    const hasExecContext = !!(execContext.cwd || execContext.harness || execContext.branch || task.complexity || task.dependsOn?.length || task.currentStatus === 'TODO');
 
     const canReflect = ['REVIEW', 'DONE', 'FAILED'].includes(task.currentStatus);
 
@@ -458,6 +460,20 @@ export function TaskDetailModal({
         }
     };
 
+    const handleOpenWorktree = () => {
+        const path = execContext.worktreePath || ideOptions?.project_root;
+        if (!path) return;
+        if (!ideOptions?.preferred_ide_id || !preferredIde) {
+            setShowIdeSetup(true);
+            return;
+        }
+        const uri = `${ideOptions.preferred_ide_id}://file${path}`;
+        const link = document.createElement('a');
+        link.href = uri;
+        link.click();
+        toast({ title: 'Editor opened', description: `Opened ${path} in ${preferredIde.label}.` });
+    };
+
     const startEditingAssignees = () => {
         if (isExecuting) {
             toast({ title: 'Task is executing', description: 'Stop the task before changing assignee.' });
@@ -472,7 +488,17 @@ export function TaskDetailModal({
             toast({ title: 'Task is executing', description: 'Stop the task before changing assignee.' });
             return;
         }
-        onUpdateAssignees(task.id, selectedAssignee ? [selectedAssignee] : []);
+        // Determine the new agent's default model so both updates happen atomically
+        let defaultModelName: string | undefined;
+        if (selectedAssignee) {
+            const newAssignee = allMembers.find(m => m.id === selectedAssignee);
+            const models = newAssignee?.availableModels || [];
+            if (models.length > 0) {
+                const defaultModel = models.find(m => m.is_default) || models[0];
+                defaultModelName = defaultModel.name;
+            }
+        }
+        onUpdateAssignees(task.id, selectedAssignee ? [selectedAssignee] : [], defaultModelName);
         setIsEditingAssignees(false);
     };
 
@@ -545,18 +571,48 @@ export function TaskDetailModal({
                         <CopyButton text={String(task.idShort)} />
                         <div className="flex-1" />
                     </div>
-                    {ideOptions?.project_root && (
+                    {(ideOptions?.project_root || execContext.worktreePath) && (
                         <div className="mb-3 flex items-center">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 gap-2 text-xs font-medium"
-                                onClick={handleOpenProject}
-                                disabled={openingProject || loadingIdeOptions}
-                            >
-                                <FolderOpen className="size-3.5" />
-                                {openingProject ? 'Opening...' : preferredIde ? `Open in ${preferredIde.label}` : 'Open Project'}
-                            </Button>
+                            <div className="flex">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={`h-8 gap-2 text-xs font-medium ${ideOptions?.project_root && execContext.worktreePath ? 'rounded-r-none border-r-0' : ''}`}
+                                    onClick={handleOpenWorktree}
+                                    disabled={openingProject || loadingIdeOptions}
+                                >
+                                    <FolderOpen className="size-3.5" />
+                                    {preferredIde ? `Open in ${preferredIde.label}` : 'Open in Editor'}
+                                </Button>
+                                {ideOptions?.project_root && execContext.worktreePath && (
+                                    <Popover open={openEditorDropdown} onOpenChange={setOpenEditorDropdown}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-8 px-1.5 rounded-l-none"
+                                                disabled={openingProject || loadingIdeOptions}
+                                            >
+                                                <ChevronDown className="size-3.5" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-1" align="start">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-8 gap-2 text-xs font-medium w-full justify-start"
+                                                onClick={() => {
+                                                    setOpenEditorDropdown(false);
+                                                    handleOpenProject();
+                                                }}
+                                            >
+                                                <FolderOpen className="size-3.5" />
+                                                Open project root
+                                            </Button>
+                                        </PopoverContent>
+                                    </Popover>
+                                )}
+                            </div>
                         </div>
                     )}
                     {editingField === 'title' ? (
@@ -671,14 +727,6 @@ export function TaskDetailModal({
                                 </div>
                             )}
 
-                            {/* Suggested odin commands on failure */}
-                            {task.currentStatus === 'FAILED' && (
-                                <div className="space-y-1 mb-1">
-                                    <CopyableCommand command={`odin exec ${task.idShort}`} />
-                                    <CopyableCommand command="odin logs debug" />
-                                    {execContext.cwd && <CopyableCommand command={`cd ${execContext.cwd}`} />}
-                                </div>
-                            )}
 
                             {/* Pending Question Banner */}
                             {!!task.metadata?.has_pending_question && (
@@ -741,7 +789,7 @@ export function TaskDetailModal({
                                                     const isAgent = (m: Member) => m.role === 'AGENT' || m.email.endsWith('@odin.agent');
                                                     const humans = filteredMembers.filter(m => !isAgent(m));
                                                     const agents = filteredMembers.filter(m => isAgent(m));
-                                                    
+
                                                     const renderItem = (member: Member) => {
                                                         const isSelected = selectedAssignee === member.id;
                                                         const isA = isAgent(member);
@@ -768,31 +816,68 @@ export function TaskDetailModal({
                                                     };
 
                                                     return (
-                                                        <div className="space-y-1">
-                                                            {humans.length > 0 && (
-                                                                <div>
-                                                                    <div className="text-[9px] font-bold text-muted-foreground px-1.5 py-0.5 uppercase tracking-wider">Team</div>
-                                                                    {humans.map(renderItem)}
-                                                                </div>
-                                                            )}
-                                                            {agents.length > 0 && (
-                                                                <div>
-                                                                    <div className="text-[9px] font-bold text-muted-foreground px-1.5 py-0.5 uppercase tracking-wider">Agents</div>
-                                                                    {agents.map(renderItem)}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })()}
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-2 justify-end mt-1.5">
-                                            <Button size="sm" variant="ghost" onClick={() => setIsEditingAssignees(false)} className="h-6 text-[10px] px-2">Cancel</Button>
-                                            <Button size="sm" onClick={handleSaveAssignees} className="h-6 text-[10px] px-2">Save</Button>
+                                                    <div className="space-y-1">
+                                                        {humans.length > 0 && (
+                                                            <div>
+                                                                <div className="text-[9px] font-bold text-muted-foreground px-1.5 py-0.5 uppercase tracking-wider">Team</div>
+                                                                {humans.map(renderItem)}
+                                                            </div>
+                                                        )}
+                                                        {agents.length > 0 && (
+                                                            <div>
+                                                                <div className="text-[9px] font-bold text-muted-foreground px-1.5 py-0.5 uppercase tracking-wider">Agents</div>
+                                                                {agents.map(renderItem)}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
-                                )}
+                                    <div className="flex gap-2 justify-end mt-1.5">
+                                        <Button size="sm" variant="ghost" onClick={() => setIsEditingAssignees(false)} className="h-6 text-[10px] px-2">Cancel</Button>
+                                        <Button size="sm" onClick={handleSaveAssignees} className="h-6 text-[10px] px-2">Save</Button>
+                                    </div>
+                                </div>
+                            )}
                             </CompactRow>
+
+                            {/* Model — directly below assignee so changes are visible */}
+                            {(assigneeModels.length > 0 || execContext.model) && (
+                                <CompactRow label="Model">
+                                    {assigneeModels.length > 0 ? (
+                                        <Select
+                                            value={execContext.model || ''}
+                                            onValueChange={(value) => {
+                                                if (isExecuting) {
+                                                    toast({ title: 'Task is executing', description: 'Stop the task before changing model.' });
+                                                    return;
+                                                }
+                                                onUpdateTask(task.id, { modelName: value });
+                                            }}
+                                            disabled={isExecuting}
+                                        >
+                                            <SelectTrigger className="h-6 text-[10px] font-mono w-full !whitespace-nowrap overflow-hidden">
+                                                <SelectValue placeholder="Select model..." />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {assigneeModels.map(m => (
+                                                    <SelectItem key={m.name} value={m.name}>
+                                                        <div>
+                                                            <span className="font-mono text-[11px]">{m.name}</span>
+                                                            {m.description && (
+                                                                <span className="block text-[9px] text-muted-foreground leading-tight">{m.description}</span>
+                                                            )}
+                                                        </div>
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    ) : (
+                                        <span className="text-[11px] font-mono font-medium text-primary/80 truncate">{execContext.model}</span>
+                                    )}
+                                </CompactRow>
+                            )}
 
                             {/* Time Budget — inline */}
                             <CompactRow label="Time Budget">
@@ -848,7 +933,7 @@ export function TaskDetailModal({
                             </CompactRow>
 
                             {/* Branch & Merge — always visible */}
-                            <CompactRow label="Branch" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />}>
+                            <CompactRow label="Branch">
                                 <div className="flex items-center gap-1.5">
                                     <span className="text-xs font-mono truncate" title={execContext.branch || undefined}>{formatBranchDisplay(execContext.branch)}</span>
                                     {execContext.branch && <CopyButton text={execContext.branch} />}
@@ -868,7 +953,7 @@ export function TaskDetailModal({
                                 </div>
                             </CompactRow>
                             {execContext.worktreePath && (
-                                <CompactRow label="Worktree" icon={<FolderOpen className="size-2.5 text-muted-foreground/60" />}>
+                                <CompactRow label="Worktree">
                                     <div className="flex items-center gap-1.5">
                                         <span className="text-xs font-mono truncate" title={execContext.worktreePath}>{execContext.worktreePath}</span>
                                         <CopyButton text={execContext.worktreePath} />
@@ -878,81 +963,49 @@ export function TaskDetailModal({
 
                             {/* Diff stat — files changed by this task */}
                             {execContext.diffStat && (
-                                <CompactRow label="Changes" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />}>
-                                    <pre className="text-[10px] font-mono text-muted-foreground whitespace-pre-wrap">{execContext.diffStat}</pre>
-                                </CompactRow>
-                            )}
-
-                            {/* Dependencies — Blocked by and Blocks */}
-                            {task.dependsOn && task.dependsOn.length > 0 && (
-                                <CompactRow label="Blocked by">
-                                    <div className="flex flex-wrap gap-1">
-                                        {task.dependsOn.map(dep => {
-                                            const depTask = taskMap.get(dep);
-                                            return (
-                                                <button key={dep}
-                                                    className="flex items-center gap-1 text-[10px] bg-secondary/60 rounded-full px-2 py-0.5 hover:bg-secondary/80 transition-colors"
-                                                    onClick={() => depTask && onSelectTask?.(depTask.id)}>
-                                                    <span className="size-1.5 rounded-full" style={{ background: depTask ? getStatusColor(depTask.currentStatus) : 'var(--muted-foreground)' }} />
-                                                    <span className="font-mono">#{dep}</span>
-                                                    <span className="truncate max-w-[100px]">{depTask?.title || depTask?.name || ''}</span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </CompactRow>
-                            )}
-
-                            {blockedTasks.length > 0 && (
-                                <CompactRow label="Blocks">
-                                    <div className="flex flex-wrap gap-1">
-                                        {blockedTasks.map(bt => (
-                                            <button key={bt.id}
-                                                className="flex items-center gap-1 text-[10px] bg-secondary/60 rounded-full px-2 py-0.5 hover:bg-secondary/80 transition-colors"
-                                                onClick={() => onSelectTask?.(bt.id)}>
-                                                <span className="size-1.5 rounded-full" style={{ background: getStatusColor(bt.currentStatus) }} />
-                                                <span className="font-mono">#{bt.idShort}</span>
-                                                <span className="truncate max-w-[100px]">{bt.title || bt.name || ''}</span>
-                                            </button>
-                                        ))}
-                                    </div>
+                                <CompactRow label="Changes">
+                                    <pre className="text-[10px] font-mono text-muted-foreground whitespace-pre-wrap overflow-hidden max-w-full">{
+                                        execContext.diffStat.replace(/[+-]{21,}/g, m => {
+                                            const plus = (m.match(/\+/g) || []).length;
+                                            const minus = (m.match(/-/g) || []).length;
+                                            const total = plus + minus;
+                                            const max = 20;
+                                            const p = Math.round((plus / total) * max);
+                                            const mn = max - p;
+                                            return '+'.repeat(p) + '-'.repeat(mn);
+                                        })
+                                    }</pre>
                                 </CompactRow>
                             )}
 
                             {task.scheduleSummary ? (
                                 <div className="py-2 border-b border-border/30">
-                                    <div className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-semibold mb-2">Scheduling</div>
-                                    <div className="space-y-1 text-xs">
-                                        <div className="flex items-center justify-between gap-3">
-                                            <span className="text-muted-foreground">Mode</span>
-                                            <span className="font-mono">{task.scheduleSummary.kind}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-3">
-                                            <span className="text-muted-foreground">Schedule Status</span>
-                                            <span className="font-mono">{task.scheduleSummary.status}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-3">
-                                            <span className="text-muted-foreground">Timezone</span>
-                                            <span className="font-mono">{task.scheduleSummary.timezone}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-3">
-                                            <span className="text-muted-foreground">Next Run</span>
-                                            <span className="font-mono">{task.scheduleSummary.next_run_at_utc ? formatDate(task.scheduleSummary.next_run_at_utc) : '\u2014'}</span>
-                                        </div>
-                                        {task.scheduleRuns && task.scheduleRuns.length > 0 ? (
-                                            <div className="pt-2 border-t border-border/30">
-                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">Recent Schedule Runs</div>
-                                                <div className="space-y-1">
-                                                    {task.scheduleRuns.slice(0, 4).map(run => (
-                                                        <div key={run.id} className="flex items-center justify-between gap-3">
-                                                            <span className="text-muted-foreground">#{run.run_number}</span>
-                                                            <span className="font-mono text-[11px]">{run.status}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
+                                    <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70 mb-1 block">Scheduling</span>
+                                    <CompactRow label="Mode" noBorder>
+                                        <span className="text-xs font-mono">{task.scheduleSummary.kind}</span>
+                                    </CompactRow>
+                                    <CompactRow label="Status" noBorder>
+                                        <span className="text-xs font-mono">{task.scheduleSummary.status}</span>
+                                    </CompactRow>
+                                    <CompactRow label="Timezone" noBorder>
+                                        <span className="text-xs font-mono">{task.scheduleSummary.timezone}</span>
+                                    </CompactRow>
+                                    <CompactRow label="Next Run" noBorder>
+                                        <span className="text-xs font-mono">{task.scheduleSummary.next_run_at_utc ? formatDate(task.scheduleSummary.next_run_at_utc) : '\u2014'}</span>
+                                    </CompactRow>
+                                    {task.scheduleRuns && task.scheduleRuns.length > 0 ? (
+                                        <div className="pt-2 border-t border-border/30">
+                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">Recent Schedule Runs</div>
+                                            <div className="space-y-1">
+                                                {task.scheduleRuns.slice(0, 4).map(run => (
+                                                    <div key={run.id} className="flex items-center justify-between gap-3">
+                                                        <span className="text-muted-foreground text-xs">#{run.run_number}</span>
+                                                        <span className="font-mono text-xs">{run.status}</span>
+                                                    </div>
+                                                ))}
                                             </div>
-                                        ) : null}
-                                    </div>
+                                        </div>
+                                    ) : null}
                                 </div>
                             ) : null}
 
@@ -978,6 +1031,12 @@ export function TaskDetailModal({
                                                 {execMetrics.usage?.output_tokens != null ? execMetrics.usage.output_tokens.toLocaleString() : '\u2014'}
                                             </span>
                                         </div>
+                                        <div>
+                                            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-semibold block">Duration</span>
+                                            <span className="text-sm font-mono text-muted-foreground">
+                                                {execMetrics.durationMs != null ? `${(execMetrics.durationMs / 1000).toFixed(1)}s` : '\u2014'}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -986,42 +1045,11 @@ export function TaskDetailModal({
                             {hasExecContext && (
                                 <CollapsibleSection
                                     label="Execution Context"
-                                    icon={<Terminal className="size-3" />}
                                 >
-                                    {(execContext.model || assigneeModels.length > 0) && (
-                                        <CompactRow label="Model" icon={<Package className="size-2.5 text-muted-foreground/60" />} noBorder>
-                                            {assigneeModels.length > 0 ? (
-                                                <Select
-                                                    value={execContext.model || ''}
-                                                    onValueChange={(value) => {
-                                                        if (isExecuting) {
-                                                            toast({ title: 'Task is executing', description: 'Stop the task before changing model.' });
-                                                            return;
-                                                        }
-                                                        onUpdateTask(task.id, { modelName: value });
-                                                    }}
-                                                    disabled={isExecuting}
-                                                >
-                                                    <SelectTrigger className="h-6 text-[10px] font-mono">
-                                                        <SelectValue placeholder="Select model..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {assigneeModels.map(m => (
-                                                            <SelectItem key={m.name} value={m.name}>
-                                                                <span className="font-mono">{m.name}</span>
-                                                                {m.description && <span className="text-muted-foreground ml-1">— {m.description}</span>}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            ) : (
-                                                <span className="text-[11px] font-mono font-medium text-primary/80 truncate">{execContext.model}</span>
-                                            )}
-                                        </CompactRow>
-                                    )}
+                                    {/* Model is now shown next to Assignee above */}
 
                                     {task.currentStatus === 'TODO' && (
-                                        <CompactRow label="Skip reflection" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />} noBorder>
+                                        <CompactRow label="Skip reflection" noBorder>
                                             <div className="flex items-center gap-2">
                                                 <Switch
                                                     checked={!!task.skipReflection}
@@ -1034,26 +1062,20 @@ export function TaskDetailModal({
                                         </CompactRow>
                                     )}
                                     {routingReasoning && (
-                                        <CompactRow label="Routing" icon={<GitBranch className="size-2.5 text-muted-foreground/60" />} noBorder>
-                                            <span className="text-[10px] font-mono text-muted-foreground/80 leading-snug">{routingReasoning}</span>
+                                        <CompactRow label="Routing" noBorder>
+                                            <span className="text-xs text-muted-foreground leading-snug">{routingReasoning}</span>
                                         </CompactRow>
                                     )}
 
                                     {execContext.cwd && (
-                                        <CompactRow label="CWD" icon={<FolderOpen className="size-2.5 text-muted-foreground/60" />} noBorder>
+                                        <CompactRow label="CWD" noBorder>
                                             <div className="flex items-center gap-1.5">
-                                                <span className="text-[10px] font-mono text-muted-foreground break-all bg-secondary/50 px-1 py-0.5 rounded">{execContext.cwd}</span>
+                                                <span className="text-xs font-mono break-all">{execContext.cwd}</span>
                                                 <CopyButton text={execContext.cwd} />
                                             </div>
                                         </CompactRow>
                                     )}
 
-                                    <CompactRow label="Editor" icon={<Code className="size-2.5 text-muted-foreground/60" />} noBorder>
-                                        {execContext.worktreePath
-                                            ? <EditorLink cwd={execContext.worktreePath} />
-                                            : <span className="text-[10px] text-muted-foreground/50">{'\u2014'}</span>
-                                        }
-                                    </CompactRow>
 
                                     {execContext.harness && (
                                         <CompactRow label="Harness" noBorder>
@@ -1157,7 +1179,6 @@ export function TaskDetailModal({
                             {execMetrics.summary && (
                                 <CollapsibleSection
                                     label="Last Execution"
-                                    icon={<Terminal className="size-3" />}
                                 >
                                     <div className="space-y-1">
                                         <div className="flex items-center gap-1.5">
@@ -2068,11 +2089,10 @@ function CommentItem({ comment, onReply, replyComment }: {
 }
 
 /** Compact metadata row — label on left, value on right */
-function CompactRow({ label, icon, children, noBorder }: { label: string; icon?: React.ReactNode; children: React.ReactNode; noBorder?: boolean }) {
+function CompactRow({ label, children, noBorder }: { label: string; children: React.ReactNode; noBorder?: boolean }) {
     return (
         <div className={`flex items-start gap-2 py-1.5 ${noBorder ? '' : 'border-b border-border/30'}`}>
-            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-semibold shrink-0 w-[72px] pt-0.5 flex items-center gap-1">
-                {icon}
+            <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wider font-semibold shrink-0 w-20 pt-0.5">
                 {label}
             </span>
             <div className="flex-1 min-w-0">{children}</div>
@@ -2081,7 +2101,7 @@ function CompactRow({ label, icon, children, noBorder }: { label: string; icon?:
 }
 
 /** Collapsible section for secondary information */
-function CollapsibleSection({ label, icon, children, defaultOpen = true }: { label: string; icon?: React.ReactNode; children: React.ReactNode; defaultOpen?: boolean }) {
+function CollapsibleSection({ label, children, defaultOpen = true }: { label: string; children: React.ReactNode; defaultOpen?: boolean }) {
     const [isOpen, setIsOpen] = useState(defaultOpen);
     return (
         <div className="border-b border-border/30">
@@ -2090,7 +2110,6 @@ function CollapsibleSection({ label, icon, children, defaultOpen = true }: { lab
                 onClick={() => setIsOpen(!isOpen)}
             >
                 <ChevronRight className={`size-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                {icon}
                 {label}
             </button>
             {isOpen && (
@@ -2216,24 +2235,3 @@ function ExecutingTimer({ task }: { task: Task }) {
     );
 }
 
-function EditorLink({ cwd }: { cwd: string }) {
-    const [editor, setEditor] = useState<'cursor' | 'vscode'>(() => {
-        return (localStorage.getItem('preferred-editor') as 'cursor' | 'vscode') || 'cursor';
-    });
-    const toggle = () => {
-        const next = editor === 'cursor' ? 'vscode' : 'cursor';
-        localStorage.setItem('preferred-editor', next);
-        setEditor(next);
-    };
-    const uri = `${editor}://file${cwd}`;
-    return (
-        <div className="flex items-center gap-1.5">
-            <a href={uri} className="text-[10px] font-mono text-primary hover:underline truncate">
-                Open in {editor === 'cursor' ? 'Cursor' : 'VS Code'}
-            </a>
-            <button onClick={toggle} className="text-[9px] text-muted-foreground/50 hover:text-muted-foreground transition-colors" title="Switch editor">
-                ({editor === 'cursor' ? 'vsc' : 'cur'})
-            </button>
-        </div>
-    );
-}
