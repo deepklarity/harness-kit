@@ -121,19 +121,40 @@ class WorktreeManager:
         Copies (not symlinks) each path in AGENT_CONFIG_PATHS so that
         ``load_config()`` and agent CLIs find their settings inside the
         worktree checkout. Best-effort: logs on failure, never raises.
+
+        For directories that already exist (e.g. git checked out tracked
+        files), merges missing files from the source so that untracked
+        files like settings.local.json are not silently dropped.
         """
         for rel in AGENT_CONFIG_PATHS:
             src = self.project_root / rel
             dst = worktree_path / rel
-            if not src.exists() or dst.exists():
+            if not src.exists():
                 continue
             try:
-                dst.parent.mkdir(parents=True, exist_ok=True)
                 if src.is_dir():
-                    shutil.copytree(src, dst)
+                    if dst.exists():
+                        # Directory already exists (e.g. git created it with
+                        # tracked files). Copy individual missing files so
+                        # untracked files like settings.local.json get through.
+                        for src_file in src.rglob("*"):
+                            if not src_file.is_file():
+                                continue
+                            dst_file = dst / src_file.relative_to(src)
+                            if dst_file.exists():
+                                continue
+                            dst_file.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(src_file, dst_file)
+                            logger.debug("Merged config file %s → %s", src_file.relative_to(self.project_root), worktree_path)
+                    else:
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copytree(src, dst)
+                        logger.debug("Copied agent config %s → %s", rel, worktree_path)
                 else:
-                    shutil.copy2(src, dst)
-                logger.debug("Copied agent config %s → %s", rel, worktree_path)
+                    if not dst.exists():
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dst)
+                        logger.debug("Copied agent config %s → %s", rel, worktree_path)
             except OSError:
                 logger.debug("Failed to copy agent config %s to worktree", rel)
 
