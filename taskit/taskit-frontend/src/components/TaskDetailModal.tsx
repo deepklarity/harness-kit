@@ -1920,7 +1920,7 @@ function CommentItem({ comment, onReply, replyComment }: {
                     </>
                 )
             )}
-            {(traceData || failureDetails.failureDebug) && (
+            {(traceData || failureDetails.failureDebug) && !(!summary && isExecutionTraceAtt && traceText) && (
                 <div className="mt-2">
                     <button
                         className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground font-mono flex items-center gap-1 transition-colors"

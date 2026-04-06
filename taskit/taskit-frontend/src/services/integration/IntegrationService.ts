@@ -2,6 +2,8 @@ import type {
     AgentConfig,
     Board,
     DashboardData,
+    KanbanColumnsResponse,
+    KanbanLoadMoreResponse,
     Member,
     MemberListQuery,
     PaginatedResponse,
@@ -71,7 +73,8 @@ export interface IntegrationService {
     fetchSpecsPage(query: SpecListQuery): Promise<PaginatedResponse<Spec>>;
     fetchBoardsPage(query: { search?: string; sort?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Board>>;
     fetchTimelinePage(query: TimelineQuery): Promise<PaginatedResponse<Task>>;
-    fetchKanban(boardId?: string, query?: { date_from?: string; date_to?: string }): Promise<Task[]>;
+    fetchKanban(boardId?: string, query?: { date_from?: string; date_to?: string }): Promise<KanbanColumnsResponse>;
+    fetchKanbanMore(boardId: string, status: string, offset: number, limit: number, query?: { date_from?: string; date_to?: string }): Promise<KanbanLoadMoreResponse>;
     searchTasks(query: { q: string; scope: 'board' | 'global'; boardId?: string; limit?: number }): Promise<TaskSearchResult[]>;
     fetchSchedules(query?: { board?: string; status?: string[]; kind?: string[]; history?: boolean; q?: string; sort?: string; created_from?: string; created_to?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<TaskSchedule>>;
     createSchedule(payload: Record<string, unknown>): Promise<TaskSchedule>;

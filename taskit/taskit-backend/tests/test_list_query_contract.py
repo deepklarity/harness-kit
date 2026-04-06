@@ -172,11 +172,20 @@ class TestListQueryContract(APITestCase):
         returned_ids = {item["id"] for item in resp.data}
         self.assertIn(self.task_b.id, returned_ids)
 
-    def test_kanban_endpoint_returns_unpaginated_cards(self):
+    def test_kanban_endpoint_returns_grouped_columns(self):
         resp = self.client.get(f"/api/kanban/?board_id={self.board1.id}")
         self.assertEqual(resp.status_code, 200)
-        self.assertIsInstance(resp.data, list)
-        self.assertEqual(len(resp.data), 2)
+        self.assertIn("columns", resp.data)
+        columns = resp.data["columns"]
+        # task_a + task_prefix are TODO, task_b is IN_PROGRESS, task_spec_match is REVIEW
+        self.assertEqual(columns["TODO"]["total_count"], 2)
+        self.assertEqual(len(columns["TODO"]["tasks"]), 2)
+        self.assertEqual(columns["IN_PROGRESS"]["total_count"], 1)
+        self.assertEqual(len(columns["IN_PROGRESS"]["tasks"]), 1)
+        self.assertEqual(columns["REVIEW"]["total_count"], 1)
+        # All columns present
+        for status in ["BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "TESTING", "DONE", "FAILED"]:
+            self.assertIn(status, columns)
 
     def test_kanban_endpoint_supports_date_range(self):
         date_from = (timezone.now() - timedelta(days=7)).date().isoformat()
@@ -185,9 +194,9 @@ class TestListQueryContract(APITestCase):
             f"/api/kanban/?board_id={self.board1.id}&date_from={date_from}&date_to={date_to}"
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertIsInstance(resp.data, list)
-        self.assertEqual(len(resp.data), 1)
-        self.assertEqual(resp.data[0]["id"], self.task_b.id)
+        columns = resp.data["columns"]
+        self.assertEqual(columns["IN_PROGRESS"]["total_count"], 1)
+        self.assertEqual(columns["IN_PROGRESS"]["tasks"][0]["id"], self.task_b.id)
 
     def test_task_search_board_scope_matches_title_and_spec_title(self):
         resp = self.client.get(f"/api/tasks/search/?scope=board&board_id={self.board1.id}&q=alpha")

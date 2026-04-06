@@ -56,6 +56,10 @@ interface KanbanBoardProps {
     onTaskRename?: (taskId: string, newTitle: string) => Promise<void> | void;
     onDeleteTask?: (taskId: string) => void;
     memberMap?: Map<string, Member>;
+    columnTotalCounts?: Record<string, number>;
+    onLoadMore?: (status: string) => void;
+    onShowLess?: (status: string) => void;
+    loadingMore?: Record<string, boolean>;
 }
 
 const COLUMNS: { status: string; label: string; icon: LucideIcon; includeStatuses?: string[] }[] = [
@@ -235,6 +239,10 @@ function DroppableColumn({
     onTaskRename,
     onDeleteTask,
     allTasks,
+    totalCount,
+    onLoadMore,
+    onShowLess,
+    isLoadingMore,
 }: {
     column: typeof COLUMNS[0];
     tasks: Task[];
@@ -251,17 +259,20 @@ function DroppableColumn({
     onTaskRename?: (taskId: string, newTitle: string) => Promise<void> | void;
     onDeleteTask?: (taskId: string) => void;
     allTasks?: Task[];
+    totalCount?: number;
+    onLoadMore?: (status: string) => void;
+    onShowLess?: (status: string) => void;
+    isLoadingMore?: boolean;
 }) {
     const { setNodeRef } = useDroppable({
         id: column.status,
     });
-    const [showAll, setShowAll] = useState(false);
 
     const Icon = column.icon;
     const statusColor = getStatusColor(column.status);
     const isCollapsed = isFailed && failedCollapsed;
-    const displayTasks = showAll ? tasks : tasks.slice(0, COLUMN_TASK_LIMIT);
-    const hiddenTaskCount = tasks.length - displayTasks.length;
+    const displayCount = totalCount ?? tasks.length;
+    const hasMore = totalCount !== undefined && totalCount > tasks.length;
 
     return (
         <div className="flex-shrink-0 w-[280px]">
@@ -277,7 +288,7 @@ function DroppableColumn({
                             <span>{column.label}</span>
                         </div>
                         <div className="flex items-center gap-1">
-                            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{tasks.length}</Badge>
+                            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{displayCount}</Badge>
                             {isFailed && tasks.length > 0 && (
                                 <Button variant="ghost" size="icon" className="size-5"
                                     onClick={() => setFailedCollapsed(!failedCollapsed)}>
@@ -294,26 +305,27 @@ function DroppableColumn({
                         data-testid={`kanban-column-content-${column.status}`}
                     >
                         <div className="flex flex-col gap-2 p-1 min-h-full">
-                            <SortableContext items={displayTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                            <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
                                 {tasks.length === 0 && (
                                     <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground border-2 border-dashed border-border/40 rounded-lg bg-muted/10 mx-1 mb-1">
                                         Drop tasks here
                                     </div>
                                 )}
-                                {displayTasks.map(task => (
+                                {tasks.map(task => (
                                     <SortableTask key={task.id} task={task} onClick={onTaskClick} suppressClickUntil={suppressClickUntil} memberMap={memberMap}
                                         blockedByFailed={!!(failedTaskIds && task.dependsOn?.some(dep => failedTaskIds.has(dep)))} onRename={onTaskRename} onDelete={onDeleteTask} allTasks={allTasks} taskMap={taskMap} />
                                 ))}
                             </SortableContext>
-                            {hiddenTaskCount > 0 && (
+                            {hasMore && (
                                 <Button variant="ghost" size="sm" className="text-xs text-muted-foreground w-full"
-                                    onClick={() => setShowAll(true)}>
-                                    Show {hiddenTaskCount} more
+                                    disabled={isLoadingMore}
+                                    onClick={() => onLoadMore?.(column.status)}>
+                                    {isLoadingMore ? 'Loading...' : `Show ${totalCount! - tasks.length} more`}
                                 </Button>
                             )}
-                            {showAll && tasks.length > COLUMN_TASK_LIMIT && (
+                            {!hasMore && tasks.length > COLUMN_TASK_LIMIT && (
                                 <Button variant="ghost" size="sm" className="text-xs text-muted-foreground w-full"
-                                    onClick={() => setShowAll(false)}>
+                                    onClick={() => onShowLess?.(column.status)}>
                                     Show less
                                 </Button>
                             )}
@@ -325,7 +337,7 @@ function DroppableColumn({
     );
 }
 
-export function KanbanBoard({ tasks, allTasks = [], onTaskClick, onTaskMove, onStopExecution, onTaskRename, onDeleteTask, memberMap }: KanbanBoardProps) {
+export function KanbanBoard({ tasks, allTasks = [], onTaskClick, onTaskMove, onStopExecution, onTaskRename, onDeleteTask, memberMap, columnTotalCounts, onLoadMore, onShowLess, loadingMore }: KanbanBoardProps) {
     const columnsRowRef = useRef<HTMLDivElement | null>(null);
     const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => {
         try {
@@ -437,11 +449,15 @@ export function KanbanBoard({ tasks, allTasks = [], onTaskClick, onTaskMove, onS
     const taskCountByColumn = useMemo(() => {
         const map = new Map<string, number>();
         for (const col of COLUMNS) {
-            const matchStatuses = col.includeStatuses ?? [col.status];
-            map.set(col.status, localTasks.filter(t => matchStatuses.includes(t.currentStatus)).length);
+            if (columnTotalCounts && col.status in columnTotalCounts) {
+                map.set(col.status, columnTotalCounts[col.status]);
+            } else {
+                const matchStatuses = col.includeStatuses ?? [col.status];
+                map.set(col.status, localTasks.filter(t => matchStatuses.includes(t.currentStatus)).length);
+            }
         }
         return map;
-    }, [localTasks]);
+    }, [localTasks, columnTotalCounts]);
 
     const resolveOverColumn = useCallback((id: string | null): string | null => {
         if (!id) return null;
@@ -630,6 +646,10 @@ export function KanbanBoard({ tasks, allTasks = [], onTaskClick, onTaskMove, onS
                                 onTaskRename={onTaskRename}
                                 onDeleteTask={onDeleteTask}
                                 allTasks={allTasks}
+                                totalCount={columnTotalCounts?.[col.status]}
+                                onLoadMore={onLoadMore}
+                                onShowLess={onShowLess}
+                                isLoadingMore={loadingMore?.[col.status]}
                             />
                         );
                     })}

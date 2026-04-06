@@ -30,6 +30,8 @@ import type {
     IdeOptions,
     IdeSettings,
     TaskIdeOptions,
+    KanbanColumnsResponse,
+    KanbanLoadMoreResponse,
 } from '../../types';
 
 export interface ParsedActor {
@@ -753,15 +755,40 @@ export class HarnessTimeService implements IntegrationService {
         };
     }
 
-    async fetchKanban(boardId?: string, query?: { date_from?: string; date_to?: string }): Promise<DashTask[]> {
+    async fetchKanban(boardId?: string, query?: { date_from?: string; date_to?: string }): Promise<KanbanColumnsResponse> {
         await this.ensureBoardAndSpecCaches();
         const qs = this.buildQuery({
             board_id: boardId,
             date_from: query?.date_from,
             date_to: query?.date_to,
         });
-        const raw = await this.get<HarnessTask[]>(`/api/kanban/${qs}`);
-        return raw.map(task => this.transformTask(task, false));
+        const raw = await this.get<{ columns: Record<string, { tasks: HarnessTask[]; total_count: number }> }>(`/api/kanban/${qs}`);
+        const columns: Record<string, { tasks: DashTask[]; totalCount: number }> = {};
+        for (const [status, col] of Object.entries(raw.columns)) {
+            columns[status] = {
+                tasks: col.tasks.map(task => this.transformTask(task, false)),
+                totalCount: col.total_count,
+            };
+        }
+        return { columns };
+    }
+
+    async fetchKanbanMore(boardId: string, status: string, offset: number, limit: number, query?: { date_from?: string; date_to?: string }): Promise<KanbanLoadMoreResponse> {
+        await this.ensureBoardAndSpecCaches();
+        const qs = this.buildQuery({
+            board_id: boardId,
+            status,
+            offset: String(offset),
+            limit: String(limit),
+            date_from: query?.date_from,
+            date_to: query?.date_to,
+        });
+        const raw = await this.get<{ tasks: HarnessTask[]; total_count: number; has_more: boolean }>(`/api/kanban/${qs}`);
+        return {
+            tasks: raw.tasks.map(task => this.transformTask(task, false)),
+            totalCount: raw.total_count,
+            hasMore: raw.has_more,
+        };
     }
 
     async searchTasks(query: { q: string; scope: 'board' | 'global'; boardId?: string; limit?: number }): Promise<TaskSearchResult[]> {

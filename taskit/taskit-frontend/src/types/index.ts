@@ -627,3 +627,19 @@ export interface NotificationPreference {
     quiet_hours_end: string | null;
     quiet_hours_timezone: string;
 }
+
+// ─── Kanban Pagination ────────────────────────────────────────
+export interface KanbanColumnData {
+    tasks: Task[];
+    totalCount: number;
+}
+
+export interface KanbanColumnsResponse {
+    columns: Record<string, KanbanColumnData>;
+}
+
+export interface KanbanLoadMoreResponse {
+    tasks: Task[];
+    totalCount: number;
+    hasMore: boolean;
+}

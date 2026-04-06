@@ -19,7 +19,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from .kanban_ordering import move_task
+from .kanban_ordering import KANBAN_COLUMNS, get_statuses_for_column, move_task
 from .models import (
     Board, BoardMembership, CommentAttachment, CommentType, Label,
     ReflectionReport, ReflectionStatus, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
@@ -3368,20 +3368,63 @@ def timeline(request):
 
 @api_view(["GET"])
 def kanban(request):
-    """Kanban payload returns all cards for a board without pagination/filter/sort controls."""
+    """Kanban board endpoint with optional per-status pagination.
+
+    Initial load (no ``status`` param):
+        GET /api/kanban/?board_id=1&per_status_limit=20
+        Returns ``{"columns": {"BACKLOG": {"tasks": [...], "total_count": N}, ...}}``
+
+    Load more (``status`` param present):
+        GET /api/kanban/?board_id=1&status=TESTING&offset=20&limit=20
+        Returns ``{"tasks": [...], "total_count": N, "has_more": bool}``
+    """
     board_id = request.query_params.get("board_id") or request.query_params.get("board")
     query_params = request.query_params
-    qs = (
+    base_qs = (
         Task.objects.select_related("assignee")
         .prefetch_related("labels")
         .annotate(comment_count=Count("comments"))
         .order_by("kanban_position", "id")
     )
-    qs = _exclude_hidden_scheduled_tasks(qs)
+    base_qs = _exclude_hidden_scheduled_tasks(base_qs)
     if board_id:
-        qs = qs.filter(board_id=board_id)
-    qs = _apply_date_range(qs, query_params, "created_at", "date_from", "date_to")
-    return Response(TaskListSerializer(qs, many=True).data)
+        base_qs = base_qs.filter(board_id=board_id)
+    base_qs = _apply_date_range(base_qs, query_params, "created_at", "date_from", "date_to")
+
+    status_param = query_params.get("status")
+    if status_param:
+        return _kanban_load_more(base_qs, status_param, query_params)
+    return _kanban_initial(base_qs, query_params)
+
+
+def _kanban_initial(base_qs, query_params):
+    per_status_limit = min(int(query_params.get("per_status_limit", 20)), 200)
+    columns = {}
+    for col in KANBAN_COLUMNS:
+        col_qs = base_qs.filter(status__in=get_statuses_for_column(col))
+        total = col_qs.count()
+        tasks_data = TaskListSerializer(col_qs[:per_status_limit], many=True).data
+        columns[col] = {"tasks": tasks_data, "total_count": total}
+    return Response({"columns": columns})
+
+
+def _kanban_load_more(base_qs, status_param, query_params):
+    valid_columns = {col for col in KANBAN_COLUMNS}
+    if status_param not in valid_columns:
+        return Response(
+            {"detail": f"Invalid status '{status_param}'. Valid values: {sorted(valid_columns)}"},
+            status=400,
+        )
+    offset = max(int(query_params.get("offset", 0)), 0)
+    limit = min(int(query_params.get("limit", 20)), 200)
+    col_qs = base_qs.filter(status__in=get_statuses_for_column(status_param))
+    total = col_qs.count()
+    tasks_data = TaskListSerializer(col_qs[offset:offset + limit], many=True).data
+    return Response({
+        "tasks": tasks_data,
+        "total_count": total,
+        "has_more": (offset + limit) < total,
+    })
 
 
 @api_view(["GET"])

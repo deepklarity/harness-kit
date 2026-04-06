@@ -112,7 +112,79 @@ class TestKanbanOrdering(APITestCase):
         resp = self.client.get(f"/api/kanban/?board_id={self.board.id}")
         self.assertEqual(resp.status_code, 200)
 
-        todo_ids = [row["id"] for row in resp.data if row["status"] == "TODO"]
-        review_ids = [row["id"] for row in resp.data if row["status"] == "REVIEW"]
+        columns = resp.data["columns"]
+        todo_ids = [row["id"] for row in columns["TODO"]["tasks"]]
+        review_ids = [row["id"] for row in columns["REVIEW"]["tasks"]]
         self.assertEqual(todo_ids, [todo2.id, todo1.id])
         self.assertEqual(review_ids, [review2.id, review1.id])
+
+    def test_kanban_initial_returns_columns_with_total_count(self):
+        for i in range(25):
+            self.make_task(self.board, title=f"todo-{i}", status="TODO", kanban_position=i)
+        self.make_task(self.board, title="review-1", status="REVIEW", kanban_position=0)
+
+        resp = self.client.get(f"/api/kanban/?board_id={self.board.id}")
+        self.assertEqual(resp.status_code, 200)
+        columns = resp.data["columns"]
+
+        # TODO has 25 tasks but only 20 returned
+        self.assertEqual(columns["TODO"]["total_count"], 25)
+        self.assertEqual(len(columns["TODO"]["tasks"]), 20)
+
+        # REVIEW has 1 task
+        self.assertEqual(columns["REVIEW"]["total_count"], 1)
+        self.assertEqual(len(columns["REVIEW"]["tasks"]), 1)
+
+        # Empty columns have 0
+        self.assertEqual(columns["BACKLOG"]["total_count"], 0)
+        self.assertEqual(len(columns["BACKLOG"]["tasks"]), 0)
+
+    def test_kanban_per_status_limit_respected(self):
+        for i in range(10):
+            self.make_task(self.board, title=f"todo-{i}", status="TODO", kanban_position=i)
+
+        resp = self.client.get(f"/api/kanban/?board_id={self.board.id}&per_status_limit=5")
+        self.assertEqual(resp.status_code, 200)
+        columns = resp.data["columns"]
+        self.assertEqual(columns["TODO"]["total_count"], 10)
+        self.assertEqual(len(columns["TODO"]["tasks"]), 5)
+
+    def test_kanban_load_more_returns_offset_slice(self):
+        for i in range(30):
+            self.make_task(self.board, title=f"todo-{i}", status="TODO", kanban_position=i)
+
+        resp = self.client.get(
+            f"/api/kanban/?board_id={self.board.id}&status=TODO&offset=20&limit=20"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["total_count"], 30)
+        self.assertEqual(len(resp.data["tasks"]), 10)
+        self.assertFalse(resp.data["has_more"])
+
+    def test_kanban_load_more_has_more_flag(self):
+        for i in range(50):
+            self.make_task(self.board, title=f"todo-{i}", status="TODO", kanban_position=i)
+
+        resp = self.client.get(
+            f"/api/kanban/?board_id={self.board.id}&status=TODO&offset=0&limit=20"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["total_count"], 50)
+        self.assertEqual(len(resp.data["tasks"]), 20)
+        self.assertTrue(resp.data["has_more"])
+
+    def test_kanban_in_progress_includes_executing(self):
+        self.make_task(self.board, title="ip-1", status="IN_PROGRESS", kanban_position=0)
+        self.make_task(self.board, title="exec-1", status="EXECUTING", kanban_position=1)
+
+        resp = self.client.get(f"/api/kanban/?board_id={self.board.id}")
+        self.assertEqual(resp.status_code, 200)
+        columns = resp.data["columns"]
+        self.assertEqual(columns["IN_PROGRESS"]["total_count"], 2)
+        self.assertEqual(len(columns["IN_PROGRESS"]["tasks"]), 2)
+
+    def test_kanban_load_more_invalid_status_returns_400(self):
+        resp = self.client.get(
+            f"/api/kanban/?board_id={self.board.id}&status=INVALID"
+        )
+        self.assertEqual(resp.status_code, 400)

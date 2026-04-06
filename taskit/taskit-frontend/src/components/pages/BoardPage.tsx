@@ -288,13 +288,23 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
 }) {
     const service = useService();
     const [searchParams, setSearchParams] = useSearchParams();
-    const [tasks, setTasks] = useState<Task[]>([]);
+    const [columnData, setColumnData] = useState<Record<string, { tasks: Task[]; totalCount: number; loadedCount: number }>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [pollingEnabled, setPollingEnabled] = useState(false);
     const [guideOpen, setGuideOpen] = useState(false);
+    const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
     const defaultsApplied = useRef(false);
     const hasLoadedOnce = useRef(false);
+
+    const tasks = useMemo(() => Object.values(columnData).flatMap(c => c.tasks), [columnData]);
+    const columnTotalCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        for (const [status, col] of Object.entries(columnData)) {
+            counts[status] = col.totalCount;
+        }
+        return counts;
+    }, [columnData]);
 
     const filterAssignee = useMemo(() => splitParam(searchParams.get('assignee')), [searchParams]);
     const filterPriority = useMemo(() => splitParam(searchParams.get('priority')), [searchParams]);
@@ -329,21 +339,29 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         if (!silent) setLoading(true);
         setError(null);
         try {
-            const results = await service.fetchKanban(selectedBoard, {
+            const response = await service.fetchKanban(selectedBoard, {
                 date_from: dateFrom,
                 date_to: dateTo,
             });
-            setTasks(prev => {
-                const previousStatusById = new Map(prev.map(task => [task.id, task.currentStatus]));
+            setColumnData(prev => {
+                const allPrevTasks = Object.values(prev).flatMap(c => c.tasks);
+                const previousStatusById = new Map(allPrevTasks.map(task => [task.id, task.currentStatus]));
                 const transitionTs = Date.now();
-                for (const task of results) {
-                    const previousStatus = previousStatusById.get(task.id);
-                    if (!previousStatus) continue;
-                    if (didLeaveProgressStatus(previousStatus, task.currentStatus)) {
-                        markExecutionTransitionUnseen(task.id, transitionTs);
+                const next: Record<string, { tasks: Task[]; totalCount: number; loadedCount: number }> = {};
+                for (const [status, col] of Object.entries(response.columns)) {
+                    for (const task of col.tasks) {
+                        const previousStatus = previousStatusById.get(task.id);
+                        if (!previousStatus) continue;
+                        if (didLeaveProgressStatus(previousStatus, task.currentStatus)) {
+                            markExecutionTransitionUnseen(task.id, transitionTs);
+                        }
                     }
+                    // On silent poll, preserve expanded columns by requesting at least as many as previously loaded
+                    const prevLoaded = prev[status]?.loadedCount ?? 0;
+                    const loadedCount = Math.max(col.tasks.length, prevLoaded);
+                    next[status] = { tasks: col.tasks, totalCount: col.totalCount, loadedCount };
                 }
-                return results;
+                return next;
             });
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to load kanban');
@@ -390,6 +408,35 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         }
         return ok;
     }, [onStopExecution, load]);
+
+    const handleLoadMore = useCallback(async (status: string) => {
+        if (!selectedBoard || loadingMore[status]) return;
+        setLoadingMore(prev => ({ ...prev, [status]: true }));
+        try {
+            const currentTasks = columnData[status]?.tasks ?? [];
+            const result = await service.fetchKanbanMore(selectedBoard, status, currentTasks.length, 20, {
+                date_from: dateFrom,
+                date_to: dateTo,
+            });
+            setColumnData(prev => {
+                const col = prev[status];
+                if (!col) return prev;
+                const merged = [...col.tasks, ...result.tasks];
+                return { ...prev, [status]: { tasks: merged, totalCount: result.totalCount, loadedCount: merged.length } };
+            });
+        } finally {
+            setLoadingMore(prev => ({ ...prev, [status]: false }));
+        }
+    }, [selectedBoard, loadingMore, columnData, service, dateFrom, dateTo]);
+
+    const handleShowLess = useCallback((status: string) => {
+        setColumnData(prev => {
+            const col = prev[status];
+            if (!col) return prev;
+            const trimmed = col.tasks.slice(0, 20);
+            return { ...prev, [status]: { tasks: trimmed, totalCount: col.totalCount, loadedCount: 20 } };
+        });
+    }, []);
 
     const visibleTasks = useMemo(() => {
         let result = filteredMemberId ? tasks.filter(t => t.assigneeIds.includes(filteredMemberId)) : tasks;
@@ -506,6 +553,10 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
                     onStopExecution={handleStopExecution}
                     onDeleteTask={onDeleteTask}
                     memberMap={memberMap}
+                    columnTotalCounts={columnTotalCounts}
+                    onLoadMore={handleLoadMore}
+                    onShowLess={handleShowLess}
+                    loadingMore={loadingMore}
                 />
             )}
 
