@@ -418,6 +418,122 @@ def _maybe_reassign_on_quota_failure(task, report):
     )
 
 
+def _maybe_escalate_model(task):
+    """Attempt to escalate a failed task to the next higher-priority model.
+
+    Uses the board's model_escalation_priority list. Index 0 = highest priority (rank 1).
+    Walks upward from the current model's position toward index 0.
+
+    Mutates task in place (assignee, model_name, metadata). Does NOT save.
+    Returns True if escalation happened, False otherwise.
+    """
+    task.metadata = task.metadata or {}
+
+    def _skip(reason):
+        task.metadata["escalation_skip_reason"] = reason
+        return False
+
+    if not task.board.escalation_enabled:
+        return _skip("disabled")
+
+    priority_list = task.board.model_escalation_priority or []
+    if not priority_list:
+        return _skip("no_priority_list")
+
+    # Check max retries limit
+    max_retries = task.board.failure_max_retries
+    current_escalation_count = task.metadata.get("escalation_count", 0)
+    if current_escalation_count >= max_retries:
+        return _skip("max_retries_reached")
+
+    current_model = task.model_name or task.metadata.get("selected_model")
+    if not current_model:
+        return _skip("no_current_model")
+
+    # Find current model's index in the priority list
+    current_index = None
+    for i, entry in enumerate(priority_list):
+        if entry.get("model_name") == current_model:
+            current_index = i
+            break
+
+    if current_index is None:
+        return _skip("model_not_in_list")
+
+    if current_index == 0:
+        return _skip("already_highest")
+
+    target = priority_list[current_index - 1]
+    target_model = target["model_name"]
+    target_agent_name = target["agent_name"]
+
+    # Find the User object for the target agent
+    agent_email = f"{target_agent_name}@odin.agent"
+    try:
+        target_user = User.objects.get(email=agent_email)
+    except User.DoesNotExist:
+        logger.warning(
+            "[task:%s] Escalation target agent %s not found",
+            task.id, agent_email,
+        )
+        return False
+
+    old_assignee = task.assignee
+    old_agent_name = old_assignee.name if old_assignee else "unassigned"
+    old_model = task.model_name
+
+    # Update task fields
+    task.assignee = target_user
+    task.model_name = target_model
+
+    # Update metadata
+    task.metadata = task.metadata or {}
+    escalation_history = task.metadata.get("escalation_history", [])
+    escalation_history.append({
+        "from_model": old_model,
+        "from_agent": old_agent_name,
+        "to_model": target_model,
+        "to_agent": target_agent_name,
+    })
+    task.metadata["escalation_history"] = escalation_history
+    task.metadata["escalation_count"] = len(escalation_history)
+    task.metadata["escalation_max"] = max_retries
+
+    # Record history entries
+    TaskHistory.objects.create(
+        task=task,
+        field_name="model",
+        old_value=old_model or "",
+        new_value=target_model,
+        changed_by="system@taskit",
+    )
+    TaskHistory.objects.create(
+        task=task,
+        field_name="assignee",
+        old_value=old_agent_name,
+        new_value=target_user.name,
+        changed_by="system@taskit",
+    )
+
+    # Post system comment
+    TaskComment.objects.create(
+        task=task,
+        author_email="system@taskit",
+        author_label="system",
+        content=(
+            f"Auto-escalation: {old_model or 'unknown'} failed. "
+            f"Escalating to {target_model} ({target_agent_name})."
+        ),
+        comment_type=CommentType.STATUS_UPDATE,
+    )
+
+    logger.info(
+        "[task:%s] Model escalation: %s/%s → %s/%s",
+        task.id, old_agent_name, old_model, target_agent_name, target_model,
+    )
+    return True
+
+
 @api_view(["GET", "PATCH"])
 def user_ide_settings(request):
     user, settings_obj = _user_settings_for_request(request)
@@ -2420,6 +2536,17 @@ class TaskViewSet(viewsets.ModelViewSet):
             _clear_stop_guards(task_metadata)
         task.metadata = task_metadata
 
+        # Attempt model escalation on execution failure
+        if not success and new_status == TaskStatus.FAILED:
+            if _maybe_escalate_model(task):
+                new_status = TaskStatus.IN_PROGRESS
+                task.status = new_status
+                # Replace FAILED history entry with IN_PROGRESS
+                histories = [h for h in histories if h.field_name != "status"]
+                task.kanban_position = move_task(task, target_status=new_status, target_index=None)
+                _record_change(histories, task, "status", old_status, new_status, updated_by)
+                _clear_stop_guards(task.metadata)
+
         task.save()
         TaskHistory.objects.bulk_create(histories)
 
@@ -2439,6 +2566,14 @@ class TaskViewSet(viewsets.ModelViewSet):
             exec_result.get("duration_ms"), exec_meta.get("selected_model"),
             old_status, new_status,
         )
+
+        # Trigger re-execution if escalated
+        if not success and new_status == TaskStatus.IN_PROGRESS:
+            if task.assignee_id:
+                from .execution import get_strategy
+                strategy = get_strategy()
+                if strategy:
+                    strategy.trigger(task)
 
         # Trigger auto-reflection when execution result moves task to REVIEW
         if new_status == TaskStatus.REVIEW and old_status != TaskStatus.REVIEW:
@@ -2912,6 +3047,7 @@ class SpecViewSet(viewsets.ModelViewSet):
             "taskit_id", "diff_stat", "subprocess_pid", "trace_file",
             "active_execution", "worktree_status", "worktree_error",
             "last_failure_type", "last_failure_reason", "last_failure_origin",
+            "escalation_history", "escalation_count", "escalation_max",
         }
 
         with transaction.atomic():

@@ -68,6 +68,9 @@ interface HarnessBoard {
     skip_reflection?: boolean;
     skip_proof?: boolean;
     reflection_model?: string | null;
+    model_escalation_priority?: Array<{ agent_name: string; model_name: string }>;
+    escalation_enabled?: boolean;
+    failure_max_retries?: number;
     member_ids?: number[];
     agents?: AgentConfig[];
     tasks?: HarnessTask[];
@@ -135,6 +138,7 @@ interface HarnessTask {
     skip_reflection?: boolean;
     board_skip_reflection?: boolean;
     board_skip_proof?: boolean;
+    board_escalation_enabled?: boolean;
     schedule_summary?: {
         id: number;
         kind: 'ONE_TIME' | 'RECURRING';
@@ -470,6 +474,7 @@ export class HarnessTimeService implements IntegrationService {
                     skipReflection: task.skip_reflection ?? false,
                     boardSkipReflection: task.board_skip_reflection ?? false,
                     boardSkipProof: task.board_skip_proof ?? false,
+                    boardEscalationEnabled: task.board_escalation_enabled ?? true,
                     commentCount: task.comment_count ?? 0,
                     estimatedCostUsd: task.estimated_cost_usd ?? undefined,
                     reflectionCostUsd: task.reflection_cost_usd ?? undefined,
@@ -504,6 +509,9 @@ export class HarnessTimeService implements IntegrationService {
                 skipReflection: b.skip_reflection ?? false,
                 skipProof: b.skip_proof ?? false,
                 reflectionModel: b.reflection_model || null,
+                modelEscalationPriority: b.model_escalation_priority || [],
+                escalationEnabled: b.escalation_enabled ?? true,
+                failureMaxRetries: b.failure_max_retries ?? 3,
             });
         }
 
@@ -607,6 +615,7 @@ export class HarnessTimeService implements IntegrationService {
             modelName: raw.model_name || undefined,
             skipReflection: raw.skip_reflection ?? false,
             boardSkipProof: (raw as HarnessTask).board_skip_proof ?? false,
+            boardEscalationEnabled: (raw as HarnessTask).board_escalation_enabled ?? true,
             commentCount: comments.length,
             estimatedCostUsd: raw.estimated_cost_usd ?? undefined,
             reflectionCostUsd: raw.reflection_cost_usd ?? undefined,
@@ -719,6 +728,9 @@ export class HarnessTimeService implements IntegrationService {
                 skipReflection: b.skip_reflection ?? false,
                 skipProof: b.skip_proof ?? false,
                 reflectionModel: b.reflection_model || null,
+                modelEscalationPriority: b.model_escalation_priority || [],
+                escalationEnabled: b.escalation_enabled ?? true,
+                failureMaxRetries: b.failure_max_retries ?? 3,
                 memberIds: boardMemberIds,
                 agents: (b as { agents?: AgentConfig[] }).agents,
                 tasks: [],
@@ -1382,6 +1394,7 @@ export class HarnessTimeService implements IntegrationService {
             modelName: task.model_name || undefined,
             skipReflection: task.skip_reflection ?? false,
             boardSkipProof: task.board_skip_proof ?? false,
+                    boardEscalationEnabled: task.board_escalation_enabled ?? true,
             commentCount: task.comment_count ?? 0,
             estimatedCostUsd: task.estimated_cost_usd ?? undefined,
             reflectionCostUsd: task.reflection_cost_usd ?? undefined,

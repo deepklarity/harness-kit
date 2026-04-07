@@ -89,6 +89,9 @@ class Board(models.Model):
     skip_reflection = models.BooleanField(default=False)
     skip_proof = models.BooleanField(default=False)
     reflection_model = models.CharField(max_length=255, null=True, blank=True)
+    model_escalation_priority = models.JSONField(default=list, blank=True)
+    escalation_enabled = models.BooleanField(default=True)
+    failure_max_retries = models.IntegerField(default=3)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

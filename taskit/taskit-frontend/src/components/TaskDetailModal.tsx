@@ -1041,6 +1041,69 @@ export function TaskDetailModal({
                                 </div>
                             )}
 
+                            {/* Escalation History — shows model retry chain or why escalation didn't happen */}
+                            {(() => {
+                                const md = task.metadata as Record<string, unknown> | undefined;
+                                const escalationHistory = md?.escalation_history as Array<{from_model: string | null; from_agent: string | null; to_model: string; to_agent: string}> | undefined;
+                                const escalationMax = (md?.escalation_max as number) || 0;
+                                const isFailed = task.currentStatus === 'FAILED';
+                                const hasHistory = escalationHistory && escalationHistory.length > 0;
+
+                                // Show a message for failed tasks with no escalation history
+                                const skipReason = md?.escalation_skip_reason as string | undefined;
+                                if (!hasHistory && isFailed && skipReason) {
+                                    const model = task.modelName || (md?.selected_model as string) || null;
+                                    const reasonMessages: Record<string, React.ReactNode> = {
+                                        disabled: 'Escalation is disabled for this board.',
+                                        no_priority_list: 'No escalation priority list configured for this board.',
+                                        max_retries_reached: 'Max retries reached.',
+                                        no_current_model: 'No model assigned to this task.',
+                                        model_not_in_list: <>Model {model && <span className="font-mono text-red-400">{model}</span>} is not in the escalation priority list.</>,
+                                        already_highest: <>Model {model && <span className="font-mono text-red-400">{model}</span>} is already at the highest priority — no next model to escalate to.</>,
+                                    };
+                                    return (
+                                        <CollapsibleSection label="Escalation" defaultOpen={true}>
+                                            <div className="text-[11px] text-muted-foreground/70">
+                                                {reasonMessages[skipReason] || `Escalation skipped: ${skipReason}`}
+                                            </div>
+                                        </CollapsibleSection>
+                                    );
+                                }
+
+                                if (!hasHistory) return null;
+
+                                const isLast = (idx: number) => idx === escalationHistory.length - 1;
+                                return (
+                                    <CollapsibleSection label={`Escalation History (${escalationHistory.length}${escalationMax ? `/${escalationMax}` : ''})`} defaultOpen={true}>
+                                        <div className="space-y-1">
+                                            {escalationHistory.map((entry, idx) => (
+                                                <div key={idx} className="flex items-center gap-1.5 text-xs font-mono">
+                                                    <span className="text-muted-foreground/60 w-4 text-right shrink-0">#{idx + 1}</span>
+                                                    <span className="text-red-400">{entry.from_model || '?'}</span>
+                                                    <span className="text-muted-foreground/40">→</span>
+                                                    <span className={
+                                                        isLast(idx) && isFailed
+                                                            ? 'text-red-400'
+                                                            : isLast(idx)
+                                                                ? 'text-emerald-500 font-medium'
+                                                                : 'text-muted-foreground'
+                                                    }>
+                                                        {entry.to_model}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                            {isFailed && (
+                                                <div className="text-[10px] text-red-400/80 mt-1">
+                                                    {escalationHistory.length >= escalationMax
+                                                        ? 'Max retries reached'
+                                                        : 'Already at highest priority model'}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </CollapsibleSection>
+                                );
+                            })()}
+
                             {/* Execution Context — collapsible */}
                             {hasExecContext && (
                                 <CollapsibleSection

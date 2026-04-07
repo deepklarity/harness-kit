@@ -112,6 +112,7 @@ export interface Task {
     skipReflection?: boolean;
     boardSkipReflection?: boolean;
     boardSkipProof?: boolean;
+    boardEscalationEnabled?: boolean;
     commentCount?: number;
     estimatedCostUsd?: number | null;
     reflectionCostUsd?: number | null;
@@ -154,6 +155,9 @@ export interface Board {
     skipReflection?: boolean;
     skipProof?: boolean;
     reflectionModel?: string | null;
+    modelEscalationPriority?: EscalationPriorityEntry[];
+    escalationEnabled?: boolean;
+    failureMaxRetries?: number;
     memberIds: string[];
     agents?: AgentConfig[];
     tasks: Task[];
@@ -449,6 +453,18 @@ export interface ReflectionRequest {
     reviewer_model: string;
     custom_prompt?: string;
     context_selections?: string[];
+}
+
+export interface EscalationHistoryEntry {
+    from_model: string | null;
+    from_agent: string | null;
+    to_model: string;
+    to_agent: string;
+}
+
+export interface EscalationPriorityEntry {
+    agent_name: string;
+    model_name: string;
 }
 
 export interface AgentModelInfo {

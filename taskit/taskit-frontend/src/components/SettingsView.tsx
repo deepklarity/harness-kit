@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import React from 'react';
-import type { Board, DetectedIde, Member } from '../types';
+import type { Board, DetectedIde, Member, EscalationPriorityEntry } from '../types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useService } from '../contexts/ServiceContext';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X, SettingsIcon, Moon, Sun, Keyboard, Bell } from 'lucide-react';
+import { Trash2, FlaskConical, Bot, FolderOpen, CheckCircle2, AlertCircle, Zap, Plus, Sparkles, Users, ChevronDown, ChevronUp, MoreVertical, Search, FileText, Layout, X, SettingsIcon, Moon, Sun, Keyboard, Bell, GripVertical } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
@@ -32,6 +32,23 @@ import {
 import { NotificationSettings } from './NotificationSettings';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import {
+    SortableContext,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+    useSortable,
+    arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const isMac = () => navigator.platform.toUpperCase().includes('MAC');
 
@@ -100,6 +117,42 @@ function KeyboardShortcutsContent() {
     );
 }
 
+
+function SortableEscalationRow({ id, entry, index, highlight }: { id: string; entry: { agent_name: string; model_name: string }; index: number; highlight: boolean }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 50 : undefined,
+    };
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-sm cursor-grab active:cursor-grabbing transition-colors ${
+                isDragging
+                    ? 'border-primary/40 bg-primary/5 shadow-md'
+                    : highlight
+                        ? 'border-amber-400/50 bg-amber-500/10'
+                        : 'border-border bg-muted/20'
+            }`}
+            {...attributes}
+            {...listeners}
+        >
+            <GripVertical className="size-3.5 text-muted-foreground/30 shrink-0" />
+            <span className="text-[10px] w-5 text-right font-mono shrink-0 text-muted-foreground/50">
+                {index + 1}
+            </span>
+            <span className="font-mono text-xs flex-1 truncate">
+                {entry.model_name}
+            </span>
+            <Badge variant="outline" className="text-[10px] h-4 px-1.5 shrink-0">
+                {entry.agent_name}
+            </Badge>
+        </div>
+    );
+}
 
 interface SettingsViewProps {
     members: Member[];
@@ -171,10 +224,46 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
     const [currentSkip, setCurrentSkip] = useState(currentBoard?.skipReflection ?? false);
     const [currentModel, setCurrentModel] = useState(currentBoard?.reflectionModel || '');
     const [currentSkipProof, setCurrentSkipProof] = useState(currentBoard?.skipProof ?? false);
+    const [escalationPriority, setEscalationPriority] = useState<Array<{ agent_name: string; model_name: string }>>(
+        currentBoard?.modelEscalationPriority || []
+    );
+    const [escalationEnabled, setEscalationEnabled] = useState(currentBoard?.escalationEnabled ?? true);
+    const [failureMaxRetries, setFailureMaxRetries] = useState(currentBoard?.failureMaxRetries ?? 3);
+    const [escalationSearch, setEscalationSearch] = useState('');
+    const escalationSensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    );
     useEffect(() => {
         setCurrentSkip(currentBoard?.skipReflection ?? false);
         setCurrentModel(currentBoard?.reflectionModel || '');
         setCurrentSkipProof(currentBoard?.skipProof ?? false);
+        setEscalationEnabled(currentBoard?.escalationEnabled ?? true);
+        setFailureMaxRetries(currentBoard?.failureMaxRetries ?? 3);
+
+        const saved = currentBoard?.modelEscalationPriority;
+        if (saved && saved.length > 0) {
+            setEscalationPriority(saved);
+        } else if (currentBoard?.agents) {
+            // Auto-populate from enabled agents/models sorted by output price descending
+            const generated: Array<{ agent_name: string; model_name: string; price: number }> = [];
+            for (const agent of currentBoard.agents) {
+                if (!agent.enabled) continue;
+                for (const m of agent.models) {
+                    if (!m.enabled) continue;
+                    const info = members.flatMap(mb => mb.availableModels || []).find(am => am.name === m.name);
+                    generated.push({ agent_name: agent.name, model_name: m.name, price: info?.output_price_per_1m_tokens ?? 0 });
+                }
+            }
+            generated.sort((a, b) => b.price - a.price);
+            const defaultList = generated.map(({ agent_name, model_name }) => ({ agent_name, model_name }));
+            setEscalationPriority(defaultList);
+            if (defaultList.length > 0 && currentBoard.id) {
+                service.updateBoard(currentBoard.id, { model_escalation_priority: defaultList }).catch(() => {});
+            }
+        } else {
+            setEscalationPriority([]);
+        }
     }, [currentBoard?.id]);
 
     const allModels = useMemo(() => {
@@ -408,6 +497,45 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
         }
     };
 
+    const saveEscalationPriority = async (newList: Array<{ agent_name: string; model_name: string }>) => {
+        if (!currentBoard) return;
+        const prev = escalationPriority;
+        setEscalationPriority(newList);
+        try {
+            await service.updateBoard(currentBoard.id, { model_escalation_priority: newList });
+            toast({ title: 'Escalation priority updated' });
+        } catch {
+            setEscalationPriority(prev);
+            toast({ title: 'Error', description: 'Failed to update escalation priority.', variant: 'destructive' });
+        }
+    };
+
+    const saveEscalationEnabled = async (value: boolean) => {
+        if (!currentBoard) return;
+        const prev = escalationEnabled;
+        setEscalationEnabled(value);
+        try {
+            await service.updateBoard(currentBoard.id, { escalation_enabled: value });
+            toast({ title: value ? 'Escalation enabled' : 'Escalation disabled' });
+        } catch {
+            setEscalationEnabled(prev);
+            toast({ title: 'Error', description: 'Failed to update escalation setting.', variant: 'destructive' });
+        }
+    };
+
+    const saveFailureMaxRetries = async (value: number) => {
+        if (!currentBoard) return;
+        const prev = failureMaxRetries;
+        setFailureMaxRetries(value);
+        try {
+            await service.updateBoard(currentBoard.id, { failure_max_retries: value });
+            toast({ title: 'Max retries updated' });
+        } catch {
+            setFailureMaxRetries(prev);
+            toast({ title: 'Error', description: 'Failed to update max retries.', variant: 'destructive' });
+        }
+    };
+
     const handleUpdateBoardProof = async (boardId: string, value: boolean) => {
         try {
             await service.updateBoard(boardId, { skip_proof: value });
@@ -546,6 +674,166 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                                             </div>
                                         </>
                                     )}
+
+                                    {/* Model Escalation Priority */}
+                                    <div className="h-px bg-border" />
+                                    <div>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <div className="flex items-center gap-2">
+                                                <div className="text-sm font-medium">Model Escalation</div>
+                                                {escalationEnabled && escalationPriority.length > 0 && (
+                                                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 font-mono">
+                                                        {escalationPriority.length} model{escalationPriority.length !== 1 ? 's' : ''}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <Switch
+                                                checked={escalationEnabled}
+                                                onCheckedChange={v => saveEscalationEnabled(v)}
+                                            />
+                                        </div>
+                                        <div className="text-xs text-muted-foreground mb-3">
+                                            When a task fails, it automatically retries with the next model, escalating upward from rank {escalationPriority.length || 'N'} toward rank 1.
+                                        </div>
+
+                                        {escalationEnabled && (
+                                            <>
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div>
+                                                        <div className="text-sm">Max retries</div>
+                                                    </div>
+                                                    <Select value={String(failureMaxRetries)} onValueChange={v => saveFailureMaxRetries(Number(v))}>
+                                                        <SelectTrigger className="w-16 h-7 text-xs">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {[1, 2, 3, 4, 5, 10].map(n => (
+                                                                <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+
+                                                {escalationPriority.length > 0 ? (
+                                                    <>
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <div className="text-xs text-muted-foreground">Priority order <span className="text-muted-foreground/50">(drag to reorder)</span></div>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-6 text-[11px] gap-1 px-2 text-muted-foreground hover:text-foreground"
+                                                                onClick={() => {
+                                                                    const generated: Array<{ agent_name: string; model_name: string; price: number }> = [];
+                                                                    for (const agent of (currentBoard?.agents || [])) {
+                                                                        if (!agent.enabled) continue;
+                                                                        for (const m of agent.models) {
+                                                                            if (!m.enabled) continue;
+                                                                            const info = members.flatMap(mb => mb.availableModels || []).find(am => am.name === m.name);
+                                                                            generated.push({
+                                                                                agent_name: agent.name,
+                                                                                model_name: m.name,
+                                                                                price: info?.output_price_per_1m_tokens ?? 0,
+                                                                            });
+                                                                        }
+                                                                    }
+                                                                    generated.sort((a, b) => b.price - a.price);
+                                                                    saveEscalationPriority(generated.map(({ agent_name, model_name }) => ({ agent_name, model_name })));
+                                                                }}
+                                                            >
+                                                                <Sparkles className="size-2.5" /> Reset
+                                                            </Button>
+                                                        </div>
+
+                                                        {escalationPriority.length > 5 && (
+                                                            <div className="relative mb-2">
+                                                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50" />
+                                                                <Input
+                                                                    placeholder="Filter models..."
+                                                                    value={escalationSearch}
+                                                                    onChange={e => setEscalationSearch(e.target.value)}
+                                                                    className="h-7 text-xs pl-7 bg-muted/20 border-border/50"
+                                                                />
+                                                                {escalationSearch && (
+                                                                    <button
+                                                                        onClick={() => setEscalationSearch('')}
+                                                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground"
+                                                                    >
+                                                                        <X className="size-3" />
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        <DndContext
+                                                            sensors={escalationSensors}
+                                                            collisionDetection={closestCenter}
+                                                            onDragEnd={(event: DragEndEvent) => {
+                                                                const { active, over } = event;
+                                                                if (over && active.id !== over.id) {
+                                                                    const ids = escalationPriority.map(e => `${e.agent_name}:${e.model_name}`);
+                                                                    const oldIndex = ids.indexOf(String(active.id));
+                                                                    const newIndex = ids.indexOf(String(over.id));
+                                                                    saveEscalationPriority(arrayMove(escalationPriority, oldIndex, newIndex));
+                                                                }
+                                                            }}
+                                                        >
+                                                            <SortableContext
+                                                                items={escalationPriority.map(e => `${e.agent_name}:${e.model_name}`)}
+                                                                strategy={verticalListSortingStrategy}
+                                                            >
+                                                                <div className="space-y-1 max-h-[320px] overflow-y-auto">
+                                                                    {escalationPriority.map((entry, idx) => {
+                                                                        const matchesSearch = escalationSearch !== '' && (
+                                                                            entry.model_name.toLowerCase().includes(escalationSearch.toLowerCase()) ||
+                                                                            entry.agent_name.toLowerCase().includes(escalationSearch.toLowerCase())
+                                                                        );
+                                                                        return (
+                                                                            <SortableEscalationRow
+                                                                                key={`${entry.agent_name}-${entry.model_name}`}
+                                                                                id={`${entry.agent_name}:${entry.model_name}`}
+                                                                                entry={entry}
+                                                                                index={idx}
+                                                                                highlight={matchesSearch}
+                                                                            />
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </SortableContext>
+                                                        </DndContext>
+
+                                                    </>
+                                                ) : (
+                                                    <div className="rounded-md border border-dashed border-border/50 px-4 py-6 text-center">
+                                                        <div className="text-xs text-muted-foreground/60 mb-2">No escalation priority configured.</div>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="h-7 text-xs gap-1"
+                                                            onClick={() => {
+                                                                const generated: Array<{ agent_name: string; model_name: string; price: number }> = [];
+                                                                for (const agent of (currentBoard?.agents || [])) {
+                                                                    if (!agent.enabled) continue;
+                                                                    for (const m of agent.models) {
+                                                                        if (!m.enabled) continue;
+                                                                        const info = members.flatMap(mb => mb.availableModels || []).find(am => am.name === m.name);
+                                                                        generated.push({
+                                                                            agent_name: agent.name,
+                                                                            model_name: m.name,
+                                                                            price: info?.output_price_per_1m_tokens ?? 0,
+                                                                        });
+                                                                    }
+                                                                }
+                                                                generated.sort((a, b) => b.price - a.price);
+                                                                saveEscalationPriority(generated.map(({ agent_name, model_name }) => ({ agent_name, model_name })));
+                                                            }}
+                                                        >
+                                                            <Sparkles className="size-3" /> Generate from board agents
+                                                        </Button>
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
                                 </CardContent>
                             </Card>
                         </div>

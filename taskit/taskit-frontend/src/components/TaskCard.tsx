@@ -6,7 +6,7 @@ import { TaskTimeDisplay } from './TaskTimeDisplay';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2, Bot, GitBranch } from 'lucide-react';
+import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2, Bot, GitBranch, RotateCcw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -88,6 +88,7 @@ export const TaskCard = memo(function TaskCard({
     const hasUnseen = totalComments > seenCount;
     const needsExecutionReviewAttention = hasUnseenExecutionCompletion(task);
     const hasPendingQuestion = !!(task.metadata?.has_pending_question);
+    const escalationCount = (task.metadata?.escalation_count as number) || 0;
     const model = task.modelName || (task.metadata?.model ?? task.metadata?.selected_model) as string | undefined;
 
     // Resolve assignee full name
@@ -240,6 +241,12 @@ export const TaskCard = memo(function TaskCard({
                                         </span>
                                     </DependencyPreview>
                                 )}
+                                {escalationCount > 0 && (
+                                    <Badge variant="outline" className="text-[9px] h-3.5 px-1 gap-0.5 border-orange-400/40 text-orange-500" title={`Model escalation: retried ${escalationCount} time${escalationCount > 1 ? 's' : ''} after failure`}>
+                                        <RotateCcw className="size-2" />
+                                        {escalationCount}x
+                                    </Badge>
+                                )}
                                 <div className="flex items-center gap-1 ml-auto shrink-0">
                                     {hasUnseen && (
                                         <span className="relative flex size-1.5" title={`${totalComments - seenCount} new`}>
@@ -375,6 +382,12 @@ export const TaskCard = memo(function TaskCard({
                                                 <span className="truncate">Deps: {dependencyLabel}{hiddenDependencyCount > 0 ? ` +${hiddenDependencyCount}` : ''}</span>
                                             </span>
                                         </DependencyPreview>
+                                    )}
+                                    {escalationCount > 0 && (
+                                        <Badge variant="outline" className="text-[10px] h-4 px-1 gap-0.5 border-orange-400/40 text-orange-500" title={`Model escalation: retried ${escalationCount} time${escalationCount > 1 ? 's' : ''} after failure`}>
+                                            <RotateCcw className="size-2.5" />
+                                            {escalationCount}x
+                                        </Badge>
                                     )}
                                 </div>
 
