@@ -372,7 +372,7 @@ class SpecSerializer(serializers.ModelSerializer):
         fields = [
             "id", "odin_id", "title", "source", "content", "abandoned",
             "board_id", "metadata", "created_at", "tasks",
-            "comments", "cost_summary",
+            "comments", "cost_summary", "status", "planner_config",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -397,6 +397,7 @@ class SpecListSerializer(serializers.ModelSerializer):
         fields = [
             "id", "odin_id", "title", "source", "content", "abandoned",
             "board_id", "metadata", "created_at", "task_count", "cost_summary",
+            "status", "planner_config",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -412,12 +413,28 @@ class CreateSpecSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Spec
-        fields = ["odin_id", "title", "source", "content", "board_id", "metadata"]
+        fields = ["odin_id", "title", "source", "content", "board_id", "metadata", "status"]
         extra_kwargs = {
             "source": {"default": "inline"},
             "content": {"default": ""},
             "metadata": {"default": dict},
+            "status": {"required": False},
         }
+
+
+
+class CreatePlanningSpecSerializer(serializers.ModelSerializer):
+    """Serializer for UI-initiated planning spec creation."""
+    board_id = serializers.PrimaryKeyRelatedField(queryset=Board.objects.all(), source="board")
+
+    class Meta:
+        model = Spec
+        fields = ["title", "content", "board_id", "planner_config"]
+        extra_kwargs = {
+            "content": {"default": ""},
+            "planner_config": {"default": dict},
+        }
+
 
 
 

@@ -210,6 +210,8 @@ interface HarnessSpec {
     tasks?: HarnessTask[];
     task_count?: number;
     comments?: HarnessSpecComment[];
+    status?: string;
+    planner_config?: Record<string, unknown>;
     cost_summary?: {
         total_cost_usd: number;
         reflection_cost_usd: number;
@@ -247,6 +249,17 @@ interface PaginatedResponseBody<T> {
 interface DirectoryEntriesResponse {
     base_path: string;
     entries: DirectoryEntry[];
+}
+
+interface HarnessBoardAgent {
+    name: string;
+    enabled: boolean;
+    cli_command?: string;
+    capabilities?: string[];
+    cost_tier?: 'low' | 'medium' | 'high';
+    default_model?: string | null;
+    premium_model?: string | null;
+    models: Array<{ name: string; enabled: boolean; is_default: boolean; description: string }>;
 }
 
 interface HarnessIdeOption {
@@ -1205,9 +1218,35 @@ export class HarnessTimeService implements IntegrationService {
         }));
     }
 
+    async fetchBoardSpecFiles(boardId: string): Promise<{ name: string; path: string }[]> {
+        const resp = await this.get<{ files: { name: string; path: string }[] }>(`/api/boards/${Number(boardId)}/spec-files/`);
+        return resp.files;
+    }
+
+    async readBoardSpecFile(boardId: string, path: string): Promise<{ name: string; content: string }> {
+        return this.post<{ name: string; content: string }>(
+            `/api/boards/${Number(boardId)}/spec-files/read/`,
+            { path },
+        );
+    }
+
     async fetchBoardAgents(boardId: string): Promise<AgentConfig[]> {
-        const resp = await this.get<{ agents: AgentConfig[] }>(`/api/boards/${Number(boardId)}/agents/`);
-        return resp.agents;
+        const resp = await this.get<{ agents: HarnessBoardAgent[] }>(`/api/boards/${Number(boardId)}/agents/`);
+        return resp.agents.map((agent) => ({
+            name: agent.name,
+            enabled: agent.enabled,
+            cli_command: agent.cli_command,
+            capabilities: agent.capabilities || [],
+            cost_tier: agent.cost_tier || 'medium',
+            default_model: agent.default_model || undefined,
+            premium_model: agent.premium_model || undefined,
+            models: (agent.models || []).map((m) => ({
+                name: m.name,
+                description: m.description || '',
+                enabled: m.enabled,
+                is_default: m.is_default,
+            })),
+        }));
     }
 
     async toggleBoardAgent(boardId: string, agentName: string, enabled: boolean): Promise<{ name: string; enabled: boolean; board?: Record<string, unknown> }> {
@@ -1461,6 +1500,10 @@ export class HarnessTimeService implements IntegrationService {
                 reflectionCostUsd: t.reflection_cost_usd ?? undefined,
                 usage: t.usage ?? undefined,
             })),
+            status: (s.status as Spec['status']) ?? undefined,
+            plannerConfig: s.planner_config && Object.keys(s.planner_config).length > 0
+                ? s.planner_config as Spec['plannerConfig']
+                : undefined,
         };
     }
 
@@ -1573,6 +1616,32 @@ export class HarnessTimeService implements IntegrationService {
     async cloneSpec(specId: string): Promise<Spec> {
         const raw = await this.post<HarnessSpec>(`/api/specs/${Number(specId)}/clone/`, {});
         return this.transformSpec(raw);
+    }
+
+    async retryPlanning(specId: string): Promise<Spec> {
+        const raw = await this.post<HarnessSpec>(`/api/specs/${Number(specId)}/retry-planning/`, {});
+        return this.transformSpec(raw);
+    }
+
+    async activateSpec(specId: string): Promise<Spec> {
+        const raw = await this.post<HarnessSpec>(`/api/specs/${Number(specId)}/activate/`, {});
+        return this.transformSpec(raw);
+    }
+
+    async createPlanningSpec(data: {
+        title: string;
+        content: string;
+        boardId: string;
+        plannerConfig: { agent?: string; model?: string; quick?: boolean; auto?: boolean };
+    }): Promise<number> {
+        const body = {
+            title: data.title,
+            content: data.content,
+            board_id: Number(data.boardId),
+            planner_config: data.plannerConfig,
+        };
+        const result = await this.post<{ id: number }>('/api/specs/', body);
+        return result.id;
     }
 
     async finalizeSpec(specId: string): Promise<{ pr_url?: string; finalized_at?: string; error?: string }> {

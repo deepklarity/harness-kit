@@ -204,7 +204,10 @@ class ClaudeHarness(BaseHarness):
         except FileNotFoundError:
             self._current_pid = None
             yield f"[error] CLI '{self._cli}' not found on PATH\n"
-
+    @property
+    def supports_system_prompt_flag(self) -> bool:
+        return True
+    
     def build_interactive_command(self, system_prompt_file: str, context: dict) -> list[str] | None:
         cmd = [self._cli, "--system-prompt", f"__FILE__:{system_prompt_file}"]
         model = context.get("model")

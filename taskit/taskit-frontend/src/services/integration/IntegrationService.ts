@@ -153,6 +153,10 @@ export interface IntegrationService {
     cancelReflection(reportId: number): Promise<ReflectionReport>;
     deleteReflection(reportId: number): Promise<void>;
 
+    // Spec files (preexisting)
+    fetchBoardSpecFiles(boardId: string): Promise<{ name: string; path: string }[]>;
+    readBoardSpecFile(boardId: string, path: string): Promise<{ name: string; content: string }>;
+
     // Agents (config-based)
     fetchBoardAgents(boardId: string): Promise<AgentConfig[]>;
     toggleBoardAgent(boardId: string, agentName: string, enabled: boolean): Promise<{ name: string; enabled: boolean; board?: Record<string, unknown> }>;

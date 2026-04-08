@@ -261,7 +261,10 @@ def launch_and_attach(
     sess = f"{SESSION_PREFIX}plan-{session_id[:8]}"
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
 
-    # Build wrapper script that uses script(1) for transcript capture
+    # Build wrapper script — run the command directly (no script(1) wrapper).
+    # Transcript capture uses tmux capture-pane instead, which avoids the
+    # extra PTY layer that script(1) creates (that layer breaks Ctrl+C
+    # signal delivery to the CLI running inside the pane).
     unset_lines = ""
     if env_unset:
         unset_lines = " ".join(f"unset {v};" for v in env_unset) + "\n"
@@ -281,18 +284,18 @@ def launch_and_attach(
             cmd_parts.append(shlex.quote(arg))
     cmd_str = " ".join(cmd_parts)
 
-    # macOS and Linux have different script(1) syntax
-    if platform.system() == "Darwin":
-        # macOS script: script -q <file> <command...>
-        script_line = f"script -q {escaped_output} bash -c {shlex.quote(cmd_str)}"
-    else:
-        script_line = f"script -q -c {shlex.quote(cmd_str)} {escaped_output}"
+    scrollback_file = output_file + ".scrollback"
+    escaped_scrollback = shlex.quote(scrollback_file)
 
     script_content = (
         "#!/usr/bin/env bash\n"
         f"{unset_lines}"
-        f"{script_line}\n"
-        f"echo $? > {escaped_marker}\n"
+        f"{cmd_str}\n"
+        "EXIT_CODE=$?\n"
+        "# Capture the rendered scrollback as transcript\n"
+        f"tmux capture-pane -p -S -32768 > {escaped_scrollback} 2>/dev/null || true\n"
+        f"cp {escaped_scrollback} {escaped_output} 2>/dev/null || true\n"
+        f"echo $EXIT_CODE > {escaped_marker}\n"
     )
 
     script_dir = Path(output_file).parent
@@ -300,7 +303,7 @@ def launch_and_attach(
     script_path.write_text(script_content)
     script_path.chmod(0o755)
 
-    # Create detached tmux session
+    # Create detached tmux session with large scrollback for capture
     tmux_new = [
         "tmux", "new-session", "-d",
         "-s", sess,
@@ -313,6 +316,12 @@ def launch_and_attach(
         capture_output=True,
         text=True,
     )
+    if result.returncode == 0:
+        # Set large scrollback so capture-pane gets the full session
+        subprocess.run(
+            ["tmux", "set-option", "-t", sess, "history-limit", "50000"],
+            capture_output=True,
+        )
     if result.returncode != 0:
         raise RuntimeError(
             f"Failed to create tmux session '{sess}': {result.stderr.strip()}"

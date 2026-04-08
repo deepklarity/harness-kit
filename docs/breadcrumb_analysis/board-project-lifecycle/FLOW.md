@@ -84,4 +84,4 @@ On task completion:
 ## See also
 
 - `git-worktree-isolation/` — worktree branch model, merge serialization, conflict handling
-- `odin-plan-mode/` — planning dispatch, LLM decomposition, task creation
+- `planning-flow/03-orchestrator/` — planning dispatch, LLM decomposition, task creation

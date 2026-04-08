@@ -49,7 +49,7 @@ const TOOLBAR_ACTIONS: ToolbarAction[] = [
     { label: 'Divider', icon: Minus, shortcut: 'Ctrl+Shift+-', action: 'hr' },
 ];
 
-export function MarkdownEditor({ value, onChange, rows = 12, className, placeholder }: MarkdownEditorProps) {
+export function MarkdownEditor({ value, onChange, rows = 14, className, placeholder }: MarkdownEditorProps) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showPreview, setShowPreview] = useState(false);
     const [history, setHistory] = useState<string[]>([value]);
@@ -253,78 +253,78 @@ export function MarkdownEditor({ value, onChange, rows = 12, className, placehol
     }, [onChange, addToHistory]);
 
     return (
-        <div className={`relative border border-border rounded-lg overflow-hidden bg-card ${className}`}>
+        <div className={`relative border border-border rounded-lg overflow-hidden bg-card flex flex-col ${className}`}>
             {/* Toolbar */}
-            <div className="flex flex-wrap items-center gap-0.5 p-1.5 border-b border-border bg-muted/30">
-                <div className="flex items-center gap-0.5 pr-2 border-r border-border">
+            <div className="flex flex-wrap items-center gap-px p-1 border-b border-border bg-muted/30 shrink-0">
+                <div className="flex items-center gap-px pr-1.5 border-r border-border">
                     <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0"
+                        className="h-6 w-6 p-0"
                         onClick={handleUndo}
                         disabled={historyIndex <= 0}
                         title="Undo (Ctrl+Z)"
                     >
-                        <Undo2 className="size-3.5" />
+                        <Undo2 className="size-3" />
                     </Button>
                     <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0"
+                        className="h-6 w-6 p-0"
                         onClick={handleRedo}
                         disabled={historyIndex >= history.length - 1}
                         title="Redo (Ctrl+Y)"
                     >
-                        <Redo2 className="size-3.5" />
+                        <Redo2 className="size-3" />
                     </Button>
                 </div>
 
-                <div className="flex items-center gap-0.5 px-2">
+                <div className="flex items-center gap-px px-1.5">
                     {TOOLBAR_ACTIONS.slice(0, 4).map(action => (
                         <Button
                             key={action.label}
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="h-7 w-7 p-0"
+                            className="h-6 w-6 p-0"
                             onClick={() => applyFormatting(action.action)}
                             title={`${action.label} (${action.shortcut})`}
                         >
-                            <action.icon className="size-3.5" />
+                            <action.icon className="size-3" />
                         </Button>
                     ))}
                 </div>
 
-                <div className="flex items-center gap-0.5 px-2 border-l border-border pl-2">
+                <div className="flex items-center gap-px px-1.5 border-l border-border pl-1.5">
                     {TOOLBAR_ACTIONS.slice(4, 9).map(action => (
                         <Button
                             key={action.label}
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="h-7 w-7 p-0"
+                            className="h-6 w-6 p-0"
                             onClick={() => applyFormatting(action.action)}
                             title={`${action.label} (${action.shortcut})`}
                         >
-                            <action.icon className="size-3.5" />
+                            <action.icon className="size-3" />
                         </Button>
                     ))}
                 </div>
 
-                <div className="flex items-center gap-0.5 px-2 border-l border-border pl-2">
+                <div className="flex items-center gap-px px-1.5 border-l border-border pl-1.5">
                     {TOOLBAR_ACTIONS.slice(9).map(action => (
                         <Button
                             key={action.label}
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="h-7 w-7 p-0"
+                            className="h-6 w-6 p-0"
                             onClick={() => applyFormatting(action.action)}
                             title={`${action.label} (${action.shortcut})`}
                         >
-                            <action.icon className="size-3.5" />
+                            <action.icon className="size-3" />
                         </Button>
                     ))}
                 </div>
@@ -335,17 +335,17 @@ export function MarkdownEditor({ value, onChange, rows = 12, className, placehol
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 gap-1.5"
+                    className="h-6 px-1.5 gap-1"
                     onClick={() => setShowPreview(!showPreview)}
                     title={showPreview ? 'Hide preview' : 'Show preview'}
                 >
-                    {showPreview ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                    <span className="text-xs">{showPreview ? 'Hide' : 'Preview'}</span>
+                    {showPreview ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+                    <span className="text-[11px]">{showPreview ? 'Hide' : 'Preview'}</span>
                 </Button>
             </div>
 
             {/* Editor + Preview */}
-            <div className={`flex ${showPreview ? 'flex-col md:flex-row' : 'flex-col'}`}>
+            <div className={`flex min-h-0 flex-1 ${showPreview ? 'flex-col md:flex-row' : 'flex-col'}`}>
                 <textarea
                     ref={textareaRef}
                     value={value}
@@ -369,19 +369,18 @@ export function MarkdownEditor({ value, onChange, rows = 12, className, placehol
             </div>
 
             {/* Status bar */}
-            <div className="flex items-center justify-between px-3 py-1.5 border-t border-border bg-muted/30 text-xs text-muted-foreground">
-                <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between px-2 py-1 border-t border-border bg-muted/30 text-[11px] text-muted-foreground shrink-0">
+                <div className="flex items-center gap-2">
                     <span>Markdown</span>
                     <span>•</span>
                     <span>{value.length} chars</span>
                     <span>•</span>
                     <span>{value.split(/\s+/).filter(Boolean).length} words</span>
                 </div>
-                <div className="hidden sm:flex items-center gap-2">
-                    <span className="text-muted-foreground/60">Shortcuts:</span>
-                    <kbd className="px-1.5 py-0.5 bg-background rounded border text-[10px]">Ctrl+B</kbd>
+                <div className="hidden sm:flex items-center gap-1.5">
+                    <kbd className="px-1 py-px bg-background rounded border text-[9px]">Ctrl+B</kbd>
                     <span className="text-muted-foreground/60">bold</span>
-                    <kbd className="px-1.5 py-0.5 bg-background rounded border text-[10px]">Ctrl+I</kbd>
+                    <kbd className="px-1 py-px bg-background rounded border text-[9px]">Ctrl+I</kbd>
                     <span className="text-muted-foreground/60">italic</span>
                 </div>
             </div>

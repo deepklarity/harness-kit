@@ -569,6 +569,26 @@ class TaskItBackend(BoardBackend):
             spec_id, success, duration_ms,
         )
 
+    def mark_planning_complete(self, spec_id: str) -> None:
+        """POST /specs/:id/planning-complete/ to transition status."""
+        taskit_pk = self._resolve_spec_pk(spec_id)
+        if taskit_pk is None:
+            logger.warning("Cannot mark planning complete: spec %s not found", spec_id)
+            return
+        resp = self._client.post(f"/specs/{taskit_pk}/planning-complete/")
+        _raise_for_status(resp)
+        logger.info("Spec %s marked planning_complete", spec_id)
+
+    def mark_planning_failed(self, spec_id: str) -> None:
+        """POST /specs/:id/planning-failed/ to transition status."""
+        taskit_pk = self._resolve_spec_pk(spec_id)
+        if taskit_pk is None:
+            logger.warning("Cannot mark planning failed: spec %s not found", spec_id)
+            return
+        resp = self._client.post(f"/specs/{taskit_pk}/planning-failed/")
+        _raise_for_status(resp)
+        logger.info("Spec %s marked planning_failed", spec_id)
+
     def update_spec_metadata(
         self,
         spec_id: str,
@@ -600,15 +620,21 @@ class TaskItBackend(BoardBackend):
         existing = _unwrap_list(resp.json())
 
         if existing:
-            # Update existing spec
+            # Update existing spec — preserve the existing title (may have
+            # been set by the UI) unless the spec was created via CLI.
             taskit_id = existing[0]["id"]
             self._spec_pk_cache[spec.id] = taskit_id
-            payload = {
-                "title": spec.title,
+            payload: dict = {
                 "abandoned": spec.abandoned,
                 "metadata": spec.metadata,
                 "updated_by": self._created_by,
             }
+            # Only overwrite title if the existing spec has no title or
+            # its current title is a temp file path (created by the UI
+            # planning consumer).
+            existing_title = existing[0].get("title", "")
+            if not existing_title or existing_title == spec.title:
+                payload["title"] = spec.title
             resp = self._client.put(f"/specs/{taskit_id}/", json=payload)
             _raise_for_status(resp)
         else:
@@ -620,6 +646,7 @@ class TaskItBackend(BoardBackend):
                 "content": spec.content,
                 "board_id": self._board_id,
                 "metadata": spec.metadata,
+                "status": "planning",
             }
             resp = self._client.post("/specs/", json=payload)
             _raise_for_status(resp)

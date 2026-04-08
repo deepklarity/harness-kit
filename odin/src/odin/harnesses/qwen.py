@@ -129,11 +129,17 @@ class QwenHarness(BaseHarness):
             self._current_pid = None
             yield f"[error] CLI '{self._cli}' not found on PATH\n"
 
+    @property
+    def supports_system_prompt_flag(self) -> bool:
+        return False
+
     def build_interactive_command(self, system_prompt_file: str, context: dict) -> list[str] | None:
         # Qwen CLI does not support a dedicated system-prompt flag.
         # Seed the session with the planning instructions as the initial
         # interactive prompt so the user can continue the conversation.
         cmd = [self._cli, "--prompt-interactive", f"__FILE__:{system_prompt_file}"]
+        extra = self.config.execute_args or "--yolo"
+        cmd.extend(shlex.split(extra))
         model = context.get("model")
         if model:
             cmd.extend(["--model", model])

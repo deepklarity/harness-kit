@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import uuid
 from datetime import datetime, time
 from pathlib import Path
 from collections import deque
@@ -51,6 +52,7 @@ from .serializers import (
     CreateBoardSerializer,
     CreateScheduleSerializer,
     CommentAttachmentSerializer,
+    CreatePlanningSpecSerializer,
     CreateSpecSerializer,
     CreateTaskCommentSerializer,
     ModelToggleSerializer,
@@ -1510,6 +1512,46 @@ class BoardViewSet(viewsets.ModelViewSet):
             "enabled": enabled,
         })
 
+    @action(detail=True, methods=["get"], url_path="spec-files", url_name="spec-files")
+    def spec_files(self, request, *args, **kwargs):
+        """List .md spec files from the board's ./specs directory."""
+        board = self.get_object()
+        working_dir = (board.working_dir or "").strip()
+        if not working_dir:
+            return Response({"files": []})
+
+        specs_dir = Path(working_dir) / "specs"
+        if not specs_dir.is_dir():
+            return Response({"files": []})
+
+        files = []
+        for p in sorted(specs_dir.iterdir()):
+            if p.is_file() and p.suffix.lower() in (".md", ".txt"):
+                files.append({"name": p.name, "path": str(p.relative_to(working_dir))})
+        return Response({"files": files})
+
+    @action(detail=True, methods=["post"], url_path="spec-files/read", url_name="spec-files-read")
+    def spec_files_read(self, request, *args, **kwargs):
+        """Read the content of a spec file by relative path."""
+        board = self.get_object()
+        working_dir = (board.working_dir or "").strip()
+        if not working_dir:
+            raise ValidationError({"detail": "Board has no working directory set."})
+
+        rel_path = (request.data.get("path") or "").strip()
+        if not rel_path:
+            raise ValidationError({"path": "File path is required."})
+
+        file_path = (Path(working_dir) / rel_path).resolve()
+        # Prevent path traversal outside working_dir
+        if not str(file_path).startswith(str(Path(working_dir).resolve())):
+            raise ValidationError({"path": "Invalid file path."})
+        if not file_path.is_file():
+            raise ValidationError({"path": "File not found."})
+
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        return Response({"name": file_path.name, "content": content})
+
     @action(detail=True, methods=["post"])
     def clear(self, request, *args, **kwargs):
         """Delete all tasks (and their history via cascade) and specs for this board."""
@@ -2949,6 +2991,14 @@ class SpecViewSet(viewsets.ModelViewSet):
 
         status_values = [s.lower() for s in _parse_multi_values(query_params, "status")]
         if status_values:
+            # Planning-specific statuses use the new status field
+            new_status_values = [
+                s for s in status_values
+                if s in (Spec.STATUS_PLANNING, Spec.STATUS_PLANNING_COMPLETE, Spec.STATUS_PLANNING_FAILED)
+            ]
+            if new_status_values:
+                qs = qs.filter(status__in=new_status_values)
+            # Legacy: "active" → abandoned=False, "abandoned" → abandoned=True
             abandoned_values = []
             if "abandoned" in status_values:
                 abandoned_values.append(True)
@@ -2973,22 +3023,75 @@ class SpecViewSet(viewsets.ModelViewSet):
             "title": "title",
             "task_count": "task_count",
         }))
+
+        # Exclude temporary specs created by `odin plan` during UI planning
+        # sessions.  The consumer writes the spec content to a temp file named
+        # spec_{pk}_{random}.md and odin registers a new spec using that file
+        # path as the title.  These byproduct specs are merged into the UI
+        # planning spec (and deleted) when planning completes — but while
+        # planning is running they would otherwise clutter the list.
+        # Only exclude on list views — detail/update/delete must always find
+        # the spec by PK, and odin_id lookups need exact matches for upsert.
+        if self.action == "list" and not odin_id:
+            qs = qs.exclude(title__regex=r'spec_\d+_[a-z0-9_]+\.md$')
+
         return qs
 
     def get_serializer_class(self):
         if self.action == "create":
+            if "planner_config" in self.request.data or "plannerConfig" in self.request.data:
+                return CreatePlanningSpecSerializer
             return CreateSpecSerializer
         if self.action == "list":
             return SpecListSerializer
         return SpecSerializer
 
     def create(self, request, *args, **kwargs):
-        serializer = CreateSpecSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        spec = serializer.save()
+        is_planning = "planner_config" in request.data or "plannerConfig" in request.data
+        if is_planning:
+            serializer = CreatePlanningSpecSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            spec = serializer.save(
+                odin_id=f"ui-planning-{uuid.uuid4().hex[:12]}",
+                source="ui",
+                status=Spec.STATUS_PLANNING,
+            )
+        else:
+            serializer = CreateSpecSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            spec = serializer.save()
         return Response(
             SpecSerializer(spec).data, status=status.HTTP_201_CREATED
         )
+
+    @action(detail=True, methods=["post"], url_path="planning-complete")
+    def mark_planning_complete(self, request, pk=None):
+        """Mark a planning spec as complete (called internally after planning finishes)."""
+        spec = self.get_object()
+        spec.status = Spec.STATUS_PLANNING_COMPLETE
+        spec.save(update_fields=["status"])
+        return Response({"status": "ok"})
+
+    @action(detail=True, methods=["post"], url_path="planning-failed")
+    def mark_planning_failed(self, request, pk=None):
+        """Mark a planning spec as failed (called by CLI when planning crashes)."""
+        spec = self.get_object()
+        spec.status = Spec.STATUS_PLANNING_FAILED
+        spec.save(update_fields=["status"])
+        return Response({"status": "ok"})
+
+    @action(detail=True, methods=["post"], url_path="retry-planning")
+    def retry_planning(self, request, pk=None):
+        """Reset a failed planning spec back to planning so the terminal can reconnect."""
+        spec = self.get_object()
+        if spec.status not in (Spec.STATUS_PLANNING_FAILED, Spec.STATUS_PLANNING):
+            return Response(
+                {"error": "Can only retry specs with status planning_failed"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        spec.status = Spec.STATUS_PLANNING
+        spec.save(update_fields=["status"])
+        return Response(SpecSerializer(spec).data)
 
     def retrieve(self, request, *args, **kwargs):
         spec = get_object_or_404(
@@ -3015,6 +3118,19 @@ class SpecViewSet(viewsets.ModelViewSet):
         spec.save()
         return Response(SpecSerializer(spec).data)
 
+
+    @action(detail=True, methods=["post"])
+    def activate(self, request, pk=None):
+        """Transition a planning_complete spec to active so execution can begin."""
+        spec = self.get_object()
+        if spec.status != Spec.STATUS_PLANNING_COMPLETE:
+            return Response(
+                {"error": "Can only activate specs with status planning_complete"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        spec.status = Spec.STATUS_ACTIVE
+        spec.save(update_fields=["status"])
+        return Response(SpecSerializer(spec).data)
 
     @action(detail=True, methods=["get"], url_path="diagnostic")
     def diagnostic(self, request, pk=None):

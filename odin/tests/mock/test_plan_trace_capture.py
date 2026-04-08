@@ -109,6 +109,28 @@ class TestDecomposeReturnsResult:
         assert result is not None
         assert "Chunk 1" in result.output
 
+    def test_decompose_passes_explicit_base_model_to_harness(self, odin_dirs, config_with_mock):
+        """An explicit planning base_model should be forwarded to the harness context."""
+        config_with_mock.base_model = "mock-model-pinned"
+        orch = Orchestrator(config=config_with_mock)
+
+        fake_result = TaskResult(
+            success=True,
+            output="Plan written.",
+            duration_ms=1000,
+            agent="mock",
+        )
+        mock_harness = MagicMock()
+        mock_harness.execute = AsyncMock(return_value=fake_result)
+
+        with patch("odin.orchestrator.get_harness", return_value=mock_harness):
+            result = asyncio.get_event_loop().run_until_complete(
+                orch._decompose("plan prompt", str(odin_dirs["root"]), spec_id="sp_test_003")
+            )
+
+        assert result is not None
+        assert mock_harness.execute.await_args.args[1]["model"] == "mock-model-pinned"
+
 
 class TestPlanPostsPlanningResult:
     """plan() should post the planning trace to the backend after harness completes."""

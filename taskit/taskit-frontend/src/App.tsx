@@ -10,6 +10,7 @@ import { AppHeader, ALL_BOARDS_ID, VIEW_ROUTES } from './components/AppHeader';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { CreateBoardModal } from './components/CreateBoardModal';
 import { CreateTaskModal } from './components/CreateTaskModal';
+import { CreateSpecModal } from './components/CreateSpecModal';
 import { KPICards } from './components/KPICards';
 import { DashboardCharts } from './components/DashboardCharts';
 import { SettingsView } from './components/SettingsView';
@@ -106,7 +107,12 @@ function App() {
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [taskDetailLoading, setTaskDetailLoading] = useState(false);
     const [showCreateBoard, setShowCreateBoard] = useState(false);
-    const [showCreateTask, setShowCreateTask] = useState(false);
+    const [createModal, setCreateModal] = useState<'task' | 'spec' | null>(() => {
+        const p = new URLSearchParams(window.location.search).get('create');
+        return p === 'task' || p === 'spec' ? p : null;
+    });
+    const showCreateTask = createModal === 'task';
+    const showCreateSpec = createModal === 'spec';
     const [overviewTasks, setOverviewTasks] = useState<Task[]>([]);
     const [overviewReflections, setOverviewReflections] = useState<ReflectionReport[]>([]);
     const [overviewLoading, setOverviewLoading] = useState(false);
@@ -118,7 +124,20 @@ function App() {
     const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
     const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState<string | undefined>();
 
-    const suppressSingleKeys = showCreateTask || showCreateBoard || !!selectedTask
+    const openCreateModal = useCallback((type: 'task' | 'spec') => {
+        setCreateModal(type);
+        const url = new URL(window.location.href);
+        url.searchParams.set('create', type);
+        window.history.replaceState(null, '', url.toString());
+    }, []);
+    const closeCreateModal = useCallback(() => {
+        setCreateModal(null);
+        const url = new URL(window.location.href);
+        url.searchParams.delete('create');
+        window.history.replaceState(null, '', url.toString());
+    }, []);
+
+    const suppressSingleKeys = showCreateTask || showCreateSpec || showCreateBoard || !!selectedTask
         || processModalOpen || !!selectedUser || commandPaletteOpen;
 
     const globalShortcutActions = useCallback(() => ({
@@ -126,7 +145,7 @@ function App() {
             setCommandPaletteInitialQuery(initialQuery);
             setCommandPaletteOpen(true);
         },
-        createTask: () => setShowCreateTask(true),
+        createTask: () => openCreateModal('task'),
         navigateTo: (path: string) => {
             const board = searchParams.get('board');
             navigate(board ? `${path}?board=${board}` : path);
@@ -144,11 +163,9 @@ function App() {
     const needsMembers = viewMode === 'board'
         || viewMode === 'settings'
         || viewMode === 'overview'
-        || showCreateTask
         || !!selectedTask;
-    const needsSpecs = showCreateTask;
+    const needsSpecs = false;
     const needsLabels = viewMode === 'board'
-        || showCreateTask
         || !!selectedTask;
 
     const loadShellData = useCallback(async () => {
@@ -683,7 +700,8 @@ function App() {
                     viewMode={viewMode}
                     onBoardChange={handleBoardChange}
                     onNavChange={handleNavChange}
-                    onCreateTask={() => setShowCreateTask(true)}
+                    onCreateTask={() => openCreateModal('task')}
+                    onCreateSpec={() => openCreateModal('spec')}
                     onCreateBoard={() => setShowCreateBoard(true)}
                     onNavigateHome={() => {
                         const board = searchParams.get('board');
@@ -814,12 +832,25 @@ function App() {
                             role: m.role,
                             availableModels: m.availableModels,
                         }))}
-                        onClose={() => setShowCreateTask(false)}
+                        onClose={closeCreateModal}
                         onCreate={handleCreateTask}
                         onCreateSchedule={handleCreateSchedule}
                         availableLabels={labels}
                     />
                 )}
+
+                <CreateSpecModal
+                    open={showCreateSpec}
+                    onOpenChange={(open) => { if (!open) closeCreateModal(); }}
+                    boardId={selectedBoard === ALL_BOARDS_ID ? '' : (selectedBoard ?? '')}
+                    board={currentBoard ?? null}
+                    onCreated={(specId) => {
+                        closeCreateModal();
+                        const board = searchParams.get('board');
+                        navigate(board ? `/specs/${specId}?board=${board}` : `/specs/${specId}`);
+                    }}
+                    onClose={closeCreateModal}
+                />
 
                 <ProcessMonitorModal
                     open={processModalOpen}
@@ -834,7 +865,7 @@ function App() {
                     onClose={() => { setCommandPaletteOpen(false); setCommandPaletteInitialQuery(undefined); }}
                     boards={boards}
                     navigate={(path) => { const b = searchParams.get('board'); navigate(b ? `${path}?board=${b}` : path); }}
-                    onCreateTask={() => { setCommandPaletteOpen(false); setShowCreateTask(true); }}
+                    onCreateTask={() => { setCommandPaletteOpen(false); openCreateModal('task'); }}
                     onCreateBoard={() => { setCommandPaletteOpen(false); setShowCreateBoard(true); }}
                     onTaskSelect={(taskId) => { setCommandPaletteOpen(false); handleTaskSelect(taskId); }}
                     onBoardChange={(id) => { setCommandPaletteOpen(false); handleBoardChange(id); }}

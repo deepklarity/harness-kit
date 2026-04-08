@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import {
     ChevronRight, Copy, Check, Zap,
     Wrench, Terminal, Activity, Box, User, Bot,
-    FileCode, FileText, Search, ChevronUp, ExternalLink,
-    Clock, AlertTriangle
+    FileCode, FileText, Search, ChevronUp, ChevronDown, ExternalLink,
+    Clock, AlertTriangle, X
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -1058,12 +1058,118 @@ function TimelineView({ events }: { events: TraceEvent[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Inline search bar (shared by TraceViewer + TerminalOutputView)
+// ---------------------------------------------------------------------------
+
+function useTextSearch(text: string) {
+    const [query, setQuery] = useState('');
+    const [activeIdx, setActiveIdx] = useState(0);
+    const [open, setOpen] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    const matches = useMemo(() => {
+        if (!query || query.length < 2) return [];
+        const q = query.toLowerCase();
+        const results: number[] = [];
+        let pos = 0;
+        const lower = text.toLowerCase();
+        while ((pos = lower.indexOf(q, pos)) !== -1) {
+            results.push(pos);
+            pos += q.length;
+        }
+        return results;
+    }, [text, query]);
+
+    const toggle = useCallback(() => {
+        setOpen(v => {
+            if (!v) setTimeout(() => inputRef.current?.focus(), 0);
+            else { setQuery(''); setActiveIdx(0); }
+            return !v;
+        });
+    }, []);
+
+    const next = useCallback(() => setActiveIdx(i => (i + 1) % Math.max(matches.length, 1)), [matches.length]);
+    const prev = useCallback(() => setActiveIdx(i => (i - 1 + matches.length) % Math.max(matches.length, 1)), [matches.length]);
+
+    return { query, setQuery, activeIdx, setActiveIdx, matches, open, toggle, next, prev, inputRef };
+}
+
+function SearchBar({ search }: { search: ReturnType<typeof useTextSearch> }) {
+    if (!search.open) return null;
+    return (
+        <div className="flex items-center gap-1.5 px-3 py-1 bg-[#141417] border-b border-[#2b2b2e] shrink-0">
+            <Search className="size-3 text-zinc-500" />
+            <input
+                ref={search.inputRef}
+                value={search.query}
+                onChange={e => { search.setQuery(e.target.value); search.setActiveIdx(0); }}
+                onKeyDown={e => { if (e.key === 'Enter') e.shiftKey ? search.prev() : search.next(); if (e.key === 'Escape') search.toggle(); }}
+                placeholder="Search..."
+                className="bg-transparent text-[11px] text-zinc-300 placeholder:text-zinc-600 outline-none flex-1 font-mono min-w-0"
+            />
+            {search.query.length >= 2 && (
+                <span className="text-[9px] text-zinc-500 font-mono shrink-0">
+                    {search.matches.length > 0 ? `${search.activeIdx + 1}/${search.matches.length}` : 'No matches'}
+                </span>
+            )}
+            <button onClick={search.prev} className="text-zinc-500 hover:text-zinc-300 transition-colors" title="Previous (Shift+Enter)">
+                <ChevronUp className="size-3" />
+            </button>
+            <button onClick={search.next} className="text-zinc-500 hover:text-zinc-300 transition-colors" title="Next (Enter)">
+                <ChevronDown className="size-3" />
+            </button>
+            <button onClick={search.toggle} className="text-zinc-500 hover:text-zinc-300 transition-colors" title="Close">
+                <X className="size-3" />
+            </button>
+        </div>
+    );
+}
+
+/** Render text with search matches highlighted. Scrolls active match into view. */
+function HighlightedText({ text, search }: { text: string; search: ReturnType<typeof useTextSearch> }) {
+    const activeRef = useRef<HTMLSpanElement>(null);
+    const { query, matches, activeIdx } = search;
+
+    // Scroll active match into view
+    const prevIdx = useRef(-1);
+    if (activeRef.current && activeIdx !== prevIdx.current) {
+        activeRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        prevIdx.current = activeIdx;
+    }
+
+    if (!query || query.length < 2 || matches.length === 0) {
+        return <>{text}</>;
+    }
+
+    const parts: React.ReactNode[] = [];
+    let last = 0;
+    const qLen = query.length;
+    matches.forEach((pos, i) => {
+        if (pos > last) parts.push(text.slice(last, pos));
+        const isActive = i === activeIdx;
+        parts.push(
+            <span
+                key={i}
+                ref={isActive ? activeRef : undefined}
+                className={isActive ? 'bg-amber-400/40 text-amber-200 rounded-sm' : 'bg-zinc-600/50 text-zinc-200 rounded-sm'}
+            >
+                {text.slice(pos, pos + qLen)}
+            </span>
+        );
+        last = pos + qLen;
+    });
+    if (last < text.length) parts.push(text.slice(last));
+    return <>{parts}</>;
+}
+
+// ---------------------------------------------------------------------------
 // Main TraceViewer
 // ---------------------------------------------------------------------------
 
 export function TraceViewer({ traceText }: { traceText: string }) {
     const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
     const [viewMode, setViewMode] = useState<'timeline' | 'raw'>('timeline');
+    const search = useTextSearch(traceText);
 
     const events = useMemo(() => parseTrace(traceText), [traceText]);
     const tokenSummary = useMemo(() => extractTokenSummary(events), [events]);
@@ -1100,6 +1206,13 @@ export function TraceViewer({ traceText }: { traceText: string }) {
                         <button onClick={() => setViewMode('raw')} className={cn("text-[9px] px-2 py-0.5 rounded font-mono transition-colors", viewMode === 'raw' ? "bg-zinc-700 text-zinc-100 shadow" : "text-zinc-500 hover:text-zinc-300")}>Raw</button>
                     </div>
                     <button
+                        className={cn("text-[9px] font-mono flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded", search.open ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800")}
+                        onClick={search.toggle}
+                        title="Search (Ctrl+F)"
+                    >
+                        <Search className="size-2.5" /> Search
+                    </button>
+                    <button
                         className="text-[9px] text-zinc-400 hover:text-zinc-200 border border-transparent hover:bg-zinc-800 font-mono flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded"
                         onClick={handleCopy}
                     >
@@ -1110,6 +1223,7 @@ export function TraceViewer({ traceText }: { traceText: string }) {
                     </button>
                 </div>
             </div>
+            <SearchBar search={search} />
 
             {/* Token summary bar */}
             {tokenSummary && (
@@ -1152,7 +1266,7 @@ export function TraceViewer({ traceText }: { traceText: string }) {
 
             {viewMode === 'raw' && (
                 <pre className="text-[10px] font-mono text-zinc-400 p-3 overflow-auto flex-1 whitespace-pre-wrap leading-relaxed custom-scrollbar bg-[#0e0e11]">
-                    {traceText}
+                    <HighlightedText text={traceText} search={search} />
                 </pre>
             )}
 
@@ -1160,6 +1274,65 @@ export function TraceViewer({ traceText }: { traceText: string }) {
                 <TimelineView events={events} />
             )}
 
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// TerminalOutputView — static terminal-style container for interactive mode
+// ---------------------------------------------------------------------------
+
+export function TerminalOutputView({ text, label }: { text: string; label?: string }) {
+    const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
+    const search = useTextSearch(text);
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopyState('copied');
+            setTimeout(() => setCopyState('idle'), 1400);
+        } catch { }
+    };
+
+    if (!text.trim()) return null;
+
+    return (
+        <div className="mt-2 rounded-xl border border-zinc-800/80 bg-[#0e0e11] overflow-hidden shadow-sm flex flex-col max-h-[500px]">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-[#141417] border-b border-[#2b2b2e] shrink-0">
+                <div className="flex items-center gap-2">
+                    <div className="flex gap-1.5">
+                        <span className="size-2.5 rounded-full bg-[#ff5f57]" />
+                        <span className="size-2.5 rounded-full bg-[#ffbd2e]" />
+                        <span className="size-2.5 rounded-full bg-[#27c93f]" />
+                    </div>
+                    <Terminal className="size-3.5 text-violet-400" />
+                    <span className="text-[11px] font-semibold text-zinc-300 tracking-wide">
+                        {label || 'Session Transcript'}
+                    </span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        className={cn("text-[9px] font-mono flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded", search.open ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800")}
+                        onClick={search.toggle}
+                        title="Search"
+                    >
+                        <Search className="size-2.5" /> Search
+                    </button>
+                    <button
+                        className="text-[9px] text-zinc-400 hover:text-zinc-200 border border-transparent hover:bg-zinc-800 font-mono flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded"
+                        onClick={handleCopy}
+                    >
+                        {copyState === 'copied'
+                            ? <><Check className="size-2.5 text-emerald-400" /> Copied</>
+                            : <><Copy className="size-2.5" /> Copy</>
+                        }
+                    </button>
+                </div>
+            </div>
+            <SearchBar search={search} />
+            <pre className="text-[11px] font-mono text-zinc-300 p-3 overflow-auto flex-1 whitespace-pre-wrap break-words leading-relaxed custom-scrollbar bg-[#0e0e11]">
+                <HighlightedText text={text} search={search} />
+            </pre>
         </div>
     );
 }

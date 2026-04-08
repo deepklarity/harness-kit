@@ -360,6 +360,10 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                 if (!active) return;
                 setDetectedIdes(options.detected_ides || []);
                 setPreferredIdeId(options.preferred_ide_id || null);
+                // Keep localStorage in sync for EditorLink
+                if (options.preferred_ide_id) {
+                    localStorage.setItem('preferred-editor', options.preferred_ide_id);
+                }
             })
             .catch(() => {
                 if (!active) return;
@@ -380,6 +384,12 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
         try {
             const saved = await service.saveIdeSettings(ideId);
             setPreferredIdeId(saved.preferred_ide_id || null);
+            // Sync to localStorage so EditorLink picks it up without an API call
+            if (saved.preferred_ide_id) {
+                localStorage.setItem('preferred-editor', saved.preferred_ide_id);
+            } else {
+                localStorage.removeItem('preferred-editor');
+            }
             setShowIdeSetup(false);
             toast({ title: 'IDE saved', description: 'Open Project will use this IDE by default.' });
         } catch (e) {

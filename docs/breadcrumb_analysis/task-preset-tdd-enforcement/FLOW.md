@@ -162,7 +162,7 @@ Key structural properties:
 
 ## Cross-references
 
-- Current planning flow: `odin-plan-mode/FLOW.md`
+- Current planning flow: `planning-flow/03-orchestrator/FLOW.md`
 - Current execution flow: `spec-task-lifecycle/02-execute-and-dispatch/FLOW.md`
 - Current reflection flow: `spec-task-lifecycle/03-reflection-loop/FLOW.md`
 - Task proof submission: `task-proof-submission/FLOW.md`

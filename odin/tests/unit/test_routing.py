@@ -477,12 +477,15 @@ class TestRouteTaskTierDistribution:
 
 
 class TestRouteTaskPremiumUpgrade:
-    """High-complexity tasks should be upgraded to premium_model when available."""
+    """High-complexity tasks should be upgraded to premium_model when the
+    router picked the model (no planner suggestion). When the planner
+    explicitly suggested a model, that choice is respected — the planner
+    already knows the complexity."""
 
     @pytest.mark.asyncio
-    async def test_high_complexity_upgrades_to_premium(self, tmp_path):
-        """A high-complexity task assigned to an agent with premium_model
-        should be upgraded."""
+    async def test_high_complexity_upgrades_when_no_model_suggested(self, tmp_path):
+        """When the router picks the model (no suggested_model), high complexity
+        triggers premium upgrade."""
         agents = {
             "gemini": AgentConfig(
                 cli_command="gemini",
@@ -504,9 +507,73 @@ class TestRouteTaskPremiumUpgrade:
 
         assert agent == "gemini"
         assert model == "gemini-2.5-pro", (
-            f"High complexity should upgrade to premium, got '{model}'"
+            f"High complexity should upgrade to premium when router picked model, got '{model}'"
         )
         assert "premium" in reasoning
+
+    @pytest.mark.asyncio
+    async def test_high_complexity_upgrades_when_only_agent_suggested(self, tmp_path):
+        """When planner suggests agent but NOT model, high complexity still
+        triggers premium upgrade — the router picked the model."""
+        agents = {
+            "gemini": AgentConfig(
+                cli_command="gemini",
+                capabilities=["writing", "coding"],
+                cost_tier=CostTier.LOW,
+                premium_model="gemini-2.5-pro",
+            ),
+        }
+        routing = [ModelRoute(agent="gemini", model="gemini-2.5-flash")]
+        orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
+
+        with _mock_all_available():
+            agent, model, reasoning = await orch._route_task(
+                required_caps=["writing"],
+                complexity="high",
+                suggested="gemini",
+                quota=None,
+                suggested_model=None,
+            )
+
+        assert agent == "gemini"
+        assert model == "gemini-2.5-pro", (
+            f"High complexity + agent-only suggestion should upgrade to premium, got '{model}'"
+        )
+        assert "premium" in reasoning
+
+    @pytest.mark.asyncio
+    async def test_high_complexity_no_upgrade_when_model_suggested(self, tmp_path):
+        """When planner explicitly suggests a model, high complexity does NOT
+        override it. The planner already considered complexity when choosing."""
+        agents = {
+            "gemini": AgentConfig(
+                cli_command="gemini",
+                capabilities=["writing", "coding"],
+                cost_tier=CostTier.LOW,
+                premium_model="gemini-2.5-pro",
+            ),
+        }
+        routing = [
+            ModelRoute(agent="gemini", model="gemini-2.5-flash"),
+            ModelRoute(agent="gemini", model="gemini-2.0-flash"),
+        ]
+        orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
+
+        with _mock_all_available():
+            agent, model, reasoning = await orch._route_task(
+                required_caps=["writing"],
+                complexity="high",
+                suggested="gemini",
+                quota=None,
+                suggested_model="gemini-2.0-flash",
+            )
+
+        assert agent == "gemini"
+        assert model == "gemini-2.0-flash", (
+            f"Planner's explicit model choice should be respected even at high complexity, got '{model}'"
+        )
+        assert "premium" not in reasoning
+        assert "suggested model" in reasoning
 
     @pytest.mark.asyncio
     async def test_medium_complexity_no_upgrade(self, tmp_path):
@@ -571,4 +638,145 @@ class TestRouteTaskPremiumUpgrade:
         assert model == "gemini-2.5-flash", (
             f"Banned premium model should not be used, got '{model}'"
         )
+
+
+# ── [mock] Suggested model scenarios ─────────────────────────────────
+
+
+class TestRouteTaskSuggestedModel:
+    """_route_task() should honour the planner's suggested_model when valid."""
+
+    @pytest.mark.asyncio
+    async def test_suggested_model_used_when_valid(self, tmp_path):
+        """Planner suggests agent + model, both valid → exact model used."""
+        agents = {
+            "gemini": AgentConfig(
+                cli_command="gemini",
+                capabilities=["writing", "coding"],
+                cost_tier=CostTier.LOW,
+            ),
+        }
+        routing = [
+            ModelRoute(agent="gemini", model="gemini-2.5-flash"),
+            ModelRoute(agent="gemini", model="gemini-2.0-flash"),
+        ]
+        orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
+
+        with _mock_all_available():
+            agent, model, reasoning = await orch._route_task(
+                required_caps=["writing"],
+                complexity="low",
+                suggested="gemini",
+                quota=None,
+                suggested_model="gemini-2.0-flash",
+            )
+
+        assert agent == "gemini"
+        assert model == "gemini-2.0-flash", (
+            f"Should use planner's suggested model, got '{model}'"
+        )
+        assert "suggested model" in reasoning
+
+    @pytest.mark.asyncio
+    async def test_suggested_model_not_in_routing_falls_back(self, tmp_path):
+        """Planner suggests a model not in routing → fall back to agent default."""
+        agents = {
+            "gemini": AgentConfig(
+                cli_command="gemini",
+                capabilities=["writing", "coding"],
+                cost_tier=CostTier.LOW,
+            ),
+        }
+        routing = [ModelRoute(agent="gemini", model="gemini-2.5-flash")]
+        orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
+
+        with _mock_all_available():
+            agent, model, reasoning = await orch._route_task(
+                required_caps=["writing"],
+                complexity="low",
+                suggested="gemini",
+                quota=None,
+                suggested_model="nonexistent-model",
+            )
+
+        assert agent == "gemini"
+        assert model == "gemini-2.5-flash", (
+            f"Invalid suggested model should fall back to agent default, got '{model}'"
+        )
+        assert "suggested by planner" in reasoning
+
+    @pytest.mark.asyncio
+    async def test_suggested_model_without_agent_ignored(self, tmp_path):
+        """suggested_model without suggested agent → tier routing picks."""
+        orch = _make_orchestrator(tmp_path)
+
+        with _mock_all_available():
+            agent, model, reasoning = await orch._route_task(
+                required_caps=["writing"],
+                complexity="low",
+                suggested=None,
+                quota=None,
+                suggested_model="gemini-2.0-flash",
+            )
+
+        # Should fall through to tier routing
+        assert agent in {"qwen", "gemini", "glm"}
+        assert "tier" in reasoning
+
+    @pytest.mark.asyncio
+    async def test_suggested_model_agent_unavailable_falls_back(self, tmp_path):
+        """Planner suggests agent + model but agent unavailable → tier routing."""
+        orch = _make_orchestrator(tmp_path)
+
+        with _mock_availability({"qwen", "glm"}):
+            agent, model, reasoning = await orch._route_task(
+                required_caps=["writing"],
+                complexity="low",
+                suggested="gemini",
+                quota=None,
+                suggested_model="gemini-2.0-flash",
+            )
+
+        assert agent in {"qwen", "glm"}, (
+            f"Unavailable agent should fall back to tier routing, got '{agent}'"
+        )
+
+    @pytest.mark.asyncio
+    async def test_reasoning_distinguishes_model_vs_agent_suggestion(self, tmp_path):
+        """Reasoning says 'suggested model' when model was honoured,
+        'suggested by planner' when only agent was used."""
+        agents = {
+            "gemini": AgentConfig(
+                cli_command="gemini",
+                capabilities=["writing"],
+                cost_tier=CostTier.LOW,
+            ),
+        }
+        routing = [
+            ModelRoute(agent="gemini", model="gemini-2.5-flash"),
+            ModelRoute(agent="gemini", model="gemini-2.0-flash"),
+        ]
+        orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
+
+        # With suggested_model
+        with _mock_all_available():
+            _, _, reasoning_with = await orch._route_task(
+                required_caps=["writing"],
+                complexity="low",
+                suggested="gemini",
+                quota=None,
+                suggested_model="gemini-2.0-flash",
+            )
+
+        # Without suggested_model
+        with _mock_all_available():
+            _, _, reasoning_without = await orch._route_task(
+                required_caps=["writing"],
+                complexity="low",
+                suggested="gemini",
+                quota=None,
+            )
+
+        assert "suggested model" in reasoning_with
+        assert "suggested by planner" in reasoning_without
 

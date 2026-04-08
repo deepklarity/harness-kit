@@ -136,6 +136,17 @@ class TaskStatus(models.TextChoices):
 class Spec(models.Model):
     """Odin spec archive — groups related tasks under a planning unit."""
 
+    STATUS_PLANNING = "planning"
+    STATUS_PLANNING_COMPLETE = "planning_complete"
+    STATUS_PLANNING_FAILED = "planning_failed"
+    STATUS_ACTIVE = "active"
+    STATUS_CHOICES = [
+        (STATUS_PLANNING, "Planning"),
+        (STATUS_PLANNING_COMPLETE, "Planning Complete"),
+        (STATUS_PLANNING_FAILED, "Planning Failed"),
+        (STATUS_ACTIVE, "Active"),
+    ]
+
     odin_id = models.CharField(max_length=64, unique=True, db_index=True)
     title = models.CharField(max_length=255)
     source = models.CharField(max_length=255, default="inline")
@@ -144,6 +155,8 @@ class Spec(models.Model):
     board = models.ForeignKey(Board, on_delete=models.CASCADE, related_name="specs")
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    planner_config = models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = "specs"

@@ -2,14 +2,13 @@ import { Link } from 'react-router-dom';
 import type { Board, ViewMode } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import {
     BarChart3, LayoutDashboard, FileText, TrendingUp,
     Plus, LogOut, Settings,
-    Activity, Search, ChevronDown, Clock3,
+    Activity, Search, ChevronDown, Clock3, Sparkles, ListTodo,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -38,6 +37,7 @@ interface AppHeaderProps {
     onBoardChange: (value: string) => void;
     onNavChange: (value: string) => void;
     onCreateTask: () => void;
+    onCreateSpec: () => void;
     onCreateBoard: () => void;
     onNavigateHome: () => void;
     onOpenProcessMonitor: () => void;
@@ -47,7 +47,7 @@ interface AppHeaderProps {
 export function AppHeader({
     boards, selectedBoard, currentBoard, isAllBoards, viewMode,
     onBoardChange, onNavChange,
-    onCreateTask, onCreateBoard, onNavigateHome,
+    onCreateTask, onCreateSpec, onCreateBoard, onNavigateHome,
     onOpenProcessMonitor, onOpenCommandPalette,
 }: AppHeaderProps) {
     const { user: authUser, authEnabled, logout } = useAuth();
@@ -103,19 +103,27 @@ export function AppHeader({
                 </div>
 
                 <div className="flex items-center gap-1">
-                    <Tabs value={viewMode} onValueChange={onNavChange} className="shrink-0">
-                        <TabsList>
-                            {VIEW_ROUTES.filter(item => ['board', 'specs'].includes(item.id)).map(item => {
-                                const Icon = item.icon;
-                                return (
-                                    <TabsTrigger key={item.id} value={item.id} className="gap-1.5 text-xs">
-                                        <Icon className="size-3.5" />
-                                        <span className="hidden sm:inline">{item.label}</span>
-                                    </TabsTrigger>
-                                );
-                            })}
-                        </TabsList>
-                    </Tabs>
+                    <div className="inline-flex items-center justify-center rounded-lg bg-muted p-[3px] h-9 shrink-0">
+                        {VIEW_ROUTES.filter(item => ['board', 'specs'].includes(item.id)).map(item => {
+                            const Icon = item.icon;
+                            const isActive = viewMode === item.id;
+                            return (
+                                <Link
+                                    key={item.id}
+                                    to={selectedBoard && selectedBoard !== ALL_BOARDS_ID ? `${item.path}?board=${selectedBoard}` : item.path}
+                                    className={cn(
+                                        "inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium whitespace-nowrap transition-all cursor-pointer",
+                                        isActive
+                                            ? "bg-background text-foreground shadow-sm"
+                                            : "text-foreground/60 hover:text-foreground"
+                                    )}
+                                >
+                                    <Icon className="size-3.5" />
+                                    <span className="hidden sm:inline">{item.label}</span>
+                                </Link>
+                            );
+                        })}
+                    </div>
 
                     <Popover>
                         <PopoverTrigger asChild>
@@ -179,10 +187,35 @@ export function AppHeader({
                         <Activity className="size-3.5" />
                         <span className="hidden md:inline">Process</span>
                     </Button>
-                    <Button size="sm" className="gap-1.5 h-8 px-2 sm:px-3" onClick={onCreateTask}>
-                        <Plus className="size-3.5" />
-                        <span className="hidden md:inline">Task</span>
-                    </Button>
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button size="sm" className="gap-1.5 h-8 px-2 sm:px-3">
+                                <Plus className="size-3.5" />
+                                <span className="hidden md:inline">New</span>
+                                <ChevronDown className="size-3 opacity-50" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-40 p-1">
+                            <div className="flex flex-col gap-0.5">
+                                <button
+                                    type="button"
+                                    onClick={onCreateTask}
+                                    className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left hover:bg-accent/50"
+                                >
+                                    <ListTodo className="size-3.5" />
+                                    <span>Task</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={onCreateSpec}
+                                    className="flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left hover:bg-accent/50"
+                                >
+                                    <Sparkles className="size-3.5" />
+                                    <span>Spec</span>
+                                </button>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
                     <Button variant="ghost" size="sm" className="size-8 p-0" asChild>
                         <Link to={selectedBoard && selectedBoard !== ALL_BOARDS_ID ? `/settings?board=${selectedBoard}` : '/settings'}>
                             <Settings className="size-4" />

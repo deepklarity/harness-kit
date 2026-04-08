@@ -192,6 +192,13 @@ export interface SpecComment {
     createdAt: string;
 }
 
+export interface PlannerConfig {
+    agent?: string;
+    model?: string;
+    quick?: boolean;
+    auto?: boolean;
+}
+
 export interface Spec {
     id: string;
     title: string;
@@ -206,6 +213,8 @@ export interface Spec {
     comments?: SpecComment[];
     cwd?: string;
     costSummary?: SpecCostSummary;
+    status?: 'planning' | 'planning_complete' | 'planning_failed' | 'active';
+    plannerConfig?: PlannerConfig;
     fileName?: string;
     isManaged?: boolean;
 }

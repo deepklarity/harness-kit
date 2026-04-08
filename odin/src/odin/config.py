@@ -248,6 +248,7 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
 
     cfg = OdinConfig(
         base_agent=raw.get("base_agent", "claude"),
+        base_model=raw.get("base_model"),
         agents=agents,
         model_routing=model_routing,
         banned_models=raw.get("banned_models", []),

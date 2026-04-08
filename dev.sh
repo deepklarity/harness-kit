@@ -69,9 +69,12 @@ fi
 # shellcheck disable=SC1091
 source "$ROOT_DIR/.venv/bin/activate"
 
-if ! python -c "import rest_framework" 2>/dev/null; then
+REQ_HASH=$(md5 -q "$BACKEND_DIR/requirements.txt" 2>/dev/null || md5sum "$BACKEND_DIR/requirements.txt" | cut -d' ' -f1)
+REQ_STAMP="$ROOT_DIR/.venv/.requirements-hash"
+if [ ! -f "$REQ_STAMP" ] || [ "$(cat "$REQ_STAMP")" != "$REQ_HASH" ]; then
     log "Installing backend deps..."
     pip install -r "$BACKEND_DIR/requirements.txt" --quiet
+    echo "$REQ_HASH" > "$REQ_STAMP"
 fi
 
 # odin must install AFTER backend deps — installing requirements.txt first
@@ -87,9 +90,12 @@ if ! python -c "from odin.worktree import WorktreeManager" 2>/dev/null; then
     }
 fi
 
-if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+PKG_HASH=$(md5 -q "$FRONTEND_DIR/package.json" 2>/dev/null || md5sum "$FRONTEND_DIR/package.json" | cut -d' ' -f1)
+PKG_STAMP="$FRONTEND_DIR/node_modules/.package-hash"
+if [ ! -f "$PKG_STAMP" ] || [ "$(cat "$PKG_STAMP")" != "$PKG_HASH" ]; then
     log "Installing frontend deps..."
     (cd "$FRONTEND_DIR" && npm install --silent)
+    echo "$PKG_HASH" > "$PKG_STAMP"
 fi
 
 # Migrations — always run (fast no-op when nothing changed)

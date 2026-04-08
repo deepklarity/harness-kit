@@ -8,14 +8,15 @@ import { DependencyBoardView } from '@/components/DependencyBoardView';
 import { KanbanBoard } from '@/components/KanbanBoard';
 import { KanbanTaskSearch } from '@/components/KanbanTaskSearch';
 import { TimelineView } from '@/components/TimelineView';
-import { OdinGuideModal, OdinGuideContent } from '@/components/OdinGuideModal';
+import { OdinGuideContent } from '@/components/OdinGuideModal';
+
 import { FilterBar, MultiSelectFilter, PaginationControls, SearchBar, SortControl, DateRangeFilter } from '@/components/filters';
 import { TaskList } from '@/components/TaskCard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ClipboardList, Columns3, Calendar, GitBranch, Plus, Terminal } from 'lucide-react';
+import { ClipboardList, Columns3, Calendar, GitBranch, Terminal } from 'lucide-react';
 import type { TaskSearchResult } from '@/services/integration/IntegrationService';
 import { didLeaveProgressStatus, markExecutionTransitionUnseen } from '@/utils/unseenStatusTransitions';
 
@@ -287,12 +288,13 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     onDeleteTask?: (taskId: string) => void;
 }) {
     const service = useService();
+
     const [searchParams, setSearchParams] = useSearchParams();
     const [columnData, setColumnData] = useState<Record<string, { tasks: Task[]; totalCount: number; loadedCount: number }>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [pollingEnabled, setPollingEnabled] = useState(false);
-    const [guideOpen, setGuideOpen] = useState(false);
+
     const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
     const defaultsApplied = useRef(false);
     const hasLoadedOnce = useRef(false);
@@ -518,12 +520,6 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
                         Clear filters
                     </Button>
                 )}
-                <div className="ml-auto flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
-                        <Plus className="size-3.5 mr-1" />
-                        Spec
-                    </Button>
-                </div>
             </div>
             {error && <div className="text-sm text-destructive mb-3">{error}</div>}
             {loading ? (
@@ -560,7 +556,6 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
                 />
             )}
 
-            <OdinGuideModal open={guideOpen} onOpenChange={setGuideOpen} board={currentBoard ?? null} />
         </div>
     );
 }

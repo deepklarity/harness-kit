@@ -128,8 +128,12 @@ class GLMHarness(BaseHarness):
             self._current_pid = None
             yield f"[error] CLI '{self._cli}' not found on PATH\n"
 
+    @property
+    def supports_system_prompt_flag(self) -> bool:
+        return False
+
     def build_interactive_command(self, system_prompt_file: str, context: dict) -> list[str] | None:
-        cmd = [self._cli]
+        cmd = [self._cli,'--prompt', f"__FILE__:{system_prompt_file}"]
         model = context.get("model")
         if model:
             cmd.extend(["-m", model])

@@ -129,9 +129,15 @@ class GeminiHarness(BaseHarness):
             self._current_pid = None
             yield f"[error] CLI '{self._cli}' not found on PATH\n"
 
+    @property
+    def supports_system_prompt_flag(self) -> bool:
+        return False
+
     def build_interactive_command(self, system_prompt_file: str, context: dict) -> list[str] | None:
-        cmd = [self._cli, "--system-prompt", f"__FILE__:{system_prompt_file}"]
+        cmd = [self._cli, "--prompt-interactive", f"__FILE__:{system_prompt_file}"]
         model = context.get("model")
+        extra = self.config.execute_args or "--yolo"
+        cmd.extend(shlex.split(extra))
         if model:
             cmd.extend(["--model", model])
         # Gemini CLI auto-discovers MCP from .gemini/settings.json — no flag needed.

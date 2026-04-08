@@ -12,12 +12,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Design Principles
 
+**Simplicity is a feature.** Between two correct approaches, pick the one with fewer moving parts. The goal is code so straightforward it looks obvious — that's the hardest thing to achieve, not the easiest. Extra abstraction layers, wrapper functions, and extensibility points are costs that need justification, not defaults to reach for. When a shortcut is the right call, take it — but you should be able to say in one sentence why it won't cause problems later. If you can't, do it properly.
+
 **Default First**: Every feature should work out of the box with sensible defaults. Configuration, agent assignments, and settings should be *suggestive* — provide a good default that the user can override, rather than requiring upfront configuration. The system picks reasonable choices automatically; the user intervenes only when they want something different.
 
 This applies everywhere:
 - **Odin agent assignments**: Cheapest capable agent is suggested automatically; user can reassign before execution
 - **Configuration**: Built-in defaults → project-local config → explicit flags (each layer overrides the previous)
 - **Workflow**: `odin run` works end-to-end with defaults; staged commands (`plan`/`exec`/`assemble`) let users intervene when needed
+
+**Solve the actual problem.** Don't write a framework when a function will do. Don't generalize from one instance. Don't add config for a decision you can just make. If the code feels awkward, question the data model before adding helpers to work around it. The right fix is usually upstream of where the symptom appeared.
 
 ## Philosophy Grounding
 
@@ -52,7 +56,9 @@ Treat tenet violations the same way you treat code smells — they signal someth
 
 ## Methodical Problem-Solving
 
-**Think step by step. Observe before acting. Change one thing at a time.**
+**Understand the problem before designing the solution. Observe before acting. Change one thing at a time.**
+
+**Treat the cause, not the symptom.** When something fails, resist the urge to make the error go away directly. Instead, ask "why did this happen?" and fix the answer to that question. The immediate fix often masks a deeper problem that will recur in a different form. Trace backward from the symptom to the system that should have prevented it, and fix there. **Test:** If your fix only works for this exact instance and wouldn't prevent the same class of problem next time, you're treating the symptom.
 
 ### Breadcrumb-First Exploration
 
@@ -306,7 +312,7 @@ The full testing framework, RCA protocol, stale test handling, and quality stand
 
 2. **Write failing tests first** (separate subagent, no impl context) — each scenario maps to a test. The test-writing subagent receives ONLY behavioral requirements and existing test patterns. Run the tests. They must fail. A test that passes before implementation is a false positive. **Gate: do not proceed until failures are confirmed.**
 
-3. **Write minimum code to pass** (separate subagent, receives failing tests) — implementation subagents receive the failing test files so they know exactly what to satisfy. Resist the urge to add features beyond scope.
+3. **Write clean code scoped to the requirements** (separate subagent, receives failing tests) — implementation subagents receive the failing test files so they know what to satisfy. The solution should be properly thought through — no duct-tape patches, no hardcoded returns, no workarounds that defer real work to the next person. But don't add capabilities, abstractions, or extension points beyond what the requirements demand.
 
 4. **Verify live** — after static tests pass, confirm the behavior in the real system (UI, API, spec run). This step is not optional.
 

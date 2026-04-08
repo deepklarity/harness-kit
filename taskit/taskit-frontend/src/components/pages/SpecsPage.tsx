@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Board, Spec } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
 import { useToast } from '@/hooks/use-toast';
@@ -17,9 +17,10 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ExternalLink, Plus, Terminal, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Terminal, Trash2 , ExternalLink} from 'lucide-react';
 import { formatCost } from '@/utils/costEstimation';
 import { OdinGuideModal, OdinGuideContent } from '@/components/OdinGuideModal';
+import { CreateSpecModal } from '@/components/CreateSpecModal';
 import { FilterBar, MultiSelectFilter, PaginationControls, SearchBar, SortControl, DateRangeFilter } from '@/components/filters';
 
 interface SpecsPageProps {
@@ -38,6 +39,7 @@ function splitParam(value: string | null): string[] {
 export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecClick, onDataChange }: SpecsPageProps) {
     const service = useService();
     const { toast } = useToast();
+    const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const [specs, setSpecs] = useState<Spec[]>([]);
     const [count, setCount] = useState(0);
@@ -48,6 +50,7 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
     const [cloning, setCloning] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [guideOpen, setGuideOpen] = useState(false);
+    const [showCreateModal, setShowCreateModal] = useState(false);
     const [pollingEnabled, setPollingEnabled] = useState(false);
     const hasLoadedOnce = useRef(false);
 
@@ -173,9 +176,11 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                 return next;
             }, { replace: true })}
                 trailing={
-               <Button size="sm" variant="outline" onClick={() => setGuideOpen(true)}>
-                 <Plus className="size-3.5 mr-1" />
-                        Spec
+
+                    <Button size="sm" variant="outline" onClick={() => setShowCreateModal(true)}>
+                        <Plus className="size-3.5 mr-1" />
+
+                       Spec
                     </Button>
                 }
             >
@@ -188,6 +193,9 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                 <MultiSelectFilter
                     label="Status"
                     options={[
+                        { label: 'Planning', value: 'planning' },
+                        { label: 'Completed', value: 'planning_complete' },
+                        { label: 'Failed', value: 'planning_failed' },
                         { label: 'Active', value: 'active' },
                         { label: 'Abandoned', value: 'abandoned' },
                     ]}
@@ -246,7 +254,7 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                                 <CardContent className="p-4 min-w-0">
                                     <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2">
                                         <Badge variant="outline" className="text-[10px] font-mono">#{spec.id}</Badge>
-                                        <div className="flex gap-1.5 items-center">
+                                        <div className="flex gap-1.5 items-center flex-wrap">
                                             <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-primary transition-colors"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -262,6 +270,22 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                                                 <Trash2 className="size-3 mr-1" />
                                                 Delete
                                             </Button>
+                                            {spec.status === 'planning' && (
+                                                <Badge className="text-[10px] gap-1 bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/20">
+                                                    <Loader2 className="size-2.5 animate-spin" />
+                                                    Planning
+                                                </Badge>
+                                            )}
+                                            {spec.status === 'planning_complete' && (
+                                                <Badge className="text-[10px] bg-sky-500/15 text-sky-400 border-sky-500/30 hover:bg-sky-500/20">
+                                                    Planning Complete
+                                                </Badge>
+                                            )}
+                                            {spec.status === 'planning_failed' && (
+                                                <Badge className="text-[10px] bg-destructive/15 text-destructive border-destructive/30 hover:bg-destructive/20">
+                                                    Failed
+                                                </Badge>
+                                            )}
                                             {spec.abandoned && (
                                                 <Badge variant="destructive" className="text-[10px]">
                                                     Abandoned
@@ -353,6 +377,19 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
             </AlertDialog>
 
             <OdinGuideModal open={guideOpen} onOpenChange={setGuideOpen} board={currentBoard ?? null} />
+
+            {selectedBoard && (
+                <CreateSpecModal
+                    open={showCreateModal}
+                    onClose={() => setShowCreateModal(false)}
+                    boardId={selectedBoard}
+                    board={currentBoard ?? null}
+                    onCreated={(specId) => {
+                        setShowCreateModal(false);
+                        navigate(selectedBoard ? `/specs/${specId}?board=${selectedBoard}` : `/specs/${specId}`);
+                    }}
+                />
+            )}
         </div>
     );
 }

@@ -78,6 +78,19 @@ agents:
         assert cfg.agents["gemini"].cli_command == "/usr/local/bin/gemini"
         assert cfg.agents["claude"].cost_tier == CostTier.HIGH
 
+    def test_load_from_yaml_reads_base_model(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("""
+base_agent: claude
+base_model: claude-sonnet-4-5
+agents:
+  claude:
+    enabled: true
+""")
+        cfg = load_config(str(config_file))
+        assert cfg.base_agent == "claude"
+        assert cfg.base_model == "claude-sonnet-4-5"
+
     def test_empty_yaml_returns_defaults(self, tmp_path):
         config_file = tmp_path / "config.yaml"
         config_file.write_text("")

@@ -30,12 +30,14 @@ AUTH_ENABLED = _env_bool("AUTH_ENABLED", _legacy_firebase_enabled)
 AUTH_LEGACY_FIREBASE_FLAG_COMPAT = _env_bool("AUTH_LEGACY_FIREBASE_FLAG_COMPAT", True)
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
+    "channels",
     "tasks.apps.TasksConfig",
 ]
 
@@ -63,6 +65,7 @@ else:
 ROOT_URLCONF = "config.urls"
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 USE_SQLITE = os.environ.get("USE_SQLITE", "True").lower() in ("true", "1", "yes")
 
@@ -140,6 +143,24 @@ FORCED_BASE_MODEL = (os.environ.get("FORCED_BASE_MODEL") or "").strip() or None
 ODIN_EXECUTION_STRATEGY = os.environ.get("ODIN_EXECUTION_STRATEGY", "celery_dag")
 ODIN_CLI_PATH = os.environ.get("ODIN_CLI_PATH", "odin")
 ODIN_WORKING_DIR = os.environ.get("ODIN_WORKING_DIR", None)
+
+# Planning integration
+TASKIT_INTERNAL_URL = os.environ.get("TASKIT_INTERNAL_URL", "http://localhost:8000")
+
+# Channel layers — InMemory for dev (SQLite), Redis for production
+if USE_SQLITE:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [os.environ.get("REDIS_URL", "redis://localhost:6379/1")]},
+        }
+    }
 
 # Celery configuration (required for celery_dag execution strategy)
 USE_FILESYSTEM_BROKER = os.environ.get("USE_FILESYSTEM_BROKER", "True").lower() in ("true", "1", "yes")

@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import type { Spec, SpecComment, SpecCommit, Task } from '../types';
 import { useService } from '../contexts/ServiceContext';
-import { useToast } from '@/hooks/use-toast';
 import { ApiError } from '../services/harness/HarnessTimeService';
 import { parseActor } from '../services/harness/HarnessTimeService';
 import { formatCost } from '../utils/costEstimation';
@@ -21,12 +20,43 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Separator } from '@/components/ui/separator';
-import { getStatusColor, formatDuration, formatTokens, shortModelName, CopyButton, CopyableCommand, getMergeStatusDotColor } from '../utils/transformer';
-import { ArrowLeft, AlertTriangle, FileText, Clock, Code2, FolderOpen, Trash2, Bug, DollarSign, ChevronDown, ChevronRight, Brain, Route, Activity, GitBranch, GitCommitHorizontal, ExternalLink, CheckCircle2, Loader2, GitPullRequest } from 'lucide-react';
+import { getStatusColor, formatDuration, formatTokens, shortModelName, CopyButton, getMergeStatusDotColor } from '../utils/transformer';
+import {
+  ArrowLeft,
+  AlertTriangle,
+  CheckCircle2,
+  FileText,
+  Clock,
+  Code2,
+  FolderOpen,
+  Trash2,
+  Bug,
+  DollarSign,
+  ChevronDown,
+  ChevronRight,
+  Brain,
+  Route,
+  Activity,
+  Loader2,
+  GitBranch,
+  GitCommitHorizontal,
+  ExternalLink,
+  GitPullRequest,
+  Bot,
+  Package,
+} from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { TraceViewer } from './TraceViewer';
+import { TraceViewer, TerminalOutputView } from './TraceViewer';
 import { parseCommentBody } from '../utils/commentParser';
+import { PlanningTerminal } from './PlanningTerminal';
 
+const PLANNER_AGENT_COLORS: Record<string, string> = {
+    claude: '#8b5cf6',
+    gemini: '#22c55e',
+    codex: '#3b82f6',
+    qwen: '#f97316',
+    kilo: '#ec4899',
+};
 
 interface SpecDetailViewProps {
     specId: string;
@@ -38,21 +68,42 @@ interface SpecDetailViewProps {
 
 export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, onDeleteSpec }: SpecDetailViewProps) {
     const service = useService();
-    const { toast } = useToast();
     const [searchParams] = useSearchParams();
     const [spec, setSpec] = useState<Spec | null>(cachedSpec || null);
     const [loading, setLoading] = useState(!cachedSpec);
     const [error, setError] = useState<{ notFound: boolean; message: string } | null>(null);
-    const [editOpen, setEditOpen] = useState(false);
     const [showPlanningTrace, setShowPlanningTrace] = useState(false);
     const [showRoutingConfig, setShowRoutingConfig] = useState(false);
     const [showContent, setShowContent] = useState(false);
     const [showMetadata, setShowMetadata] = useState(false);
+    const [retrying, setRetrying] = useState(false);
+    const [terminalVisible, setTerminalVisible] = useState(false);
+    const [terminalKey, setTerminalKey] = useState(0);
     const [isCreatingPr, setIsCreatingPr] = useState(false);
     const [prError, setPrError] = useState<string | null>(null);
     const [createdPrUrl, setCreatedPrUrl] = useState<string | null>(null);
     const [showCommits, setShowCommits] = useState(false);
     const [commits, setCommits] = useState<SpecCommit[]>([]);
+
+    const refetchSpec = useCallback(() => {
+        service.fetchSpecDetail(specId)
+            .then(setSpec)
+            .catch(() => { /* ignore refetch errors */ });
+    }, [specId, service]);
+
+    const handleRetryPlanning = useCallback(async () => {
+        setRetrying(true);
+        try {
+            const updated = await (service as unknown as {
+                retryPlanning: (id: string) => Promise<Spec>;
+            }).retryPlanning(specId);
+            setSpec(updated);
+        } catch {
+            /* ignore — user can try again */
+        } finally {
+            setRetrying(false);
+        }
+    }, [specId, service]);
 
     // Sort tasks by id ascending
     const sortedTasks = useMemo(() => {
@@ -68,6 +119,14 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
         }), 1),
         [spec?.tasks]
     );
+
+    // Show the terminal whenever the spec enters the 'planning' state (initial load or retry).
+    useEffect(() => {
+        if (spec?.status === 'planning') {
+            setTerminalVisible(true);
+            setTerminalKey(k => k + 1);
+        }
+    }, [spec?.status]);
 
     // Read spec worktree path directly from spec metadata (set by odin plan).
     const specWorktreePath = useMemo(() => {
@@ -89,6 +148,14 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
         }).length;
         return { merged, total: tasks.length };
     }, [spec?.tasks]);
+
+    const plannerInfo = useMemo(() => {
+        const pc = spec?.plannerConfig;
+        const trace = spec?.metadata?.planning_trace as { agent?: string; model?: string } | undefined;
+        const agent = pc?.agent || trace?.agent || null;
+        const model = pc?.model || trace?.model || null;
+        return { agent, model };
+    }, [spec?.plannerConfig, spec?.metadata]);
 
     useEffect(() => {
         if (cachedSpec) {
@@ -217,6 +284,41 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                             <div className="flex items-center gap-2 mb-2">
                                 <Badge variant="outline" className="font-mono text-xs">#{spec.id}</Badge>
                                 <CopyButton text={spec.id} />
+                                {spec.status === 'planning' && (
+                                    <Badge className="gap-1 text-xs bg-amber-500/15 text-amber-400 border-amber-500/30">
+                                        <Loader2 className="size-3 animate-spin" /> Planning
+                                    </Badge>
+                                )}
+                                {spec.status === 'planning_complete' && (
+                                    <Badge className="text-xs bg-sky-500/15 text-sky-400 border-sky-500/30">
+                                        Planning Complete
+                                    </Badge>
+                                )}
+                                {spec.status === 'planning_failed' && (
+                                    <Badge className="gap-1 text-xs bg-destructive/15 text-destructive border-destructive/30">
+                                        <AlertTriangle className="size-3" /> Failed
+                                    </Badge>
+                                )}
+                                {plannerInfo.agent && (
+                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <span className="text-muted-foreground/40">|</span>
+                                        <span
+                                            className="size-4 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white font-mono"
+                                            style={{ background: PLANNER_AGENT_COLORS[plannerInfo.agent] || '#6366f1' }}
+                                        >
+                                            {plannerInfo.agent.charAt(0).toUpperCase()}
+                                        </span>
+                                        <Bot className="size-3 opacity-60" />
+                                        <span className="font-medium">{plannerInfo.agent}</span>
+                                        {plannerInfo.model && (
+                                            <>
+                                                <span className="text-muted-foreground/30">·</span>
+                                                <Package className="size-3 opacity-60" />
+                                                <span className="font-mono">{shortModelName(plannerInfo.model)}</span>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
                                 {spec.abandoned && (
                                     <Badge variant="destructive" className="gap-1 text-xs">
                                         <AlertTriangle className="size-3" /> Abandoned
@@ -225,7 +327,10 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                             </div>
                             <CardTitle className="text-xl">{spec.title}</CardTitle>
                         </div>
-                        <Badge variant="secondary">{spec.taskCount} task{spec.taskCount !== 1 ? 's' : ''}</Badge>
+                        <div className="flex items-center gap-2 shrink-0">
+                            {specWorktreePath && <EditorLink cwd={specWorktreePath} />}
+                            <Badge variant="secondary">{spec.taskCount} task{spec.taskCount !== 1 ? 's' : ''}</Badge>
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -239,12 +344,6 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                         <div className="flex items-center gap-1.5">
                             <FolderOpen className="size-3.5" /> CWD: {spec.cwd || '\u2014'}
                         </div>
-                        {specWorktreePath && (
-                            <div className="flex items-center gap-1.5">
-                                <Code2 className="size-3.5" />
-                                <EditorLink cwd={specWorktreePath} />
-                            </div>
-                        )}
                         <div className="flex items-center gap-1.5">
                             <GitBranch className="size-3.5" />
                             <span className="font-mono font-medium text-foreground">{specBranch || '\u2014'}</span>
@@ -421,6 +520,39 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                     )}
                 </CardContent>
             </Card>
+
+            {/* Planning section */}
+            {/* Live terminal — stays mounted after completion so the user can read the output */}
+            {terminalVisible && (
+                <div className="mb-6">
+                    <h2 className="text-base font-semibold mb-2">Planning Session</h2>
+                    <PlanningTerminal key={terminalKey} specId={spec.id} onComplete={refetchSpec} />
+                </div>
+            )}
+
+            {/* Failed state — shown for both same-session failures (below the terminal) and
+                fresh navigation to a failed spec */}
+            {spec.status === 'planning_failed' && (
+                <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
+                    <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-destructive mb-0.5">Planning interrupted</p>
+                        <p className="text-xs text-muted-foreground">
+                            The planning session ended before completing — the connection may have been lost or the process exited unexpectedly.
+                        </p>
+                    </div>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 border-destructive/40 hover:border-destructive/60"
+                        onClick={handleRetryPlanning}
+                        disabled={retrying}
+                    >
+                        {retrying ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+                        {retrying ? 'Retrying…' : 'Retry Planning'}
+                    </Button>
+                </div>
+            )}
 
             {/* Cost + Tasks side by side */}
             <div className="flex gap-4 items-start mb-6 max-md:flex-col">
@@ -796,33 +928,15 @@ function PlanningCommentItem({ comment }: { comment: SpecComment }) {
                     {metrics}
                 </div>
             )}
-            {summary && (
-                <>
-                    <div className="text-xs whitespace-pre-wrap break-words max-h-[100px] overflow-hidden">
-                        {summary.substring(0, 500)}
-                        {summary.length > 500 && '...'}
-                    </div>
-                    {summary.length > 500 && !traceData && (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-[10px] h-5 px-1.5 mt-1"
-                            onClick={() => setShowFullTrace(v => !v)}
-                        >
-                            {showFullTrace ? 'Collapse' : 'Show full text'}
-                        </Button>
-                    )}
-                    {showFullTrace && !traceData && (
-                        <div className="mt-2 max-h-[400px] overflow-y-auto rounded border border-border bg-muted/30 p-2">
-                            <pre className="text-[11px] font-mono whitespace-pre-wrap break-words">
-                                {summary}
-                            </pre>
+            {traceData ? (
+                /* Auto mode: structured JSONL trace → TraceViewer */
+                <div className="mt-2">
+                    {summary && (
+                        <div className="text-xs whitespace-pre-wrap break-words mb-2 max-h-[80px] overflow-hidden text-muted-foreground">
+                            {summary.substring(0, 300)}
+                            {summary.length > 300 && '...'}
                         </div>
                     )}
-                </>
-            )}
-            {traceData && (
-                <div className="mt-2">
                     <Button
                         variant="ghost"
                         size="sm"
@@ -834,29 +948,44 @@ function PlanningCommentItem({ comment }: { comment: SpecComment }) {
                     </Button>
                     {showFullTrace && <TraceViewer traceText={traceData} />}
                 </div>
-            )}
+            ) : summary ? (
+                /* Interactive mode: terminal transcript → TerminalOutputView */
+                <div className="mt-2">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-[10px] h-5 px-1.5 mb-1 gap-1"
+                        onClick={() => setShowFullTrace(v => !v)}
+                    >
+                        <Activity className="size-3" />
+                        {showFullTrace ? 'Collapse' : 'Show session transcript'}
+                    </Button>
+                    {showFullTrace && (
+                        <TerminalOutputView
+                            text={summary}
+                            label={`${actor.display} · interactive session`}
+                        />
+                    )}
+                </div>
+            ) : null}
         </div>
     );
 }
 
+const IDE_LABELS: Record<string, string> = { cursor: 'Cursor', vscode: 'VS Code', zed: 'Zed' };
+
 function EditorLink({ cwd }: { cwd: string }) {
-    const [editor, setEditor] = useState<'cursor' | 'vscode'>(() => {
-        return (localStorage.getItem('preferred-editor') as 'cursor' | 'vscode') || 'cursor';
-    });
-    const toggle = () => {
-        const next = editor === 'cursor' ? 'vscode' : 'cursor';
-        localStorage.setItem('preferred-editor', next);
-        setEditor(next);
-    };
+    const editor = localStorage.getItem('preferred-editor') || 'cursor';
     const uri = `${editor}://file${cwd}`;
+    const label = IDE_LABELS[editor] || editor;
     return (
-        <div className="flex items-center gap-1.5">
-            <a href={uri} className="text-sm text-primary hover:underline truncate">
-                Open in {editor === 'cursor' ? 'Cursor' : 'VS Code'}
-            </a>
-            <button onClick={toggle} className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors" title="Switch editor">
-                ({editor === 'cursor' ? 'vsc' : 'cur'})
-            </button>
-        </div>
+        <a
+            href={uri}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            title={`Open in ${label} (change in Settings)`}
+        >
+            <ExternalLink className="size-3" />
+            Open in {label}
+        </a>
     );
 }

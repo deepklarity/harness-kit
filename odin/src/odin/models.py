@@ -106,6 +106,7 @@ class OdinConfig(BaseModel):
     """Top-level Odin configuration."""
 
     base_agent: str = "claude"
+    base_model: Optional[str] = None
     forced_base_provider: Optional[str] = None
     forced_base_model: Optional[str] = None
     agents: Dict[str, AgentConfig] = Field(default_factory=dict)

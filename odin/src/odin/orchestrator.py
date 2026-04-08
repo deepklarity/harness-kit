@@ -264,7 +264,7 @@ class Orchestrator:
         base_cfg = self.config.agents.get(base_name)
         if not base_cfg:
             raise RuntimeError(f"Base agent '{base_name}' not found in config")
-        return base_name, base_cfg.premium_model or base_cfg.default_model
+        return base_name, self.config.base_model or base_cfg.premium_model or base_cfg.default_model
 
     @staticmethod
     def _load_pricing_table() -> Optional[Dict]:
@@ -377,6 +377,7 @@ class Orchestrator:
         stream_callback: Optional[Callable[[str], None]] = None,
         quick: bool = False,
         skip_reflection: bool = False,
+        direct: bool = False,
     ) -> Tuple[str, List[Task]]:
         """Decompose a spec into sub-tasks and create them with suggested agent
         assignments.  Does NOT execute anything.
@@ -404,6 +405,7 @@ class Orchestrator:
         # 1. Create spec archive FIRST — spec_id is available for plan_path
         title = spec_file or _extract_title(spec)
         sid = generate_spec_id(title)
+        self._last_plan_spec_id = sid  # Track for mark_planning_failed()
         spec_archive = SpecArchive(
             id=sid,
             title=title,
@@ -472,12 +474,13 @@ class Orchestrator:
         trace_file = str(log_dir / f"plan_{sid}.trace.jsonl")
         if mode == "interactive":
             t0 = _time.monotonic()
-            transcript_path = self._run_interactive_plan(prompt, wd, quick=quick)
+            transcript_path = self._run_interactive_plan(prompt, wd, quick=quick, direct=direct)
             elapsed_ms = (_time.monotonic() - t0) * 1000
             # Read transcript for trace capture
             raw_output = ""
             if transcript_path and Path(transcript_path).exists():
                 raw_output = Path(transcript_path).read_text(errors="replace")
+                raw_output = self._clean_interactive_transcript(raw_output)
             decompose_result = TaskResult(
                 success=True,
                 output=raw_output,
@@ -525,6 +528,9 @@ class Orchestrator:
         # 8. Post planning trace to backend (if captured)
         if decompose_result is not None:
             self._record_planning_trace(sid, decompose_result, prompt)
+
+        # 9. Mark spec as planning_complete
+        self._mark_planning_complete(sid)
 
         self._log.info("Plan completed: spec_id=%s, task_count=%d", sid, len(tasks))
         self.logger.log(
@@ -574,6 +580,35 @@ class Orchestrator:
         except Exception:
             self._log.warning(
                 "Failed to post planning trace for spec %s",
+                spec_id, exc_info=True,
+            )
+
+    def _mark_planning_complete(self, spec_id: str) -> None:
+        """Transition spec status to planning_complete (best-effort)."""
+        backend = getattr(self.task_mgr, "_backend", None)
+        if backend is None:
+            return
+        try:
+            backend.mark_planning_complete(spec_id)
+        except Exception:
+            self._log.warning(
+                "Failed to mark spec %s as planning_complete",
+                spec_id, exc_info=True,
+            )
+
+    def mark_planning_failed(self) -> None:
+        """Mark the last planned spec as planning_failed (called by CLI on crash)."""
+        spec_id = getattr(self, "_last_plan_spec_id", None)
+        if not spec_id:
+            return
+        backend = getattr(self.task_mgr, "_backend", None)
+        if backend is None:
+            return
+        try:
+            backend.mark_planning_failed(spec_id)
+        except Exception:
+            self._log.warning(
+                "Failed to mark spec %s as planning_failed",
                 spec_id, exc_info=True,
             )
 
@@ -678,7 +713,10 @@ ARTIFACT COORDINATION:
 - Parallel tasks feeding into a merge task MUST agree on filenames upfront.
 - Sequential tasks can determine filenames as they go.
 
-Write your final plan as a JSON array to: `{plan_path}`"""
+Write your final plan as a JSON array to: `{plan_path}`
+
+After writing the plan file, tell the user: "Planning complete. Press Stop or Ctrl+C to finish and create tasks."
+Do not take any further actions after writing the plan."""
 
     # ------------------------------------------------------------------
     # _create_tasks_from_plan()
@@ -710,12 +748,14 @@ Write your final plan as a JSON array to: `{plan_path}`"""
                 st.get("suggested_agent"),
                 quota,
                 routing_config=routing_config,
+                suggested_model=st.get("suggested_model"),
             )
 
             task_metadata = {
                 **st.get("metadata", {}),
                 "required_capabilities": st.get("required_capabilities", []),
                 "suggested_agent": st.get("suggested_agent"),
+                "suggested_model": st.get("suggested_model"),
                 "complexity": complexity,
                 "routing_reasoning": routing_reasoning,
             }
@@ -795,6 +835,64 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         return tasks
 
     # ------------------------------------------------------------------
+    # _clean_interactive_transcript()
+    # ------------------------------------------------------------------
+
+    # Patterns that identify TUI noise lines (compiled once at class level)
+    _TUI_NOISE_RE = re.compile(
+        r"^("
+        # Spinner / status lines: *Word..., ✦ Word..., ● Word...
+        r"[*✦⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏●◐◓◑◒]\s*\S+[.…]{1,3}"
+        r"|Collapse"
+        r"|Recentactivity"
+        # tmux window title: "0;· Claude Code" or similar
+        r"|\d+;[·.].*"
+        # Claude Code TUI welcome fragments (spaces collapsed by cursor-positioning strip)
+        r"|ClaudeCodev[\d.]+"
+        r"|Tipsforgettingstarted"
+        r"|Welcomeback\S+"
+        r")$"
+    )
+
+    @staticmethod
+    def _clean_interactive_transcript(text: str) -> str:
+        """Clean tmux TUI artifacts from interactive transcript.
+
+        The tmux capture includes box-drawing characters, TUI chrome, spinner
+        frames, and control characters that survive ANSI stripping. This method
+        removes them so the stored planning trace is human-readable.
+        """
+        from odin.logging.logger_utils import strip_ansi
+
+        # Belt-and-suspenders ANSI removal
+        cleaned = strip_ansi(text)
+        # Box-drawing (U+2500–U+257F) and block elements (U+2580–U+259F)
+        cleaned = re.sub(r"[\u2500-\u257F\u2580-\u259F]", "", cleaned)
+        # Control characters (keep \n \t \r for structure)
+        cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", cleaned)
+        # Strip trailing whitespace per line
+        cleaned = re.sub(r"[ \t]+$", "", cleaned, flags=re.MULTILINE)
+
+        # Filter out TUI noise lines and deduplicate consecutive identical lines
+        out: list[str] = []
+        prev = None
+        for line in cleaned.split("\n"):
+            stripped = line.strip()
+            # Drop known TUI noise
+            if stripped and Orchestrator._TUI_NOISE_RE.match(stripped):
+                continue
+            # Deduplicate consecutive identical lines
+            if stripped == prev:
+                continue
+            out.append(line)
+            prev = stripped
+
+        cleaned = "\n".join(out)
+        # Collapse 3+ consecutive blank lines to 2
+        cleaned = re.sub(r"(\n\s*){3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    # ------------------------------------------------------------------
     # _run_interactive_plan()
     # ------------------------------------------------------------------
 
@@ -803,12 +901,17 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         prompt: str,
         working_dir: str,
         quick: bool = False,
+        direct: bool = False,
     ) -> Optional[str]:
-        """Launch interactive tmux session for planning.
+        """Launch interactive session for planning.
 
         The agent receives the unified plan prompt (same as auto/quiet) and
         writes its plan JSON to the plan_path specified in the prompt.
-        Blocks until the user exits the tmux session.
+        Blocks until the user exits the session.
+
+        When *direct* is True, runs the agent CLI as a direct subprocess
+        without tmux wrapping — for web UI / PTY contexts where the calling
+        process already provides the terminal.
 
         Returns the path to the transcript log (for trace capture), or None.
         """
@@ -827,8 +930,9 @@ Write your final plan as a JSON array to: `{plan_path}`"""
             system_prompt=prompt,
             context=context,
             log_dir=self.config.log_dir,
+            direct=direct,
         )
-        # run() is synchronous (blocks while user is in tmux)
+        # run() is synchronous — blocks while user interacts with the agent
         return session.run()
 
     # ------------------------------------------------------------------
@@ -2153,6 +2257,7 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         suggested: Optional[str],
         quota: Optional[Dict[str, Dict[str, float]]],
         routing_config: Optional[Dict[str, Any]] = None,
+        suggested_model: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
         """Unified agent+model selection respecting LLM suggestions.
 
@@ -2170,10 +2275,12 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         """
         if routing_config and "agents" in routing_config:
             return await self._route_task_api(
-                required_caps, complexity, suggested, quota, routing_config
+                required_caps, complexity, suggested, quota, routing_config,
+                suggested_model=suggested_model,
             )
         return await self._route_task_config(
-            required_caps, complexity, suggested, quota
+            required_caps, complexity, suggested, quota,
+            suggested_model=suggested_model,
         )
 
     async def _route_task_api(
@@ -2183,6 +2290,7 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         suggested: Optional[str],
         quota: Optional[Dict[str, Dict[str, float]]],
         routing_config: Dict[str, Any],
+        suggested_model: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
         """Route using API-sourced agent/model data."""
         agents_data = routing_config["agents"]
@@ -2198,20 +2306,30 @@ Write your final plan as a JSON array to: `{plan_path}`"""
                 caps = agent_data.get("capabilities", [])
                 if not required_caps or all(c in caps for c in required_caps):
                     if not self._over_quota(suggested, quota, complexity):
-                        # Pick the default model for this agent
                         enabled_models = [
                             m["name"] for m in agent_data.get("models", [])
                             if m.get("enabled", True)
                         ]
-                        model = agent_data.get("default_model")
-                        if model and model not in enabled_models and enabled_models:
-                            model = enabled_models[0]
-                        elif not model and enabled_models:
-                            model = enabled_models[0]
-                        model, reason_suffix = self._maybe_upgrade_model_api(
-                            suggested, model, complexity, agent_data
-                        )
-                        reasoning = f"Routed to {suggested}/{model} (suggested by planner{reason_suffix})"
+                        # Honour planner's suggested_model if it's enabled
+                        planner_chose_model = suggested_model and suggested_model in enabled_models
+                        if planner_chose_model:
+                            model = suggested_model
+                        else:
+                            model = agent_data.get("default_model")
+                            if model and model not in enabled_models and enabled_models:
+                                model = enabled_models[0]
+                            elif not model and enabled_models:
+                                model = enabled_models[0]
+                        # Only auto-upgrade when the router picked the model.
+                        # When the planner explicitly chose a model, respect it —
+                        # the planner already knows the task complexity.
+                        reason_suffix = ""
+                        if not planner_chose_model:
+                            model, reason_suffix = self._maybe_upgrade_model_api(
+                                suggested, model, complexity, agent_data
+                            )
+                        src = "suggested model" if planner_chose_model else "suggested agent"
+                        reasoning = f"Routed to {suggested}/{model} ({src}{reason_suffix})"
                         return (suggested, model, reasoning)
 
         # Phase 2: collect viable routes from enabled models
@@ -2269,10 +2387,24 @@ Write your final plan as a JSON array to: `{plan_path}`"""
         complexity: str,
         suggested: Optional[str],
         quota: Optional[Dict[str, Dict[str, float]]],
+        suggested_model: Optional[str] = None,
     ) -> Tuple[str, Optional[str], str]:
         """Route using config-based model_routing (fallback when API unavailable)."""
-        # Phase 1: honour the suggested agent if possible
+        # Phase 1: honour the suggested agent (and optionally model) if possible
         if suggested:
+            # If planner suggested a specific model, try that route first.
+            # No auto-upgrade — the planner already knows the complexity.
+            if suggested_model:
+                for route in self.config.model_routing:
+                    if route.agent == suggested and route.model == suggested_model:
+                        if self._route_viable(route, required_caps, complexity, quota):
+                            cfg = self.config.agents.get(route.agent)
+                            if cfg and await self._is_available_cached(route.agent, cfg):
+                                reasoning = (
+                                    f"Routed to {suggested}/{suggested_model} (suggested model)"
+                                )
+                                return (suggested, suggested_model, reasoning)
+
             result = await self._try_routes_for_agent(
                 suggested, required_caps, complexity, quota
             )
