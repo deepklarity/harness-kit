@@ -2,9 +2,8 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Task, Member, Label, TaskComment, TaskIdeOptions } from '../types';
 import { collectDownstreamTaskIds } from '../utils/dagUtils';
-import { formatDate, formatDuration, getStatusColor, formatMergeStatus, formatBranchDisplay, CopyButton } from '../utils/transformer';
+import { classifyStatus, formatDate, formatDuration, getStatusColor, formatMergeStatus, formatBranchDisplay, CopyButton } from '../utils/transformer';
 import { parseActor } from '../services/harness/HarnessTimeService';
-import { CountdownTimer } from './CountdownTimer';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -65,6 +64,7 @@ interface TaskDetailModalProps {
 }
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+type BudgetUnit = 'seconds' | 'minutes' | 'hours' | 'days';
 
 // unused LABEL_COLORS removed
 
@@ -74,6 +74,19 @@ const PRIORITY_COLORS: Record<string, string> = {
     MEDIUM: 'text-blue-400',
     LOW: 'text-muted-foreground',
 };
+
+const BUDGET_UNIT_TO_HOURS: Record<BudgetUnit, number> = {
+    seconds: 1 / 3600,
+    minutes: 1 / 60,
+    hours: 1,
+    days: 24,
+};
+
+function formatBudgetValue(hours: number | undefined): string {
+    if (hours === undefined) return '—';
+    const totalSeconds = Math.max(0, Math.round(hours * 3600));
+    return formatDuration(totalSeconds * 1000);
+}
 
 export function TaskDetailModal({
     task, onClose, allMembers, allTasks, memberMap, onUpdateAssignees, onUpdateTask, onSelectTask, availableStatuses, onDeleteTask, availableLabels, detailLoading, onRefresh
@@ -87,6 +100,7 @@ export function TaskDetailModal({
     const [isEditingAssignees, setIsEditingAssignees] = useState(false);
     const [editingField, setEditingField] = useState<string | null>(null);
     const [editValue, setEditValue] = useState<string>('');
+    const [budgetUnit, setBudgetUnit] = useState<BudgetUnit>('hours');
     const [selectedAssignee, setSelectedAssignee] = useState<string | null>(null);
     const [assigneeSearch, setAssigneeSearch] = useState('');
     const [showRawJson, setShowRawJson] = useState(false);
@@ -113,10 +127,23 @@ export function TaskDetailModal({
     const [summarizeError, setSummarizeError] = useState<string | null>(null);
     const [allLabels, setAllLabels] = useState<Label[]>([]);
     const [selectedLabels, setSelectedLabels] = useState<number[]>([]);
+    const [budgetTickStart, setBudgetTickStart] = useState(() => Date.now());
+    const [budgetTickNow, setBudgetTickNow] = useState(() => Date.now());
 
     useEffect(() => {
         setSelectedLabels(task.labels?.map(l => l.id) || []);
     }, [task.labels]);
+
+    useEffect(() => {
+        setBudgetTickStart(Date.now());
+        setBudgetTickNow(Date.now());
+    }, [task.id, task.executingTimeMs, task.remainingTimeMs, task.isTimerRunning]);
+
+    useEffect(() => {
+        if (!task.isTimerRunning) return;
+        const interval = window.setInterval(() => setBudgetTickNow(Date.now()), 1000);
+        return () => window.clearInterval(interval);
+    }, [task.isTimerRunning]);
 
     useEffect(() => {
         if (!availableLabels?.length && task.boardId) {
@@ -511,6 +538,12 @@ export function TaskDetailModal({
         setEditValue(value || '');
     };
 
+    const startEditingBudget = () => {
+        setBudgetUnit('hours');
+        setEditingField('devEta');
+        setEditValue(task.devEta !== undefined ? String(task.devEta) : '');
+    };
+
     const handleSaveField = () => {
         if (!editingField) return;
         const updateKey = editingField === 'title' ? 'title' :
@@ -519,7 +552,9 @@ export function TaskDetailModal({
                     editingField === 'priority' ? 'priority' :
                         editingField === 'devEta' ? 'devEta' : null;
         if (updateKey) {
-            const finalValue = updateKey === 'devEta' ? parseFloat(editValue) : editValue;
+            const finalValue = updateKey === 'devEta'
+                ? Number(editValue) * BUDGET_UNIT_TO_HOURS[budgetUnit]
+                : editValue;
             onUpdateTask(task.id, { [updateKey]: finalValue });
         }
         setEditingField(null);
@@ -546,6 +581,19 @@ export function TaskDetailModal({
         m.username.toLowerCase().includes(assigneeSearch.toLowerCase())
     );
 
+    const statusCategory = classifyStatus(task.currentStatus);
+    const showTimeBudget = ['backlog', 'todo', 'doing', 'review', 'testing', 'failed', 'done'].includes(statusCategory);
+    const canEditTimeBudget = statusCategory !== 'done';
+    const budgetMs = task.devEta !== undefined ? task.devEta * 3600 * 1000 : undefined;
+    const liveTimerDeltaMs = task.isTimerRunning ? Math.max(0, budgetTickNow - budgetTickStart) : 0;
+    const usedExecutionMs = useMemo(() => {
+        if (task.isTimerRunning && budgetMs !== undefined && task.remainingTimeMs !== undefined) {
+            return Math.max(0, budgetMs - (task.remainingTimeMs - liveTimerDeltaMs));
+        }
+        return Math.max(0, task.executingTimeMs);
+    }, [budgetMs, liveTimerDeltaMs, task.executingTimeMs, task.isTimerRunning, task.remainingTimeMs]);
+    const isOverBudget = budgetMs !== undefined && usedExecutionMs > budgetMs;
+    const canSaveBudget = editValue.trim() !== '' && Number.isFinite(Number(editValue)) && Number(editValue) >= 0;
     const statusColor = getStatusColor(task.currentStatus);
     const statusEntries = Object.entries(task.timeInStatuses);
     const totalStatusTime = statusEntries.reduce((sum, [, ms]) => sum + ms, 0);
@@ -879,31 +927,73 @@ export function TaskDetailModal({
                                 </CompactRow>
                             )}
 
-                            {/* Time Budget — inline */}
-                            <CompactRow label="Time Budget">
-                                {editingField === 'devEta' ? (
-                                    <div className="flex gap-1.5">
-                                        <Input type="number" min="0" step="0.5" value={editValue}
-                                            onChange={e => setEditValue(e.target.value)} autoFocus className="h-7 text-xs w-20" />
-                                        <Button size="sm" className="h-7 px-2 text-xs" onClick={handleSaveField}>OK</Button>
-                                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setEditingField(null)}>X</Button>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => startEditingField('devEta', task.devEta?.toString() || '')}>
-                                        {task.devEta !== undefined ? (
-                                            <>
-                                                <span className="text-xs font-medium">{task.devEta}h</span>
-                                                {task.remainingTimeMs !== undefined && (
-                                                    <CountdownTimer remainingMs={task.remainingTimeMs} isRunning={!!task.isTimerRunning} />
-                                                )}
-                                            </>
-                                        ) : (
-                                            <span className="text-xs text-muted-foreground italic">None</span>
-                                        )}
-                                        <Pencil className="size-2.5 opacity-40" />
-                                    </div>
-                                )}
-                            </CompactRow>
+                            {showTimeBudget && (
+                                <CompactRow label="Time Budget">
+                                    {editingField === 'devEta' && canEditTimeBudget ? (
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                step={budgetUnit === 'hours' || budgetUnit === 'days' ? '0.5' : '1'}
+                                                value={editValue}
+                                                onChange={e => setEditValue(e.target.value)}
+                                                autoFocus
+                                                className="h-8 w-24 text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                            />
+                                            <Select value={budgetUnit} onValueChange={(value) => setBudgetUnit(value as BudgetUnit)}>
+                                                <SelectTrigger className="h-8 w-28 text-xs">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="seconds">Seconds</SelectItem>
+                                                    <SelectItem value="minutes">Minutes</SelectItem>
+                                                    <SelectItem value="hours">Hours</SelectItem>
+                                                    <SelectItem value="days">Days</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <Button
+                                                size="sm"
+                                                className="h-7 px-2.5 text-[11px]"
+                                                onClick={handleSaveField}
+                                                disabled={!canSaveBudget}
+                                            >
+                                                Save
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-7 px-2.5 text-[11px]"
+                                                onClick={() => setEditingField(null)}
+                                            >
+                                                Cancel
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="space-y-1 text-xs">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-medium text-foreground">Budget:</span>
+                                                    <span className="font-mono text-foreground/90">{formatBudgetValue(task.devEta)}</span>
+                                                </div>
+                                                <div className={`inline-flex items-center gap-2 rounded-md px-2 py-1 ${isOverBudget ? 'bg-red-500/10 text-red-500 dark:text-red-300' : 'text-foreground'}`}>
+                                                    <span className="font-medium">Used:</span>
+                                                    <span className="font-mono">{formatDuration(usedExecutionMs)}</span>
+                                                </div>
+                                            </div>
+                                            {canEditTimeBudget && (
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 px-2 text-xs"
+                                                    onClick={startEditingBudget}
+                                                >
+                                                    Edit
+                                                </Button>
+                                            )}
+                                        </div>
+                                    )}
+                                </CompactRow>
+                            )}
 
                             {/* Spec Link */}
                             {task.specId && (
@@ -1752,7 +1842,10 @@ function CommentItem({ comment, onReply, replyComment }: {
     const [isDragging, setIsDragging] = useState(false);
     const dragStartRef = useRef<{ x: number; y: number } | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const imageWrapperRef = useRef<HTMLDivElement>(null);
     const imageRef = useRef<HTMLImageElement>(null);
+    const viewStateRef = useRef({ zoomScale: 1, panX: 0, panY: 0 });
+    const pinchStateRef = useRef<{ lastDistance: number } | null>(null);
 
     useEffect(() => {
         if (!lightboxImage) {
@@ -1767,6 +1860,10 @@ function CommentItem({ comment, onReply, replyComment }: {
         const t = window.setTimeout(() => setTraceCopyState('idle'), 1400);
         return () => window.clearTimeout(t);
     }, [traceCopyState]);
+
+    useEffect(() => {
+        viewStateRef.current = { zoomScale, panX, panY };
+    }, [zoomScale, panX, panY]);
 
     const commentType = comment.commentType || 'status_update';
     const isQuestion = commentType === 'question';
@@ -1808,11 +1905,6 @@ function CommentItem({ comment, onReply, replyComment }: {
         setPanY(0);
     };
 
-    const handleWheelZoom = (e: React.WheelEvent) => {
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        setZoomScale(s => Math.max(0.5, Math.min(5, s + delta)));
-    };
-
     // Clamp pan values to prevent image from going completely off-screen
     const clampPan = (panXValue: number, panYValue: number, scale: number) => {
         const container = containerRef.current;
@@ -1832,6 +1924,40 @@ function CommentItem({ comment, onReply, replyComment }: {
             x: Math.max(-maxX, Math.min(maxX, panXValue)),
             y: Math.max(-maxY, Math.min(maxY, panYValue))
         };
+    };
+
+    const applyZoomAtPoint = (
+        nextScale: number,
+        clientX: number,
+        clientY: number,
+        previous = viewStateRef.current,
+    ) => {
+        const wrapper = imageWrapperRef.current;
+        if (!wrapper) return;
+
+        const clampedScale = Math.max(0.5, Math.min(5, nextScale));
+        const { zoomScale: prevScale, panX: prevPanX, panY: prevPanY } = previous;
+        if (clampedScale === prevScale) return;
+
+        const rect = wrapper.getBoundingClientRect();
+        const imageX = (clientX - rect.left) / prevScale;
+        const imageY = (clientY - rect.top) / prevScale;
+        const baseLeft = rect.left - prevPanX;
+        const baseTop = rect.top - prevPanY;
+
+        const nextPanX = clientX - baseLeft - imageX * clampedScale;
+        const nextPanY = clientY - baseTop - imageY * clampedScale;
+        const clampedPan = clampPan(nextPanX, nextPanY, clampedScale);
+
+        setZoomScale(clampedScale);
+        setPanX(clampedPan.x);
+        setPanY(clampedPan.y);
+    };
+
+    const handleWheelZoom = (e: React.WheelEvent) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        applyZoomAtPoint(viewStateRef.current.zoomScale + delta, e.clientX, e.clientY);
     };
 
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -1862,6 +1988,78 @@ function CommentItem({ comment, onReply, replyComment }: {
         setIsDragging(false);
         dragStartRef.current = null;
     };
+
+    const getTouchDistance = (touches: TouchList) => {
+        const [a, b] = [touches[0], touches[1]];
+        return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    };
+
+    const getTouchCenter = (touches: TouchList) => {
+        const [a, b] = [touches[0], touches[1]];
+        return {
+            x: (a.clientX + b.clientX) / 2,
+            y: (a.clientY + b.clientY) / 2,
+        };
+    };
+
+    const startPinchGesture = (touches: TouchList) => {
+        if (touches.length !== 2) {
+            pinchStateRef.current = null;
+            return;
+        }
+        pinchStateRef.current = {
+            lastDistance: getTouchDistance(touches),
+        };
+    };
+
+    const updatePinchGesture = (touches: TouchList) => {
+        if (touches.length !== 2 || !pinchStateRef.current) return;
+        const center = getTouchCenter(touches);
+        const currentDistance = getTouchDistance(touches);
+        const { lastDistance } = pinchStateRef.current;
+        const { zoomScale: currentScale } = viewStateRef.current;
+        const scaleFactor = lastDistance > 0 ? currentDistance / lastDistance : 1;
+        const nextScale = currentScale * scaleFactor;
+
+        applyZoomAtPoint(nextScale, center.x, center.y);
+        pinchStateRef.current = { lastDistance: currentDistance };
+    };
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container || !lightboxImage) return;
+
+        const onTouchStart = (e: TouchEvent) => {
+            if (e.touches.length !== 2) {
+                pinchStateRef.current = null;
+                return;
+            }
+            e.preventDefault();
+            startPinchGesture(e.touches);
+        };
+
+        const onTouchMove = (e: TouchEvent) => {
+            if (e.touches.length !== 2 || !pinchStateRef.current) return;
+            e.preventDefault();
+            updatePinchGesture(e.touches);
+        };
+
+        const onTouchEnd = () => {
+            if (pinchStateRef.current) pinchStateRef.current = null;
+        };
+
+        container.addEventListener('touchstart', onTouchStart, { passive: false });
+        container.addEventListener('touchmove', onTouchMove, { passive: false });
+        container.addEventListener('touchend', onTouchEnd, { passive: false });
+        container.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+        return () => {
+            container.removeEventListener('touchstart', onTouchStart);
+            container.removeEventListener('touchmove', onTouchMove);
+            container.removeEventListener('touchend', onTouchEnd);
+            container.removeEventListener('touchcancel', onTouchEnd);
+        };
+    }, [lightboxImage]);
 
     // Extract reflection verdict from attachments for color coding
     const reflectionVerdict = isReflection
@@ -2051,13 +2249,15 @@ function CommentItem({ comment, onReply, replyComment }: {
                             onMouseUp={handleMouseUp}
                             onMouseLeave={handleMouseLeave}
                             style={{
-                                cursor: zoomScale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
+                                cursor: zoomScale > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default',
+                                touchAction: 'none',
                             }}
                         >
                             <div
+                                ref={imageWrapperRef}
                                 style={{
-                                    transform: `scale(${zoomScale}) translate(${panX}px, ${panY}px)`,
-                                    transformOrigin: 'center center',
+                                    transform: `translate(${panX}px, ${panY}px) scale(${zoomScale})`,
+                                    transformOrigin: 'top left',
                                     transition: isDragging ? 'none' : 'transform 0.1s ease-out',
                                     willChange: 'transform'
                                 }}
@@ -2297,4 +2497,3 @@ function ExecutingTimer({ task }: { task: Task }) {
         </span>
     );
 }
-

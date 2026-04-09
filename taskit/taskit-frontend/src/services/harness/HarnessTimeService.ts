@@ -131,6 +131,7 @@ interface HarnessTask {
         cache_creation_input_tokens?: number;
     } | null;
     time_in_statuses?: Record<string, number>;
+    completed_at?: string | null;
     history?: HarnessTaskHistory[];
     comments?: HarnessTaskComment[];
     comment_count?: number;
@@ -434,9 +435,12 @@ export class HarnessTimeService implements IntegrationService {
                 const history = task.history || [];
                 const mutations = this.transformHistory(history, membersMap);
                 const timeInStatuses = this.computeTimeInStatuses(mutations, task.created_at);
-                const totalLifespanMs = Date.now() - new Date(task.created_at).getTime();
+                const endTime = task.completed_at ? new Date(task.completed_at).getTime() : Date.now();
+                const totalLifespanMs = endTime - new Date(task.created_at).getTime();
                 const workTimeMs = (timeInStatuses['IN_PROGRESS'] || 0) + (timeInStatuses['REVIEW'] || 0);
-                const executingTimeMs = timeInStatuses['EXECUTING'] || 0;
+                const executingTimeMs = HarnessTimeService.subtractQuestionPause(
+                    timeInStatuses['EXECUTING'] || 0, task.metadata,
+                );
 
                 const assigneeIds = task.assignee ? [String(task.assignee.id)] : [];
                 const assigneeNames = task.assignee ? [task.assignee.name] : [];
@@ -559,9 +563,12 @@ export class HarnessTimeService implements IntegrationService {
         const history = raw.history || [];
         const mutations = this.transformHistory(history, this.cachedMembers);
         const timeInStatuses = this.computeTimeInStatuses(mutations, raw.created_at);
-        const totalLifespanMs = Date.now() - new Date(raw.created_at).getTime();
+        const endTime = raw.completed_at ? new Date(raw.completed_at).getTime() : Date.now();
+        const totalLifespanMs = endTime - new Date(raw.created_at).getTime();
         const workTimeMs = (timeInStatuses['IN_PROGRESS'] || 0) + (timeInStatuses['REVIEW'] || 0);
-        const executingTimeMs = timeInStatuses['EXECUTING'] || 0;
+        const executingTimeMs = HarnessTimeService.subtractQuestionPause(
+            timeInStatuses['EXECUTING'] || 0, raw.metadata,
+        );
 
         const assigneeIds = raw.assignee ? [String(raw.assignee.id)] : [];
         const assigneeNames = raw.assignee ? [raw.assignee.name] : [];
@@ -1383,9 +1390,12 @@ export class HarnessTimeService implements IntegrationService {
         if (Object.keys(timeInStatuses).length === 0) {
             timeInStatuses = { [task.status]: Date.now() - new Date(task.created_at).getTime() };
         }
-        const totalLifespanMs = Date.now() - new Date(task.created_at).getTime();
+        const endTime = task.completed_at ? new Date(task.completed_at).getTime() : Date.now();
+        const totalLifespanMs = endTime - new Date(task.created_at).getTime();
         const workTimeMs = (timeInStatuses['IN_PROGRESS'] || 0) + (timeInStatuses['REVIEW'] || 0);
-        const executingTimeMs = timeInStatuses['EXECUTING'] || 0;
+        const executingTimeMs = HarnessTimeService.subtractQuestionPause(
+            timeInStatuses['EXECUTING'] || 0, task.metadata,
+        );
         const assigneeIds = task.assignee ? [String(task.assignee.id)] : [];
         const assigneeNames = task.assignee ? [task.assignee.name] : [];
         const devEtaHours = task.dev_eta_seconds ? task.dev_eta_seconds / 3600 : undefined;
@@ -1564,6 +1574,20 @@ export class HarnessTimeService implements IntegrationService {
 
         times[currentStatus] = (times[currentStatus] || 0) + (Date.now() - lastTime);
         return times;
+    }
+
+    /** Subtract question-pause time from raw EXECUTING ms. */
+    private static subtractQuestionPause(
+        rawMs: number,
+        metadata?: Record<string, unknown> | null,
+    ): number {
+        if (!metadata || rawMs <= 0) return rawMs;
+        let pauseMs = (metadata.executing_paused_ms as number) || 0;
+        const pausedAt = metadata.question_paused_at as string | undefined;
+        if (pausedAt) {
+            pauseMs += Date.now() - new Date(pausedAt).getTime();
+        }
+        return Math.max(0, rawMs - pauseMs);
     }
 
     private async authHeaders(): Promise<Record<string, string>> {

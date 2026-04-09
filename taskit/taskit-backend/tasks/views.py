@@ -2404,6 +2404,9 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         task.metadata = task.metadata or {}
         task.metadata["has_pending_question"] = True
+        # Freeze the EXECUTING timer while waiting for the answer
+        if task.status == TaskStatus.EXECUTING and not task.metadata.get("question_paused_at"):
+            task.metadata["question_paused_at"] = timezone.now().isoformat()
         task.save(update_fields=["metadata"])
 
         # Notify board human members about the question
@@ -2459,9 +2462,16 @@ class TaskViewSet(viewsets.ModelViewSet):
         question_comment.attachments = attachments
         question_comment.save(update_fields=["attachments"])
 
-        # Clear pending question flag
+        # Clear pending question flag and resume EXECUTING timer
         task.metadata = task.metadata or {}
         task.metadata.pop("has_pending_question", None)
+        paused_at = task.metadata.pop("question_paused_at", None)
+        if paused_at:
+            paused_start = datetime.fromisoformat(paused_at)
+            pause_ms = (timezone.now() - paused_start).total_seconds() * 1000
+            task.metadata["executing_paused_ms"] = (
+                task.metadata.get("executing_paused_ms", 0) + pause_ms
+            )
         task.save(update_fields=["metadata"])
 
         return Response(

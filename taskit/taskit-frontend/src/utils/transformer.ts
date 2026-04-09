@@ -34,7 +34,7 @@ export function formatDuration(ms: number): string {
     const d = Math.floor(totalSeconds / 86400);
 
     if (d > 0) return `${d}d ${h}h`;
-    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (h > 0) return `${h}h ${m}m`;
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
 }

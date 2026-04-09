@@ -72,6 +72,7 @@ class TaskSerializer(serializers.ModelSerializer):
     board_skip_proof = serializers.SerializerMethodField()
     board_escalation_enabled = serializers.SerializerMethodField()
     schedule_summary = serializers.SerializerMethodField()
+    completed_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -84,7 +85,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "board_skip_reflection", "board_skip_proof", "board_escalation_enabled",
             "estimated_cost_usd", "reflection_cost_usd", "usage", "time_in_statuses",
             "reference_images",
-            "schedule_summary",
+            "schedule_summary", "completed_at",
         ]
         read_only_fields = ["id", "created_at", "last_updated_at", "kanban_position"]
 
@@ -132,9 +133,35 @@ class TaskSerializer(serializers.ModelSerializer):
             orphan_attachments, many=True, context=self.context
         ).data
 
+    def get_completed_at(self, obj):
+        """Return timestamp when task entered DONE/TESTING (for lifespan freeze).
+
+        Returns None if the task is not currently in DONE or TESTING,
+        allowing the frontend to use Date.now() for active tasks.
+        When a task is dragged back from DONE/TESTING, this returns None
+        so lifespan resumes growing.
+        """
+        frozen_statuses = {TaskStatus.DONE, TaskStatus.TESTING}
+        if obj.status not in frozen_statuses:
+            return None
+        entry = obj.history.filter(
+            field_name="status",
+            new_value__in=[TaskStatus.DONE, TaskStatus.TESTING],
+        ).order_by("-changed_at").first()
+        if entry:
+            return entry.changed_at.isoformat()
+        return None
+
     def get_time_in_statuses(self, obj):
-        """Compute ms spent in each status from mutation history."""
+        """Compute ms spent in each status from mutation history.
+
+        Time freezes when the task is in DONE or TESTING — uses the
+        timestamp of the last transition instead of now().
+        Subtracts question-pause time from EXECUTING when an agent is
+        waiting for a human answer.
+        """
         from django.utils import timezone
+        frozen_statuses = {TaskStatus.DONE, TaskStatus.TESTING}
         history = obj.history.filter(field_name="status").order_by("changed_at")
         result = {}
         prev_status = None
@@ -145,10 +172,24 @@ class TaskSerializer(serializers.ModelSerializer):
                 result[prev_status] = result.get(prev_status, 0) + ms
             prev_status = entry.new_value
             prev_time = entry.changed_at
-        # Account for time in current status
+        # Account for time in current status — freeze for DONE/TESTING
         if prev_status and prev_time:
-            ms = (timezone.now() - prev_time).total_seconds() * 1000
+            if obj.status in frozen_statuses:
+                ms = 0
+            else:
+                ms = (timezone.now() - prev_time).total_seconds() * 1000
             result[prev_status] = result.get(prev_status, 0) + ms
+        # Subtract question-pause time from EXECUTING
+        if "EXECUTING" in result:
+            metadata = obj.metadata or {}
+            pause_ms = metadata.get("executing_paused_ms", 0)
+            paused_at = metadata.get("question_paused_at")
+            if paused_at:
+                paused_start = datetime.fromisoformat(paused_at)
+                if not paused_start.tzinfo:
+                    paused_start = paused_start.replace(tzinfo=timezone.utc)
+                pause_ms += (timezone.now() - paused_start).total_seconds() * 1000
+            result["EXECUTING"] = max(0, result["EXECUTING"] - pause_ms)
         return result
 
     def get_schedule_summary(self, obj):

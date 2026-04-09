@@ -412,8 +412,7 @@ function App() {
     const handleBoardChange = (value: string) => {
         if (value === ALL_BOARDS_ID) {
             updateSearchParam('board', null);
-            const board = searchParams.get('board');
-            navigate(board ? `/settings?board=${board}` : '/settings');
+            navigate('/settings?tab=boards');
         } else {
             updateSearchParam('board', value);
         }

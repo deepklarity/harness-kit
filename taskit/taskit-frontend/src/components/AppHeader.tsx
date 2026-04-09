@@ -51,6 +51,9 @@ export function AppHeader({
     onOpenProcessMonitor, onOpenCommandPalette,
 }: AppHeaderProps) {
     const { user: authUser, authEnabled, logout } = useAuth();
+    const activeStatsView = VIEW_ROUTES.find(item => item.id === viewMode && ['overview', 'analytics'].includes(item.id))
+        ?? VIEW_ROUTES.find(item => item.id === 'overview');
+    const ActiveStatsIcon = activeStatsView?.icon ?? BarChart3;
 
     return (
         <header className="sticky top-0 z-50 bg-background border-b border-border px-4 sm:px-6 lg:px-8">
@@ -137,8 +140,8 @@ export function AppHeader({
                                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                                 )}
                             >
-                                <BarChart3 className="size-3.5" />
-                                <span className="hidden sm:inline">Stats</span>
+                                <ActiveStatsIcon className="size-3.5" />
+                                <span className="hidden sm:inline">{activeStatsView?.label ?? 'Stats'}</span>
                                 <ChevronDown className="size-3 opacity-50" />
                             </Button>
                         </PopoverTrigger>
