@@ -14,7 +14,7 @@ import os
 import shlex
 import shutil
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ async def launch(
     task_id: str,
     output_file: str,
     env_unset: Optional[List[str]] = None,
+    env_vars: Optional[Dict[str, str]] = None,
 ) -> str:
     """Launch a command in a new detached tmux session.
 
@@ -46,6 +47,10 @@ async def launch(
 
     A marker file (``<output_file>.exit``) is written with the command's
     exit code when it finishes.
+
+    ``env_vars`` exports environment variables in the script before the
+    command runs. This is used to set per-task MCP identity vars so that
+    parallel tasks sharing the same config file don't clobber each other.
 
     Returns the session name.
     """
@@ -57,11 +62,18 @@ async def launch(
     if env_unset:
         unset_lines = " ".join(f"unset {v};" for v in env_unset) + "\n"
 
+    export_lines = ""
+    if env_vars:
+        export_lines = "".join(
+            f"export {k}={shlex.quote(v)}\n" for k, v in env_vars.items()
+        )
+
     marker = output_file + ".exit"
     script_content = (
         "#!/usr/bin/env bash\n"
         "set -o pipefail\n"
         f"{unset_lines}"
+        f"{export_lines}"
         f"{shlex.join(cmd)} 2>&1 | tee {shlex.quote(output_file)}\n"
         f"echo $? > {shlex.quote(marker)}\n"
     )

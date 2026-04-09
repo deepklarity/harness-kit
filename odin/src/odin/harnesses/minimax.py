@@ -1,6 +1,7 @@
 """MiniMax CLI harness (kilo)."""
 
 import asyncio
+import os
 import shlex
 import shutil
 import time
@@ -17,7 +18,7 @@ class MiniMaxHarness(BaseHarness):
 
     def __init__(self, config: AgentConfig):
         super().__init__(config)
-        self._cli = config.cli_command or "kilo"
+        self._cli = config.cli_command or "opencode"
 
     @property
     def name(self) -> str:
@@ -25,12 +26,21 @@ class MiniMaxHarness(BaseHarness):
 
     def build_execute_command(self, prompt: str, context: dict) -> list[str] | None:
         cmd = [self._cli, "run", "--format", "json"]
-        extra = self.config.execute_args or "--auto"
-        cmd.extend(shlex.split(extra))
+        if self.config.execute_args:
+            cmd.extend(shlex.split(self.config.execute_args))
         if context.get("model"):
             cmd.extend(["-m", context["model"]])
         cmd.append(prompt)
         return cmd
+
+    def _build_subprocess_env(self, context: dict) -> dict | None:
+        """Merge per-task MCP env vars into the process environment."""
+        mcp_env = context.get("mcp_env")
+        if not mcp_env:
+            return None
+        env = os.environ.copy()
+        env.update(mcp_env)
+        return env
 
     async def execute(self, prompt: str, context: dict) -> TaskResult:
         start = time.monotonic()
@@ -46,6 +56,7 @@ class MiniMaxHarness(BaseHarness):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=working_dir,
+                env=self._build_subprocess_env(context),
                 limit=SUBPROCESS_STREAM_LIMIT,
             )
             self._current_pid = proc.pid

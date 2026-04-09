@@ -1,6 +1,8 @@
+import json
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -8,6 +10,25 @@ import httpx
 from harness_usage_status.models import UsageInfo, StatusInfo, ProviderState
 from harness_usage_status.providers.base import BaseProvider
 from harness_usage_status.providers.registry import register_provider
+
+
+def _read_opencode_auth_token() -> Optional[str]:
+    """Read MiniMax API key from ~/.local/share/opencode/auth.json.
+
+    Checks keys in order: "minimax-coding-plan", "minimax".
+    """
+    auth_path = Path.home() / ".local" / "share" / "opencode" / "auth.json"
+    try:
+        with open(auth_path) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+    for key in ("minimax-coding-plan", "minimax"):
+        entry = data.get(key)
+        if isinstance(entry, dict) and entry.get("key"):
+            return entry["key"]
+    return None
 
 
 @register_provider("minimax")
@@ -50,7 +71,12 @@ class MiniMaxProvider(BaseProvider):
         return self.REGION_HOSTS.get(region, self.REGION_HOSTS["global"])
 
     def _api_key(self) -> Optional[str]:
-        return self.config.get("api_key")
+        # 1. Config / MINIMAX_API_KEY env var (resolved by config loader)
+        key = self.config.get("api_key")
+        if key:
+            return key
+        # 2. Fallback: ~/.local/share/opencode/auth.json
+        return _read_opencode_auth_token()
 
     def _extras(self) -> dict:
         return self.config.get("extras", {})
@@ -65,7 +91,7 @@ class MiniMaxProvider(BaseProvider):
         if not self._api_key():
             return UsageInfo(
                 provider=self.name,
-                raw={"error": "MINIMAX_API_KEY not configured"},
+                raw={"error": "MiniMax not configured (set MINIMAX_API_KEY or add key to ~/.local/share/opencode/auth.json)"},
             )
 
         url = f"{self._host()}{self.REMAINS_PATH}"
@@ -123,7 +149,7 @@ class MiniMaxProvider(BaseProvider):
                 provider=self.name,
                 state=ProviderState.UNKNOWN,
                 last_checked=datetime.now(),
-                message="MINIMAX_API_KEY not configured",
+                message="MiniMax not configured (set MINIMAX_API_KEY or add key to ~/.local/share/opencode/auth.json)",
             )
         start = time.monotonic()
         try:

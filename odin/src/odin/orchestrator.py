@@ -1909,12 +1909,21 @@ Do not take any further actions after writing the plan."""
             return None
 
         # --- OpenCode agents (minimax, glm): merge mcp + permission dicts ---
+        # Per-task identity vars (TASKIT_TASK_ID, AUTHOR_EMAIL, AUTHOR_LABEL)
+        # are exported in the tmux script env instead of being baked into
+        # opencode.json, because parallel tasks sharing the same working_dir
+        # would overwrite each other's config file.  Only shared/stable vars
+        # (TASKIT_URL, TASKIT_AUTH_TOKEN) go into the config file.
         if agent_name in ("minimax", "glm"):
             from odin.mcps.taskit_mcp.config import tool_names as taskit_tool_names
             mcp_servers: Dict = {}
             permission: Dict = {}
             if has_taskit:
-                entry = taskit_server_entry(agent_name, env)
+                # Use only shared env vars in the config file; per-task vars
+                # are injected via process environment (see _execute_task).
+                _PER_TASK_KEYS = {"TASKIT_TASK_ID", "TASKIT_AUTHOR_EMAIL", "TASKIT_AUTHOR_LABEL"}
+                shared_env = {k: v for k, v in env.items() if k not in _PER_TASK_KEYS}
+                entry = taskit_server_entry(agent_name, shared_env)
                 mcp_servers.update(entry)
                 permission.update({t: "allow" for t in taskit_tool_names()})
             if has_mobile:
@@ -2903,6 +2912,7 @@ SUCCESS or FAILED
         output_file: str,
         agent_name: str,
         timeout_seconds: Optional[int] = None,
+        env_vars: Optional[Dict[str, str]] = None,
     ) -> TaskResult:
         """Run a CLI command inside a tmux session and return a TaskResult."""
         start = time.monotonic()
@@ -2913,7 +2923,7 @@ SUCCESS or FAILED
             task_obj.metadata["tmux_session"] = tmux.session_name(task_id)
             self.task_mgr.update_task(task_obj)
 
-        await tmux.launch(cmd, working_dir, task_id, output_file)
+        await tmux.launch(cmd, working_dir, task_id, output_file, env_vars=env_vars)
         timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
         exit_code = await tmux.wait_for_exit(
             task_id, output_file, timeout=timeout,
@@ -3087,6 +3097,16 @@ SUCCESS or FAILED
                     attachments=["debug:effective_input"],
                 )
 
+            # Build per-task env vars for opencode-type agents so that
+            # parallel tasks don't clobber each other's identity in the
+            # shared opencode.json config file.
+            tmux_env_vars: Optional[Dict[str, str]] = None
+            if agent_name in ("minimax", "glm") and has_taskit:
+                mcp_env = self._get_mcp_env(task_id, agent_name, model=model)
+                tmux_env_vars = {
+                    k: v for k, v in mcp_env.items()
+                    if k in ("TASKIT_TASK_ID", "TASKIT_AUTHOR_EMAIL", "TASKIT_AUTHOR_LABEL")
+                }
                 if skip_proof:
                     self.task_mgr.add_comment(
                         task_id=task_id,
@@ -3105,6 +3125,7 @@ SUCCESS or FAILED
                         output_file,
                         harness.name,
                         timeout_seconds=self.config.execution_timeout_seconds,
+                        env_vars=tmux_env_vars,
                     )
                 else:
                     # Fallback: direct harness execution (API or no tmux)

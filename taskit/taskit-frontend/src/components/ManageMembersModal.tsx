@@ -37,7 +37,7 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
     const [boardMembers, setBoardMembers] = useState<Member[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<Member[]>([]);
-    const [searching, setSearching] = useState(false);
+    const [, setSearching] = useState(false);
     const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
     const [removing, setRemoving] = useState(false);
 

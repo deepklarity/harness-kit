@@ -8,7 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import {
     BarChart3, LayoutDashboard, FileText, TrendingUp,
     Plus, LogOut, Settings,
-    Activity, Search, ChevronDown, Clock3, Sparkles, ListTodo,
+    Activity, Search, ChevronDown, Clock3, Sparkles, ListTodo, Gauge,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -23,6 +23,7 @@ const VIEW_ROUTES: { id: ViewMode; path: string; label: string; icon: LucideIcon
     { id: 'scheduling', path: '/scheduling', label: 'Scheduling', icon: Clock3 },
     { id: 'specs', path: '/specs', label: 'Specs', icon: FileText },
     { id: 'overview', path: '/stats', label: 'Stats', icon: BarChart3 },
+    { id: 'providers', path: '/providers', label: 'Providers', icon: Gauge },
     { id: 'analytics', path: '/analytics', label: 'Analytics', icon: TrendingUp },
 ];
 
@@ -135,7 +136,7 @@ export function AppHeader({
                                 size="sm"
                                 className={cn(
                                     "h-8 px-2.5 gap-1.5 text-xs font-medium transition-colors",
-                                    ['overview', 'analytics'].includes(viewMode)
+                                    ['overview', 'analytics', 'providers'].includes(viewMode)
                                         ? "bg-muted text-foreground"
                                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                                 )}
@@ -168,6 +169,17 @@ export function AppHeader({
                                 >
                                     <TrendingUp className="size-3.5" />
                                     <span>Analytics</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => onNavChange('providers')}
+                                    className={cn(
+                                        "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
+                                        viewMode === 'providers' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                                    )}
+                                >
+                                    <Gauge className="size-3.5" />
+                                    <span>Providers</span>
                                 </button>
                             </div>
                         </PopoverContent>

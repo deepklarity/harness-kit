@@ -111,6 +111,7 @@ function createMockService() {
     fetchSpecDetail: vi.fn(),
     fetchSpecDiagnostic: vi.fn(),
     cloneSpec: vi.fn(),
+    fetchProviderUsage: vi.fn(),
   }
 }
 
@@ -120,7 +121,7 @@ describe('SpecDebugView', () => {
   beforeEach(() => {
     mockService = createMockService()
     // Mock global fetch for the diagnostic endpoint
-    global.fetch = vi.fn().mockResolvedValue({
+    globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: () => Promise.resolve(mockDiagnosticResponse),

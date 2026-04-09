@@ -25,6 +25,7 @@ urlpatterns = [
     path("runtime/directories/suggest/", views.runtime_directories_suggest),
     path("runtime/directories/children/", views.runtime_directories_children),
     path("runtime/forced-provider/", views.runtime_forced_provider),
+    path("runtime/provider-usage/", views.runtime_provider_usage),
     path("runtime/odin-status/", views.runtime_odin_status),
     path("runtime/process-monitor/", views.runtime_process_monitor),
     path("runtime/stop/", views.runtime_stop),

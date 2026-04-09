@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import subprocess
@@ -3839,6 +3840,94 @@ def runtime_odin_status(request):
 def runtime_forced_provider(request):
     """Expose the current forced provider configuration for read-only UI use."""
     return Response(_forced_provider_response())
+
+
+@api_view(["GET"])
+def runtime_provider_usage(request):
+    """Return AI provider usage quotas and health status."""
+    try:
+        from harness_usage_status.config import load_config
+        from harness_usage_status.providers.registry import get_all_providers
+    except ImportError:
+        return Response({
+            "providers": [],
+            "error": "harness_usage_status package not installed",
+            "fetched_at": timezone.now().isoformat(),
+        })
+
+    try:
+        config = load_config()
+        providers = get_all_providers(config.get_provider_configs())
+
+        provider_list = list(providers.values())
+
+        async def fetch_all():
+            usage_tasks = [p.get_usage() for p in provider_list]
+            status_tasks = [p.get_status() for p in provider_list]
+            usages = await asyncio.gather(*usage_tasks, return_exceptions=True)
+            statuses = await asyncio.gather(*status_tasks, return_exceptions=True)
+            return usages, statuses
+
+        usages, statuses = asyncio.run(fetch_all())
+
+        result = []
+        for i, provider in enumerate(provider_list):
+            usage = usages[i]
+            provider_status = statuses[i]
+
+            entry = {"name": provider.name}
+
+            if isinstance(provider_status, Exception):
+                entry.update({
+                    "state": "unknown",
+                    "latency_ms": None,
+                    "last_checked": None,
+                    "message": str(provider_status),
+                })
+            else:
+                entry.update({
+                    "state": provider_status.state.value,
+                    "latency_ms": provider_status.latency_ms,
+                    "last_checked": provider_status.last_checked.isoformat() if provider_status.last_checked else None,
+                    "message": provider_status.message,
+                })
+
+            if isinstance(usage, Exception):
+                entry.update({
+                    "plan": None,
+                    "quota_limit": None,
+                    "used": None,
+                    "remaining": None,
+                    "usage_pct": None,
+                    "unit": "unknown",
+                    "reset_date": None,
+                    "raw": None,
+                })
+            else:
+                entry.update({
+                    "plan": usage.plan,
+                    "quota_limit": usage.quota_limit,
+                    "used": usage.used,
+                    "remaining": usage.remaining,
+                    "usage_pct": usage.usage_pct,
+                    "unit": usage.unit,
+                    "reset_date": usage.reset_date.isoformat() if usage.reset_date else None,
+                    "raw": usage.raw,
+                })
+
+            result.append(entry)
+
+        return Response({
+            "providers": result,
+            "fetched_at": timezone.now().isoformat(),
+        })
+    except Exception:
+        logger.exception("Failed to fetch provider usage")
+        return Response({
+            "providers": [],
+            "error": "Failed to fetch provider usage data",
+            "fetched_at": timezone.now().isoformat(),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def _list_child_directories(path_value, limit, include_hidden=False):

@@ -19,6 +19,7 @@ import type {
     OdinStatusResponse,
     ProcessMonitorResponse,
     ForcedProviderStatus,
+    ProviderUsageResponse,
     AnalyticsCostSummary,
     ProviderQuota,
     TaskSchedule,
@@ -123,6 +124,7 @@ export interface IntegrationService {
     stopRuntimeTask(taskId: string, targetStatus?: string): Promise<void>;
     fetchOdinStatus(params?: { spec?: string; agent?: string; status?: string }): Promise<OdinStatusResponse>;
     fetchForcedProviderStatus(): Promise<ForcedProviderStatus>;
+    fetchProviderUsage(): Promise<ProviderUsageResponse>;
     fetchProcessMonitor(params?: { boardId?: string; specId?: string; runningOnly?: boolean }): Promise<ProcessMonitorResponse>;
     fetchIdeOptions(): Promise<IdeOptions>;
     fetchIdeSettings(): Promise<IdeSettings>;

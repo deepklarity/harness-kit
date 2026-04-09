@@ -521,7 +521,7 @@ export interface PresetsResponse {
     presets: TaskPreset[];
 }
 
-export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications' | 'analytics' | 'scheduling';
+export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications' | 'analytics' | 'scheduling'| 'providers';
 
 // ─── Analytics Types ─────────────────────────────────────────
 
@@ -653,18 +653,26 @@ export interface NotificationPreference {
     quiet_hours_timezone: string;
 }
 
-// ─── Kanban Pagination ────────────────────────────────────────
-export interface KanbanColumnData {
-    tasks: Task[];
-    totalCount: number;
+// ─── Provider Usage Types ────────────────────────────────────
+
+export interface ProviderUsage {
+    name: string;
+    state: 'online' | 'offline' | 'degraded' | 'unknown';
+    latency_ms: number | null;
+    last_checked: string | null;
+    message: string | null;
+    plan: string | null;
+    quota_limit: number | null;
+    used: number | null;
+    remaining: number | null;
+    usage_pct: number | null;
+    unit: string;
+    reset_date: string | null;
+    raw: Record<string, unknown> | null;
 }
 
-export interface KanbanColumnsResponse {
-    columns: Record<string, KanbanColumnData>;
-}
-
-export interface KanbanLoadMoreResponse {
-    tasks: Task[];
-    totalCount: number;
-    hasMore: boolean;
+export interface ProviderUsageResponse {
+    providers: ProviderUsage[];
+    error?: string;
+    fetched_at: string;
 }

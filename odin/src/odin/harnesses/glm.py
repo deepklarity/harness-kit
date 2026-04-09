@@ -1,6 +1,7 @@
 """GLM (Zhipu AI) CLI harness (opencode)."""
 
 import asyncio
+import os
 import shlex
 import shutil
 import time
@@ -32,6 +33,15 @@ class GLMHarness(BaseHarness):
         cmd.append(prompt)
         return cmd
 
+    def _build_subprocess_env(self, context: dict) -> dict | None:
+        """Merge per-task MCP env vars into the process environment."""
+        mcp_env = context.get("mcp_env")
+        if not mcp_env:
+            return None
+        env = os.environ.copy()
+        env.update(mcp_env)
+        return env
+
     async def execute(self, prompt: str, context: dict) -> TaskResult:
         start = time.monotonic()
         working_dir = context.get("working_dir")
@@ -46,6 +56,7 @@ class GLMHarness(BaseHarness):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=working_dir,
+                env=self._build_subprocess_env(context),
                 limit=SUBPROCESS_STREAM_LIMIT,
             )
             self._current_pid = proc.pid

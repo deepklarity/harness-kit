@@ -27,6 +27,7 @@ import { getLatestExecutionTransitionTimestamp, markExecutionTransitionSeen } fr
 import { EditUserModal } from './components/EditUserModal';
 import { BoardPage, SchedulingPage, SpecsPage } from './components/pages';
 import { NotificationsPage } from './components/NotificationsPage';
+import { ProvidersPage } from './components/pages/ProvidersPage';
 import { CommandPalette } from './components/CommandPalette';
 import { AnalyticsPage } from './components/analytics';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
@@ -41,6 +42,7 @@ function pathToViewMode(pathname: string): ViewMode {
     if (pathname.startsWith('/reflections')) return 'reflections';
     if (pathname === '/settings') return 'settings';
     if (pathname === '/notifications') return 'notifications';
+    if (pathname === '/providers') return 'providers';
     if (pathname === '/analytics') return 'analytics';
     return 'board';
 }
@@ -775,13 +777,14 @@ function App() {
                         <Route path="/reflections/:reportId" element={
                             <ReflectionDetailRoute onTaskClick={handleTaskSelect} />
                         } />
+                        <Route path="/notifications" element={<NotificationsPage />} />
+                        <Route path="/providers" element={<ProvidersPage />} />
                         <Route path="/analytics" element={
                             <>
                                 <SectionHeader title="Analytics" />
                                 <AnalyticsPage boards={boards} onTaskClick={handleTaskSelect} />
                             </>
                         } />
-                        <Route path="/notifications" element={<NotificationsPage />} />
                         <Route path="/settings" element={
                             <SettingsView
                                 members={members}

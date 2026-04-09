@@ -24,6 +24,7 @@ import type {
     ReflectionRequest,
     ProcessMonitorResponse,
     ForcedProviderStatus,
+    ProviderUsageResponse,
     AnalyticsCostSummary,
     ProviderQuota,
     TaskSchedule,
@@ -1083,6 +1084,10 @@ export class HarnessTimeService implements IntegrationService {
 
     async fetchForcedProviderStatus(): Promise<ForcedProviderStatus> {
         return this.get<ForcedProviderStatus>('/api/runtime/forced-provider/');
+    }
+
+    async fetchProviderUsage(): Promise<ProviderUsageResponse> {
+        return this.get<ProviderUsageResponse>('/api/runtime/provider-usage/');
     }
 
     async fetchProcessMonitor(params?: { boardId?: string; specId?: string; runningOnly?: boolean }): Promise<ProcessMonitorResponse> {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useService } from '@/contexts/ServiceContext';
 import type { TaskSearchResult } from '@/services/integration/IntegrationService';

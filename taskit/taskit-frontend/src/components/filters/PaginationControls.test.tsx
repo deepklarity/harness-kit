@@ -18,7 +18,7 @@ describe('PaginationControls', () => {
             />,
         );
 
-        expect(screen.getByText('Page 1 of 4')).toBeInTheDocument();
+        expect(screen.getByText('1 / 4')).toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: /next/i }));
         expect(onPageChange).toHaveBeenCalledWith(2);

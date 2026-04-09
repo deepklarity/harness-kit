@@ -8,7 +8,7 @@ import {
   classifyEdge,
 } from '../utils/dagUtils'
 import { classifyEdgeByExecution } from '../utils/diagnostics'
-import type { LayoutNode, LayoutEdge } from '../utils/dagUtils'
+import type { LayoutEdge } from '../utils/dagUtils'
 import { AlertTriangle, ChevronDown, ChevronRight, Maximize } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -16,14 +16,9 @@ import { Button } from '@/components/ui/button'
 
 const NODE_WIDTH = 200
 const NODE_HEIGHT = 50
-const ORPHAN_NODE_WIDTH = 160
-const ORPHAN_NODE_HEIGHT = 36
 const ORPHAN_COLS = 4
-const ORPHAN_GAP_X = 16
-const ORPHAN_GAP_Y = 12
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 4
-const ZOOM_STEP = 1.15
 
 // ─── Edge colors by dependency status ───
 
@@ -447,7 +442,7 @@ interface OrphanGridProps {
   alwaysExpanded?: boolean
 }
 
-function OrphanGrid({ tasks, onTaskClick, memberMap, expanded, onToggle, alwaysExpanded }: OrphanGridProps) {
+function OrphanGrid({ tasks, onTaskClick, memberMap: _memberMap, expanded, onToggle, alwaysExpanded }: OrphanGridProps) {
   const isExpanded = alwaysExpanded || expanded
   return (
     <div className="border border-border rounded-lg overflow-hidden">
