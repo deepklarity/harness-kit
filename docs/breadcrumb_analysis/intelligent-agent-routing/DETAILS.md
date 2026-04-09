@@ -20,8 +20,8 @@ Data schema (agent_models.json):
       "name": "qwen",
       "display_name": "Qwen Agent",
       "cost_tier": "low",
-      "default_model": "qwen3-coder",
-      "premium_model": "qwen3-coder",
+      "default_model": "coder-model",
+      "premium_model": "coder-model",
       "capabilities": ["code"],
       "enabled": true
     },
@@ -56,15 +56,15 @@ Data out:
       "name": "qwen",
       "display_name": "Qwen Agent",
       "cost_tier": "low",
-      "default_model": "qwen3-coder",
-      "premium_model": "qwen3-coder",
+      "default_model": "coder-model",
+      "premium_model": "coder-model",
       "capabilities": ["code"],
       "usage_pct": 45.2
     },
     ...
   ],
   "model_routing": [
-    {"agent": "qwen", "model": "qwen3-coder"},
+    {"agent": "qwen", "model": "coder-model"},
     {"agent": "gemini", "model": "gemini-2.5-flash"},
     ...
   ]
@@ -270,7 +270,7 @@ Key logic:
 - Collapsible `Card` with `Route` icon
 - Iterates `routing_config.model_routing` (array of `{agent, model}`)
 - For each route, looks up `routing_config.agents` for tier badge
-- Displays numbered list: `1. qwen / qwen3-coder [LOW]`
+- Displays numbered list: `1. qwen / coder-model [LOW]`
 
 Data in: `routing_config` from board API (not spec.metadata)
 
@@ -278,7 +278,7 @@ Data in: `routing_config` from board API (not spec.metadata)
 
 Key logic:
 - On each task card, shows `agent/model` badge
-- Format: `{assignees[0]}/{selected_model}` (e.g., "qwen/qwen3-coder")
+- Format: `{assignees[0]}/{selected_model}` (e.g., "qwen/coder-model")
 - Style: `text-[9px] font-mono text-muted-foreground/60 ml-auto`
 - Only renders if `task.metadata?.selected_model` exists
 

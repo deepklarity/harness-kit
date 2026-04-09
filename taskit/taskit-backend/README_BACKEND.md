@@ -321,7 +321,7 @@ Pinned model example:
 
 ```dotenv
 FORCED_BASE_PROVIDER=qwen
-FORCED_BASE_MODEL=qwen3-coder
+FORCED_BASE_MODEL=coder-model
 ```
 
 Notes:

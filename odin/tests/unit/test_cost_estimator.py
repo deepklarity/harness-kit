@@ -46,7 +46,7 @@ class TestLoadPricingTable:
             pytest.skip("agent_models.json not found")
 
         table = load_pricing_table(str(agent_models_path))
-        input_price, output_price = table["qwen3-coder"]
+        input_price, output_price = table["coder-model"]
         assert input_price is None
         assert output_price is None
 
@@ -77,7 +77,7 @@ class TestEstimateCost:
     def pricing(self):
         return {
             "claude-sonnet-4-5": (3.00, 15.00),
-            "qwen3-coder": (None, None),
+            "coder-model": (None, None),
             "gemini-2.5-flash": (0.15, 0.60),
         }
 
@@ -90,7 +90,7 @@ class TestEstimateCost:
 
     def test_unknown_model(self, pricing):
         """Model with null pricing returns None."""
-        cost = estimate_cost("qwen3-coder", 1000, 500, pricing)
+        cost = estimate_cost("coder-model", 1000, 500, pricing)
         assert cost is None
 
     def test_missing_model(self, pricing):

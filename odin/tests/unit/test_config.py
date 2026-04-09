@@ -177,12 +177,12 @@ class TestForcedProviderEnv:
     def test_forced_provider_uses_pinned_model(self):
         with patch.dict(
             os.environ,
-            {"FORCED_BASE_PROVIDER": "qwen", "FORCED_BASE_MODEL": "qwen3-coder"},
+            {"FORCED_BASE_PROVIDER": "qwen", "FORCED_BASE_MODEL": "coder-model"},
             clear=False,
         ), patch("odin.forced_provider.shutil.which", return_value="/usr/bin/qwen"):
             cfg = _default_config("test")
         assert cfg.forced_base_provider == "qwen"
-        assert cfg.forced_base_model == "qwen3-coder"
+        assert cfg.forced_base_model == "coder-model"
 
     def test_invalid_forced_provider_raises(self):
         with patch.dict(os.environ, {"FORCED_BASE_PROVIDER": "claude", "FORCED_BASE_MODEL": ""}, clear=False):
@@ -210,7 +210,7 @@ class TestParseModels:
 class TestParseModelRouting:
     def test_valid_list(self):
         raw = [
-            {"agent": "qwen", "model": "qwen3-coder"},
+            {"agent": "qwen", "model": "coder-model"},
             {"agent": "gemini", "model": "gemini-2.5-flash"},
         ]
         result = _parse_model_routing(raw)

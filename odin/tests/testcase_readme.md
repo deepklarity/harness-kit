@@ -86,7 +86,7 @@ tests/
 |---|---|
 | `TestLoadPricingTable::test_loads_all_models` | All models in agent_models.json have entries |
 | `TestLoadPricingTable::test_known_model_has_prices` | claude-sonnet-4-5 has $3.00/$15.00 pricing |
-| `TestLoadPricingTable::test_unknown_model_has_none_prices` | qwen3-coder has None pricing |
+| `TestLoadPricingTable::test_unknown_model_has_none_prices` | coder-model has None pricing |
 | `TestLoadPricingTable::test_loads_from_minimal_json` | Custom JSON loads correctly |
 | `TestEstimateCost::test_known_model` | 1000 in / 500 out on claude-sonnet-4-5 → $0.0105 |
 | `TestEstimateCost::test_unknown_model` | Null pricing returns None |

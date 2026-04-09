@@ -33,7 +33,7 @@ ENV_VAR_MAP = {
 # Legacy model routing priority (used as fallback when API routing is unavailable).
 # Walk top-to-bottom; first match that is enabled + available wins.
 DEFAULT_MODEL_ROUTING = [
-    ("qwen", "qwen3-coder"),
+    ("qwen", "coder-model"),
     ("gemini", "gemini-3-flash-preview"),
     ("glm", "zai-coding-plan/glm-4.7"),
     ("minimax", "minimax-coding-plan/MiniMax-M2.5"),
@@ -323,10 +323,10 @@ def _default_config(source: str) -> OdinConfig:
             capabilities=["coding", "writing"],
             cost_tier=CostTier.LOW,
             models={
-                "qwen3-coder": "default, code-optimized",
+                "coder-model": "default, code-optimized",
             },
-            default_model="qwen3-coder",
-            premium_model="qwen3-coder",
+            default_model="coder-model",
+            premium_model="coder-model",
         ),
         "minimax": AgentConfig(
             cli_command="kilo",

@@ -60,7 +60,7 @@
       ],
       "cli_command": "codex",
       "default_model": "gpt-5.3-codex",
-      "premium_model": "gpt-5.3-codex",
+      "premium_model": "gpt-5.4",
       "models": [
         {
           "name": "gpt-5.3-codex",
@@ -72,22 +72,22 @@
           "cache_read_price_per_1m_tokens": 0.5
         },
         {
-          "name": "o3",
-          "description": "strong reasoning",
+          "name": "gpt-5.4",
+          "description": "latest frontier agentic coding model",
           "is_default": false,
           "supports_image_input": true,
-          "input_price_per_1m_tokens": 2.0,
-          "output_price_per_1m_tokens": 8.0,
-          "cache_read_price_per_1m_tokens": 2.5
+          "input_price_per_1m_tokens": 2.50,
+          "output_price_per_1m_tokens": 15.00,
+          "cache_read_price_per_1m_tokens": 0.25
         },
         {
-          "name": "o4-mini",
-          "description": "fast, cheaper",
+          "name": "gpt-5.4-mini",
+          "description": "smaller frontier agentic coding model",
           "is_default": false,
           "supports_image_input": true,
-          "input_price_per_1m_tokens": 1.1,
-          "output_price_per_1m_tokens": 4.4,
-          "cache_read_price_per_1m_tokens": 0.28
+          "input_price_per_1m_tokens": 0.75,
+          "output_price_per_1m_tokens": 4.50,
+          "cache_read_price_per_1m_tokens": 0.075
         }
       ]
     },
@@ -101,7 +101,7 @@
       ],
       "cli_command": "gemini",
       "default_model": "gemini-3-flash-preview",
-      "premium_model": "gemini-3-pro-preview",
+      "premium_model": "gemini-3.1-pro-preview",
       "models": [
         {
           "name": "gemini-2.5-pro",
@@ -122,7 +122,7 @@
           "cache_read_price_per_1m_tokens": 0.04
         },
         {
-          "name": "gemini-2.0-flash",
+          "name": "gemini-2.5-flash-lite",
           "description": "fastest, lowest quota usage",
           "is_default": false,
           "supports_image_input": true,
@@ -131,7 +131,7 @@
           "cache_read_price_per_1m_tokens": 0.03
         },
         {
-          "name": "gemini-3-pro-preview",
+          "name": "gemini-3.1-pro-preview",
           "description": "next-gen preview, strong reasoning",
           "is_default": false,
           "supports_image_input": true,
@@ -158,16 +158,16 @@
         "writing"
       ],
       "cli_command": "qwen",
-      "default_model": "qwen3-coder",
-      "premium_model": "qwen3-coder",
+      "default_model": "coder-model",
+      "premium_model": "coder-model",
       "models": [
         {
-          "name": "qwen3-coder",
+          "name": "coder-model",
           "description": "default, code-optimized",
           "is_default": true,
           "supports_image_input": false,
-          "input_price_per_1m_tokens": 0.22,
-          "output_price_per_1m_tokens": 1.8,
+          "input_price_per_1m_tokens": 1.00,
+          "output_price_per_1m_tokens": 5.00,
           "cache_read_price_per_1m_tokens": 0.25
         }
       ]
@@ -209,6 +209,33 @@
           "input_price_per_1m_tokens": 0.3,
           "output_price_per_1m_tokens": 1.2,
           "cache_read_price_per_1m_tokens": 0.08
+        },
+        {
+          "name": "minimax-coding-plan/MiniMax-M2.5-highspeed",
+          "description": "fast inference",
+          "is_default": false,
+          "supports_image_input": false,
+          "input_price_per_1m_tokens": 0.60,
+          "output_price_per_1m_tokens": 2.40,
+          "cache_read_price_per_1m_tokens": 0.03
+        },
+        {
+          "name": "minimax-coding-plan/MiniMax-M2.7",
+          "description": "latest, strongest",
+          "is_default": false,
+          "supports_image_input": false,
+          "input_price_per_1m_tokens": 0.30,
+          "output_price_per_1m_tokens": 1.20,
+          "cache_read_price_per_1m_tokens": 0.06
+        },
+        {
+          "name": "minimax-coding-plan/MiniMax-M2.7-highspeed",
+          "description": "fast inference",
+          "is_default": false,
+          "supports_image_input": false,
+          "input_price_per_1m_tokens": 0.60,
+          "output_price_per_1m_tokens": 2.40,
+          "cache_read_price_per_1m_tokens": 0.06
         }
       ]
     },
@@ -233,6 +260,15 @@
           "cache_read_price_per_1m_tokens": 0.25
         },
         {
+          "name": "zai-coding-plan/glm-5-turbo",
+          "description": "turbo version of glm-5",
+          "is_default": false,
+          "supports_image_input": false,
+          "input_price_per_1m_tokens": 1.20,
+          "output_price_per_1m_tokens": 4.00,
+          "cache_read_price_per_1m_tokens": 0.25
+        },
+        {
           "name": "zai-coding-plan/glm-4.7",
           "description": "default, balanced cost/quality",
           "is_default": true,
@@ -246,17 +282,17 @@
           "description": "fast, low cost",
           "is_default": false,
           "supports_image_input": false,
-          "input_price_per_1m_tokens": 0.4,
-          "output_price_per_1m_tokens": 0.0,
-          "cache_read_price_per_1m_tokens": 0.0
+          "input_price_per_1m_tokens": 0.00,
+          "output_price_per_1m_tokens": 0.00,
+          "cache_read_price_per_1m_tokens": 0.00
         },
         {
           "name": "zai-coding-plan/glm-4.6",
           "description": "previous gen, stable",
           "is_default": false,
           "supports_image_input": false,
-          "input_price_per_1m_tokens": 0.55,
-          "output_price_per_1m_tokens": 2.2,
+          "input_price_per_1m_tokens": 0.60,
+          "output_price_per_1m_tokens": 2.20,
           "cache_read_price_per_1m_tokens": 0.15
         },
         {
@@ -264,8 +300,8 @@
           "description": "vision-capable",
           "is_default": false,
           "supports_image_input": true,
-          "input_price_per_1m_tokens": 0.55,
-          "output_price_per_1m_tokens": 2.19,
+          "input_price_per_1m_tokens": 0.30,
+          "output_price_per_1m_tokens": 0.90,
           "cache_read_price_per_1m_tokens": 0.08
         },
         {
@@ -291,8 +327,8 @@
           "description": "vision, previous gen",
           "is_default": false,
           "supports_image_input": true,
-          "input_price_per_1m_tokens": 0.55,
-          "output_price_per_1m_tokens": 2.19,
+          "input_price_per_1m_tokens": 0.60,
+          "output_price_per_1m_tokens": 1.80,
           "cache_read_price_per_1m_tokens": 0.15
         }
       ]

@@ -158,7 +158,7 @@ You can also pin a specific model. This is optional. If omitted, Odin uses that 
 
 ```dotenv
 FORCED_BASE_PROVIDER=qwen
-FORCED_BASE_MODEL=qwen3-coder
+FORCED_BASE_MODEL=coder-model
 ```
 
 Notes:

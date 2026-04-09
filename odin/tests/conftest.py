@@ -59,8 +59,8 @@ def make_config():
                     cli_command="qwen",
                     capabilities=["coding", "writing"],
                     cost_tier=CostTier.LOW,
-                    default_model="qwen3-coder",
-                    premium_model="qwen3-coder",
+                    default_model="coder-model",
+                    premium_model="coder-model",
                 ),
             },
         )

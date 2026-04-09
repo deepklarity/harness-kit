@@ -20,7 +20,7 @@
     "minimax",
     "minimax-coding-plan/MiniMax-M2.5",
     "qwen",
-    "qwen3-coder",
+    "coder-model",
     "zai-coding-plan/glm-4.7"
   ],
   "has_dependencies": true,

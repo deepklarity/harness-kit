@@ -22,7 +22,7 @@ const DEFAULT_MODELS: Record<string, string> = {
     claude: 'claude-opus-4-6',
     gemini: 'gemini-2.5-pro',
     codex: 'codex-5.2',
-    qwen: 'qwen3-coder',
+    qwen: 'coder-model',
 };
 
 const CONTEXT_OPTIONS = [

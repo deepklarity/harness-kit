@@ -6,7 +6,7 @@
 - **Tasks**: 7
 - **Comments**: 42
 - **History entries**: 64
-- **Harnesses**: claude, claude-sonnet-4-5, codex, gemini, gemini-2.5-flash, glm, gpt-5.3-codex, minimax, minimax-coding-plan/MiniMax-M2.5, qwen, qwen3-coder, zai-coding-plan/glm-4.7
+- **Harnesses**: claude, claude-sonnet-4-5, codex, gemini, gemini-2.5-flash, glm, gpt-5.3-codex, minimax, minimax-coding-plan/MiniMax-M2.5, qwen, coder-model, zai-coding-plan/glm-4.7
 - **Total tokens**: 547,337
 - **Total duration**: 297321ms
 - **Statuses**: {'REVIEW': 7}

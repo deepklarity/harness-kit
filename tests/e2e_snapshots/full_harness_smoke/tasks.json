@@ -6,7 +6,7 @@
     "status": "REVIEW",
     "priority": "MEDIUM",
     "complexity": "low",
-    "model_name": "qwen3-coder",
+    "model_name": "coder-model",
     "board_id": 1,
     "spec_id": 38,
     "depends_on": [],
@@ -31,7 +31,7 @@
         "usage_pct": 0.0,
         "remaining_pct": 100.0
       },
-      "selected_model": "qwen3-coder",
+      "selected_model": "coder-model",
       "suggested_agent": "qwen",
       "expected_outputs": [
         "smoke_output/qwen_table.html"

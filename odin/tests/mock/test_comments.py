@@ -97,7 +97,7 @@ class TestExtractAgentText:
     def test_qwen_with_warning_prefix(self):
         """Qwen CLI: non-JSON warning line before JSON events."""
         lines = [
-            "Unsupported Qwen OAuth model 'qwen3-coder', falling back to 'coder-model'.",
+            "Unsupported Qwen OAuth model 'coder-model', falling back to 'coder-model'.",
             json.dumps({"type": "system", "subtype": "init", "session_id": "abc", "model": "coder-model"}),
             json.dumps({"type": "result", "subtype": "success", "session_id": "abc",
                          "result": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated qwen.html.",

@@ -144,7 +144,7 @@ class TestPricingUtility(APITestCase):
     def test_pricing_table_qwen_has_pricing(self):
         from tasks.pricing import get_pricing_table
         table = get_pricing_table()
-        entry = table["qwen3-coder"]
+        entry = table["coder-model"]
         self.assertEqual(entry["input_price_per_1m_tokens"], 1.00)
         self.assertEqual(entry["output_price_per_1m_tokens"], 5.00)
 
@@ -161,7 +161,7 @@ class TestPricingUtility(APITestCase):
 
     def test_estimate_task_cost_qwen(self):
         from tasks.pricing import estimate_task_cost
-        cost = estimate_task_cost("qwen3-coder", 1000, 500)
+        cost = estimate_task_cost("coder-model", 1000, 500)
         # (1000/1M)*1.00 + (500/1M)*5.00 = 0.001 + 0.0025 = 0.0035
         self.assertAlmostEqual(cost, 0.0035, places=6)
 
@@ -204,7 +204,7 @@ class TestTaskDetailCostEstimation(APITestCase):
 
     def test_task_detail_qwen_returns_cost(self):
         board = self.make_board()
-        task = self.make_task(board, model_name="qwen3-coder")
+        task = self.make_task(board, model_name="coder-model")
         _make_trace_comment(task, input_tokens=10000, output_tokens=5000, fmt="gemini")
         resp = self.client.get(f"/tasks/{task.id}/detail/")
         self.assertEqual(resp.status_code, 200)
@@ -288,7 +288,7 @@ class TestBaseTaskSerializerCost(APITestCase):
         """Tasks nested in spec detail should include estimated_cost_usd."""
         board = self.make_board()
         spec = self.make_spec(board)
-        task = self.make_task(board, spec=spec, model_name="qwen3-coder")
+        task = self.make_task(board, spec=spec, model_name="coder-model")
         _make_trace_comment(task, input_tokens=5000, output_tokens=2000, fmt="gemini")
         resp = self.client.get(f"/specs/{spec.id}/")
         self.assertEqual(resp.status_code, 200)
@@ -330,7 +330,7 @@ class TestSpecCostSummary(APITestCase):
         spec = self.make_spec(board)
         t1 = self.make_task(board, title="T1", spec=spec, model_name="claude-sonnet-4-5")
         _make_trace_comment(t1, input_tokens=8000, output_tokens=2000, total_tokens=10000)
-        t2 = self.make_task(board, title="T2", spec=spec, model_name="qwen3-coder")
+        t2 = self.make_task(board, title="T2", spec=spec, model_name="coder-model")
         _make_trace_comment(t2, input_tokens=3000, output_tokens=1000, total_tokens=4000, fmt="gemini")
         resp = self.client.get(f"/specs/{spec.id}/")
         summary = resp.data["cost_summary"]
@@ -345,7 +345,7 @@ class TestSpecCostSummary(APITestCase):
         t1 = self.make_task(board, title="Task 1", spec=spec, model_name="claude-sonnet-4-5")
         _make_trace_comment(t1, input_tokens=10000, output_tokens=5000, total_tokens=15000)
         # Task with known pricing and usage (qwen)
-        t2 = self.make_task(board, title="Task 2", spec=spec, model_name="qwen3-coder")
+        t2 = self.make_task(board, title="Task 2", spec=spec, model_name="coder-model")
         _make_trace_comment(t2, input_tokens=5000, output_tokens=2000, total_tokens=7000, fmt="gemini")
         # Task with truly unknown model pricing
         t3 = self.make_task(board, title="Task 3", spec=spec, model_name="totally-fake-model-xyz")
@@ -365,7 +365,7 @@ class TestSpecCostSummary(APITestCase):
         self.assertEqual(summary["total_tokens"], 23500)  # 15000 + 7000 + 1500
         self.assertEqual(summary["tasks_with_unknown_cost"], 1)  # fake model; no-usage task not counted
         self.assertIn("claude-sonnet-4-5", summary["cost_by_model"])
-        self.assertIn("qwen3-coder", summary["cost_by_model"])
+        self.assertIn("coder-model", summary["cost_by_model"])
 
     def test_spec_diagnostic_no_tasks(self):
         board = self.make_board()
@@ -392,26 +392,30 @@ class TestAllHarnessModelPricing(APITestCase):
         # Claude harness
         "claude-sonnet-4-5":   (3.00, 15.00),
         "claude-opus-4":       (15.00, 75.00),
-        "claude-opus-4-6":     (15.00, 75.00),
-        "claude-haiku-4-5":    (0.80, 4.00),
+        "claude-opus-4-6":     (5.00, 25.00),
+        "claude-haiku-4-5":    (1.00, 5.00),
         # Codex harness
-        "gpt-5.3-codex":      (2.00, 8.00),
-        "o3":                  (10.00, 40.00),
-        "o4-mini":             (1.10, 4.40),
+        "gpt-5.3-codex":      (1.75, 14.00),
+        "gpt-5.4":             (2.50, 15.00),
+        "gpt-5.4-mini":        (0.75, 4.50),
         # Gemini harness
         "gemini-2.5-pro":           (1.25, 10.00),
-        "gemini-2.5-flash":         (0.15, 0.60),
-        "gemini-2.0-flash":         (0.10, 0.40),
-        "gemini-3-pro-preview":     (1.25, 10.00),
-        "gemini-3-flash-preview":   (0.15, 0.60),
+        "gemini-2.5-flash":         (0.30, 2.50),
+        "gemini-2.5-flash-lite":    (0.10, 0.40),
+        "gemini-3.1-pro-preview":     (2.00, 12.00),
+        "gemini-3-flash-preview":   (0.50, 3.00),
         # Qwen harness
-        "qwen3-coder":        (1.00, 5.00),
+        "coder-model":        (1.00, 5.00),
         # MiniMax harness
-        "minimax-coding-plan/MiniMax-M2":   (0.255, 1.00),
-        "minimax-coding-plan/MiniMax-M2.1": (0.27, 0.95),
-        "minimax-coding-plan/MiniMax-M2.5": (0.30, 1.10),
+        "minimax-coding-plan/MiniMax-M2":   (0.30, 1.20),
+        "minimax-coding-plan/MiniMax-M2.1": (0.30, 1.20),
+        "minimax-coding-plan/MiniMax-M2.5": (0.30, 1.20),
+        "minimax-coding-plan/MiniMax-M2.5-highspeed": (0.60, 2.40),
+        "minimax-coding-plan/MiniMax-M2.7": (0.30, 1.20),
+        "minimax-coding-plan/MiniMax-M2.7-highspeed": (0.60, 2.40),
         # GLM harness
         "zai-coding-plan/glm-5":           (1.00, 3.20),
+        "zai-coding-plan/glm-5-turbo":     (1.20, 4.00),
         "zai-coding-plan/glm-4.7":         (0.60, 2.20),
         "zai-coding-plan/glm-4.7-flash":   (0.00, 0.00),
         "zai-coding-plan/glm-4.6":         (0.60, 2.20),

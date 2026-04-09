@@ -59,7 +59,7 @@ def _make_orchestrator(tmp_path, model_routing=None, agents=None):
 
     if model_routing is None:
         model_routing = [
-            ModelRoute(agent="qwen", model="qwen3-coder"),
+            ModelRoute(agent="qwen", model="coder-model"),
             ModelRoute(agent="gemini", model="gemini-2.5-flash"),
             ModelRoute(agent="glm", model="GLM-4.7"),
             ModelRoute(agent="claude", model="claude-sonnet-4-5"),
@@ -381,7 +381,7 @@ class TestRouteTaskNoViableRoute:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_availability(set()):
-            with pytest.raises(RuntimeError, match=r"qwen/qwen3-coder") as exc_info:
+            with pytest.raises(RuntimeError, match=r"qwen/coder-model") as exc_info:
                 await orch._route_task(
                     required_caps=["writing"],
                     complexity="medium",

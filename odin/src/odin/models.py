@@ -81,7 +81,7 @@ class ModelRoute(BaseModel):
     """A single entry in the model routing priority list."""
 
     agent: str   # e.g. "qwen", "gemini", "glm"
-    model: str   # e.g. "qwen3-coder", "GLM-4.7"
+    model: str   # e.g. "coder-model", "GLM-4.7"
 
 
 class ChromeDevToolsConfig(BaseModel):
