@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Board, ViewMode } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -52,7 +53,8 @@ export function AppHeader({
     onOpenProcessMonitor, onOpenCommandPalette,
 }: AppHeaderProps) {
     const { user: authUser, authEnabled, logout } = useAuth();
-    const activeStatsView = VIEW_ROUTES.find(item => item.id === viewMode && ['overview', 'analytics'].includes(item.id))
+    const [statsOpen, setStatsOpen] = useState(false);
+    const activeStatsView = VIEW_ROUTES.find(item => item.id === viewMode && ['overview', 'analytics', 'providers'].includes(item.id))
         ?? VIEW_ROUTES.find(item => item.id === 'overview');
     const ActiveStatsIcon = activeStatsView?.icon ?? BarChart3;
 
@@ -129,7 +131,7 @@ export function AppHeader({
                         })}
                     </div>
 
-                    <Popover>
+                    <Popover open={statsOpen} onOpenChange={setStatsOpen}>
                         <PopoverTrigger asChild>
                             <Button
                                 variant="ghost"
@@ -150,7 +152,10 @@ export function AppHeader({
                             <div className="flex flex-col gap-0.5">
                                 <button
                                     type="button"
-                                    onClick={() => onNavChange('overview')}
+                                    onClick={() => {
+                                        setStatsOpen(false);
+                                        onNavChange('overview');
+                                    }}
                                     className={cn(
                                         "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
                                         viewMode === 'overview' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
@@ -161,7 +166,10 @@ export function AppHeader({
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => onNavChange('analytics')}
+                                    onClick={() => {
+                                        setStatsOpen(false);
+                                        onNavChange('analytics');
+                                    }}
                                     className={cn(
                                         "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
                                         viewMode === 'analytics' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
@@ -172,7 +180,10 @@ export function AppHeader({
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => onNavChange('providers')}
+                                    onClick={() => {
+                                        setStatsOpen(false);
+                                        onNavChange('providers');
+                                    }}
                                     className={cn(
                                         "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
                                         viewMode === 'providers' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"

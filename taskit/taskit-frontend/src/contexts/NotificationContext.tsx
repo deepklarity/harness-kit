@@ -7,6 +7,7 @@ import { useService } from './ServiceContext';
 import { usePolling } from '../hooks/usePolling';
 import { playNotificationSound } from '../utils/notificationSound';
 import { toast } from '../hooks/use-toast';
+import { getNotificationTargetPath } from '../lib/notificationNavigation';
 
 type IncomingNotificationListener = (notifications: Notification[]) => void;
 
@@ -83,14 +84,20 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const openNotificationTarget = useCallback((notification: Notification) => {
-        if (notification.task) {
-            navigate(`/board?taskId=${notification.task}`);
-            return;
-        }
-        if (notification.spec) {
-            navigate(`/specs?specId=${notification.spec}`);
-        }
+        const targetPath = getNotificationTargetPath(notification);
+        if (targetPath) navigate(targetPath);
     }, [navigate]);
+
+    const markAsRead = useCallback(async (id: number) => {
+        const updated = await service.markNotificationRead(id);
+        setNotifications(prev => {
+            const target = prev.find(n => n.id === id);
+            if (target && !target.is_read) {
+                setUnreadCount(count => Math.max(0, count - 1));
+            }
+            return prev.map(n => (n.id === id ? updated : n));
+        });
+    }, [service]);
 
     useEffect(() => {
         let cancelled = false;
@@ -142,9 +149,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             .slice()
             .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
             .forEach(notification => {
-                toast({
+                const { dismiss } = toast({
                     title: notification.title,
                     description: notification.body || 'Open the notification center for details.',
+                    className: notification.task || notification.spec ? 'cursor-pointer' : undefined,
+                    onClick: () => {
+                        if (!notification.task && !notification.spec) return;
+                        void markAsRead(notification.id);
+                        dismiss();
+                        openNotificationTarget(notification);
+                    },
                 });
 
                 if (
@@ -171,7 +185,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         for (const listener of incomingListenersRef.current) {
             try { listener(incoming); } catch { /* listener errors must not break notification flow */ }
         }
-    }, [openNotificationTarget, preferences]);
+    }, [markAsRead, openNotificationTarget, preferences]);
 
     const pollNotifications = useCallback(async () => {
         const [unread, latest] = await Promise.all([
@@ -207,17 +221,6 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         setNotifications(results);
         trackKnownNotifications(results);
     }, [service, trackKnownNotifications]);
-
-    const markAsRead = useCallback(async (id: number) => {
-        const updated = await service.markNotificationRead(id);
-        setNotifications(prev => {
-            const target = prev.find(n => n.id === id);
-            if (target && !target.is_read) {
-                setUnreadCount(count => Math.max(0, count - 1));
-            }
-            return prev.map(n => (n.id === id ? updated : n));
-        });
-    }, [service]);
 
     const markAllAsRead = useCallback(async () => {
         await service.markAllNotificationsRead();

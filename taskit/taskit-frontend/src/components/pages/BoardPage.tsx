@@ -92,6 +92,7 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
     const [count, setCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const scrolledTaskIdRef = useRef<string | null>(null);
 
     const qParam = searchParams.get('q');
     const statusParam = searchParams.get('status');
@@ -160,6 +161,27 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
     useEffect(() => {
         load();
     }, [load, refreshKey]);
+
+    useEffect(() => {
+        const taskId = searchParams.get('taskId');
+        if (!taskId) {
+            scrolledTaskIdRef.current = null;
+            return;
+        }
+        if (loading || scrolledTaskIdRef.current === taskId || !tasks.some(task => task.id === taskId)) {
+            return;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            document.getElementById(`task-card-${taskId}`)?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+            scrolledTaskIdRef.current = taskId;
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [loading, searchParams, tasks]);
 
     const hasFilters = useMemo(() => {
         const filterKeys = ['q', 'status', 'assignee', 'priority', 'spec', 'labels', 'sort', 'created_from', 'created_to'];
@@ -294,6 +316,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [pollingEnabled, setPollingEnabled] = useState(false);
+    const scrolledTaskIdRef = useRef<string | null>(null);
 
     const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
     const defaultsApplied = useRef(false);
@@ -391,6 +414,27 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         intervalMs: Number(import.meta.env.VITE_POLL_INTERVAL_MS || 15000),
         immediate: false,
     });
+
+    useEffect(() => {
+        const taskId = searchParams.get('taskId');
+        if (!taskId) {
+            scrolledTaskIdRef.current = null;
+            return;
+        }
+        if (loading || scrolledTaskIdRef.current === taskId || !tasks.some(task => task.id === taskId)) {
+            return;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            document.getElementById(`task-card-${taskId}`)?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+            scrolledTaskIdRef.current = taskId;
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [loading, searchParams, tasks]);
 
     const handleTaskMove = useCallback(async (
         taskId: string,

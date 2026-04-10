@@ -165,6 +165,8 @@ export const TaskCard = memo(function TaskCard({
     return (
         <>
             <Card
+                id={`task-card-${task.id}`}
+                data-task-card-id={task.id}
                 className={`cursor-pointer group hover:shadow-md transition-all duration-200 hover:ring-1 hover:ring-ring/40 hover:border-ring/40
                 ${compact ? 'py-0.5 gap-0.5' : ''}
                 ${isOverlay ? 'shadow-xl cursor-grabbing ring-2 ring-primary/20 rotate-2 bg-background z-50' : ''}

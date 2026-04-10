@@ -129,6 +129,7 @@ export function TaskDetailModal({
     const [selectedLabels, setSelectedLabels] = useState<number[]>([]);
     const [budgetTickStart, setBudgetTickStart] = useState(() => Date.now());
     const [budgetTickNow, setBudgetTickNow] = useState(() => Date.now());
+    const handledNotificationScrollRef = useRef<string | null>(null);
 
     useEffect(() => {
         setSelectedLabels(task.labels?.map(l => l.id) || []);
@@ -374,6 +375,68 @@ export function TaskDetailModal({
         }
         return map;
     }, [task.comments]);
+
+    useEffect(() => {
+        const latestComment = task.comments[task.comments.length - 1];
+
+        if (!latestComment) {
+            handledNotificationScrollRef.current = null;
+            return;
+        }
+
+        const scrollKey = `${task.id}:${latestComment.id}`;
+        if (handledNotificationScrollRef.current === scrollKey || detailLoading) {
+            return;
+        }
+
+        const latestIsDebug = Array.isArray(latestComment.attachments)
+            && latestComment.attachments.some(a => typeof a === 'string' && a.startsWith('debug:'));
+        if (latestIsDebug && !showDebugComments) {
+            setShowDebugComments(true);
+            return;
+        }
+
+        const latestIsReply = latestComment.commentType === 'reply'
+            || (latestComment.attachments as Array<Record<string, unknown>> | undefined)?.some(a => a?.type === 'reply');
+        const replyMeta = latestIsReply
+            ? (latestComment.attachments as Array<Record<string, unknown>> | undefined)?.find(a => a?.type === 'reply')
+            : null;
+        const questionId = latestIsReply && replyMeta?.reply_to ? String(replyMeta.reply_to) : null;
+        const questionComment = questionId ? task.comments.find(comment => comment.id === questionId) : null;
+        const anchorComment = questionComment ?? latestComment;
+
+        const topLevelVisibleComments = task.comments.filter(comment => {
+            if (!showDebugComments && Array.isArray(comment.attachments) && comment.attachments.some(a => typeof a === 'string' && a.startsWith('debug:'))) {
+                return false;
+            }
+            if (comment.commentType === 'reply') return false;
+            return true;
+        });
+        const visibleWindow = showAllComments ? topLevelVisibleComments : topLevelVisibleComments.slice(-10);
+        const anchorVisible = visibleWindow.some(comment => comment.id === anchorComment.id);
+
+        if (!anchorVisible && !showAllComments) {
+            setShowAllComments(true);
+            return;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            const targetId = latestIsReply
+                ? `comment-reply-${latestComment.id}`
+                : `comment-item-${latestComment.id}`;
+            const target = document.getElementById(targetId)
+                ?? document.getElementById(`comment-item-${anchorComment.id}`);
+            if (!target) return;
+
+            target.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+            handledNotificationScrollRef.current = scrollKey;
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [detailLoading, replyMap, showAllComments, showDebugComments, task.comments, task.id]);
 
     // Execution metrics from task.metadata
     const execMetrics = useMemo(() => {
@@ -2080,7 +2143,7 @@ function CommentItem({ comment, onReply, replyComment }: {
                         : 'border-border bg-card';
 
     return (
-        <div className={`rounded-lg border p-3 ${borderStyle}`}>
+        <div id={`comment-item-${comment.id}`} className={`rounded-lg border p-3 ${borderStyle}`}>
             <div className="flex items-baseline justify-between mb-1">
                 <div className="flex items-center gap-1.5">
                     {isSummary && <Sparkles className="size-3.5 text-purple-400" />}
@@ -2331,7 +2394,7 @@ function CommentItem({ comment, onReply, replyComment }: {
 
             {/* Show linked reply inline */}
             {isQuestion && replyComment && (
-                <div className="mt-2 pt-2 border-t border-emerald-500/20">
+                <div id={`comment-reply-${replyComment.id}`} className="mt-2 pt-2 border-t border-emerald-500/20">
                     <div className="flex items-center gap-1.5 text-xs text-emerald-600 mb-1">
                         <CornerDownRight className="size-3" />
                         <span className="font-medium">{replyComment.authorLabel || parseActor(replyComment.authorEmail).display}</span>

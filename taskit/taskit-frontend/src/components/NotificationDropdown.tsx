@@ -11,6 +11,7 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { getNotificationTargetPath } from "@/lib/notificationNavigation";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { TYPE_ICONS, TYPE_META, DEFAULT_ICON } from "@/components/notificationHelpers";
 import type { Notification, NotificationType } from "@/types";
@@ -32,12 +33,8 @@ export function NotificationDropdown({ onClose }: Props) {
 
     const handleClick = (notification: Notification) => {
         void markAsRead(notification.id);
-        const targetBoard = notification.board ? String(notification.board) : searchParams.get('board');
-        if (notification.task) {
-            navigate(targetBoard ? `/board?taskId=${notification.task}&board=${targetBoard}` : `/board?taskId=${notification.task}`);
-        } else if (notification.spec) {
-            navigate(targetBoard ? `/specs?specId=${notification.spec}&board=${targetBoard}` : `/specs?specId=${notification.spec}`);
-        }
+        const targetPath = getNotificationTargetPath(notification, searchParams.get('board'));
+        if (targetPath) navigate(targetPath);
         onClose();
     };
 
