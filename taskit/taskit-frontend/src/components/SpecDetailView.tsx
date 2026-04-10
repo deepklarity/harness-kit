@@ -3,6 +3,7 @@ import type { Spec, SpecComment, SpecCommit, Task } from '../types';
 import { useService } from '../contexts/ServiceContext';
 import { ApiError } from '../services/harness/HarnessTimeService';
 import { parseActor } from '../services/harness/HarnessTimeService';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { formatCost } from '../utils/costEstimation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +45,8 @@ import {
   GitPullRequest,
   Bot,
   Package,
+  Search,
+  X,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { TraceViewer, TerminalOutputView } from './TraceViewer';
@@ -57,6 +60,22 @@ const PLANNER_AGENT_COLORS: Record<string, string> = {
     qwen: '#f97316',
     kilo: '#ec4899',
 };
+
+function ContentWithHighlight({ text, search }: { text: string; search: string }) {
+    if (!search) return <MarkdownRenderer text={text} />;
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const parts = text.split(regex);
+    return (
+        <pre className="whitespace-pre-wrap break-words font-sans">
+            {parts.map((part, i) =>
+                regex.test(part)
+                    ? <mark key={i} className="bg-yellow-400/40 text-foreground rounded-sm px-0.5">{part}</mark>
+                    : part
+            )}
+        </pre>
+    );
+}
 
 interface SpecDetailViewProps {
     specId: string;
@@ -75,6 +94,8 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
     const [showPlanningTrace, setShowPlanningTrace] = useState(false);
     const [showRoutingConfig, setShowRoutingConfig] = useState(false);
     const [showContent, setShowContent] = useState(false);
+    const [contentSearch, setContentSearch] = useState('');
+    const [showContentSearch, setShowContentSearch] = useState(false);
     const [showMetadata, setShowMetadata] = useState(false);
     const [retrying, setRetrying] = useState(false);
     const [terminalVisible, setTerminalVisible] = useState(false);
@@ -480,19 +501,57 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                     {spec.content && (
                         <>
                             <Separator />
-                            <div
-                                className="flex items-center gap-1.5 cursor-pointer select-none"
-                                onClick={() => setShowContent(v => !v)}
-                            >
-                                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Content</h3>
-                                {showContent
-                                    ? <ChevronDown className="size-3.5 text-muted-foreground" />
-                                    : <ChevronRight className="size-3.5 text-muted-foreground" />
-                                }
+                            <div className="flex items-center justify-between">
+                                <div
+                                    className="flex items-center gap-1.5 cursor-pointer select-none"
+                                    onClick={() => setShowContent(v => !v)}
+                                >
+                                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Content</h3>
+                                    {showContent
+                                        ? <ChevronDown className="size-3.5 text-muted-foreground" />
+                                        : <ChevronRight className="size-3.5 text-muted-foreground" />
+                                    }
+                                </div>
+                                {showContent && (
+                                    <div className="flex items-center gap-1">
+                                        {showContentSearch ? (
+                                            <div className="flex items-center gap-1 rounded-md border border-border bg-muted/50 px-2 py-0.5">
+                                                <Search className="size-3 text-muted-foreground shrink-0" />
+                                                <input
+                                                    type="text"
+                                                    value={contentSearch}
+                                                    onChange={e => setContentSearch(e.target.value)}
+                                                    placeholder="Search..."
+                                                    autoFocus
+                                                    className="bg-transparent text-xs text-foreground outline-none w-32 placeholder:text-muted-foreground/60"
+                                                />
+                                                <button
+                                                    onClick={() => { setShowContentSearch(false); setContentSearch(''); }}
+                                                    className="text-muted-foreground hover:text-foreground"
+                                                >
+                                                    <X className="size-3" />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                onClick={() => setShowContentSearch(true)}
+                                                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                                title="Search content"
+                                            >
+                                                <Search className="size-3.5" />
+                                            </button>
+                                        )}
+                                        <CopyButton text={spec.content} className="size-3.5" />
+                                    </div>
+                                )}
                             </div>
                             {showContent && (
-                                <div className="max-h-[300px] w-full overflow-y-auto rounded-lg border border-border bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
-                                    {spec.content}
+                                <div className="max-h-[300px] w-full overflow-y-auto rounded-lg border border-border bg-muted/30 p-4 text-sm leading-relaxed">
+                                    {contentSearch ? (
+                                        <ContentWithHighlight text={spec.content} search={contentSearch} />
+                                    ) : (
+                                        <MarkdownRenderer text={spec.content} />
+                                    )}
                                 </div>
                             )}
                         </>
