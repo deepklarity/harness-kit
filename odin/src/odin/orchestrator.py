@@ -838,48 +838,136 @@ Do not take any further actions after writing the plan."""
     # _clean_interactive_transcript()
     # ------------------------------------------------------------------
 
-    # Patterns that identify TUI noise lines (compiled once at class level)
+    # Spinner/indicator characters emitted by CLI TUIs (Claude Code, etc.)
+    _SPINNER_CHARS = r"✦✳✶✻✢·⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏●◐◓◑◒⠐⠂\*"
+
+    # Patterns that identify TUI noise lines (compiled once at class level).
+    # Must handle both tmux scrollback and raw `script` byte-stream output
+    # (where cursor-positioning creates fragmented text).
     _TUI_NOISE_RE = re.compile(
         r"^("
-        # Spinner / status lines: *Word..., ✦ Word..., ● Word...
-        r"[*✦⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏●◐◓◑◒]\s*\S+[.…]{1,3}"
+        # ---- Spinner / progress ----
+        # Spinner char(s) alone or with short fragment (TUI redraw artifacts)
+        rf"[{_SPINNER_CHARS}]+(\s*\S{{0,4}})?$"
+        # Spinner char + word ending in ellipsis
+        rf"|[{_SPINNER_CHARS}]\s*\S+[.…]{{1,3}}"
+        # Spinner status text (Recombobulating, Moseying, etc.)
+        r"|.*(?:Recombobulating|Moseying|Cogitating|Perambulating|Ruminating|Pontificating|Sauntering)\S*[.…]*.*"
+        # (thinking) / (thought for Xs) — standalone or with any prefix
+        r"|.*\(thinking\)"
+        r"|.*\(thought for \d+s?\)"
+        # [Request interrupted by user] and similar system messages
+        r"|\[Request interrupted.*\]"
+        # ---- OSC / terminal control remnants ----
+        # Terminal title, progress: "0;✳ Claude Code", "9;4;0;", etc.
+        r"|\d+;[\d;]*.*"
+        # Hyperlink OSC remnants: "8;;file:///..."
+        r"|8;;.*"
+        # ---- TUI chrome (with and without spaces) ----
         r"|Collapse"
-        r"|Recentactivity"
-        # tmux window title: "0;· Claude Code" or similar
-        r"|\d+;[·.].*"
-        # Claude Code TUI welcome fragments (spaces collapsed by cursor-positioning strip)
+        r"|No\s*recent\s*activity|Norecentactivity|Recentactivity"
+        r"|esc\s*to\s*interrupt|esctointerrupt"
+        r"|\?\s*for\s*shortcuts|\?forshortcuts"
+        r"|Update\s*available.*|Updateavailable.*"
+        r"|ctrl\+\w\s*to\s*\w+.*|ctrl\+\w+to\w+.*"
+        r"|/ide\s*for\s*\w+.*|/idefor\w+.*"
+        r"|Press\s*Ctrl-C.*|PressCtrl-C.*"
+        r"|Resume\s+this\s+session.*"
+        r"|claude\s+--resume\s+\S+"
+        r"|…\+\d+lines.*"
+        # ---- Model / status badges ----
+        r"|(Opus|Sonnet|Haiku)[\d.]+[·.].*"
+        r"|\S+·Claude\s*(Max|Pro|Free)"
+        # ---- TUI welcome (spaces collapsed by cursor-positioning) ----
         r"|ClaudeCodev[\d.]+"
         r"|Tipsforgettingstarted"
-        r"|Welcomeback\S+"
-        r")$"
+        r"|Welcomeback\S*"
+        # ---- Bare prompt with no user input ----
+        r"|❯\s*$"
+        # ---- Standalone path (CWD display in prompt) ----
+        r"|~/\S+$"
+        r")$",
+        re.IGNORECASE,
+    )
+
+    # OSC sequences that survive basic ANSI stripping.
+    # Matches \x1b] ... (terminated by BEL \x07 or ST \x1b\\)
+    _OSC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
+
+    # Substrings that identify TUI chrome even when concatenated on one line.
+    # Used with re.search (not re.match) to catch "esctointerruptUpdateavailable..."
+    _TUI_CHROME_RE = re.compile(
+        r"esctointerrupt|esc to interrupt"
+        r"|\?forshortcuts|\? for shortcuts"
+        r"|Updateavailable|Update available"
+        r"|ctrl\+\w+to\w+|ctrl\+\w+ to \w+"
+        r"|/idefor|/ide for"
+        r"|brewupgrade|brew upgrade"
+        r"|PressCtrl-C|Press Ctrl-C"
+        r"|StoporCtrl|Stop or Ctrl"
+        r"|tofinishandcreatetasks|to finish and create tasks",
+        re.IGNORECASE,
     )
 
     @staticmethod
     def _clean_interactive_transcript(text: str) -> str:
-        """Clean tmux TUI artifacts from interactive transcript.
+        """Clean TUI artifacts from interactive transcript.
 
-        The tmux capture includes box-drawing characters, TUI chrome, spinner
-        frames, and control characters that survive ANSI stripping. This method
-        removes them so the stored planning trace is human-readable.
+        Handles both tmux scrollback and raw ``script`` output.  The raw
+        byte-stream from ``script`` contains cursor-positioning, spinner
+        animation frames, OSC sequences, and TUI chrome that must be
+        stripped to produce a human-readable planning trace.
         """
         from odin.logging.logger_utils import strip_ansi
 
-        # Belt-and-suspenders ANSI removal
-        cleaned = strip_ansi(text)
-        # Box-drawing (U+2500–U+257F) and block elements (U+2580–U+259F)
+        # 1. Strip OSC sequences FIRST (not covered by the CSI-only ANSI regex)
+        cleaned = Orchestrator._OSC_RE.sub("", text)
+        # 2. Belt-and-suspenders CSI / SGR removal
+        cleaned = strip_ansi(cleaned)
+        # 3. Box-drawing (U+2500–U+257F) and block elements (U+2580–U+259F)
         cleaned = re.sub(r"[\u2500-\u257F\u2580-\u259F]", "", cleaned)
-        # Control characters (keep \n \t \r for structure)
+        # 4. Control characters (keep \n \t \r for structure)
         cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", cleaned)
-        # Strip trailing whitespace per line
+        # 5. Strip inline hyperlink OSC remnants (8;;url8;;)
+        cleaned = re.sub(r"8;;[^\s\n]*", "", cleaned)
+        # 6. Strip trailing whitespace per line
         cleaned = re.sub(r"[ \t]+$", "", cleaned, flags=re.MULTILINE)
 
-        # Filter out TUI noise lines and deduplicate consecutive identical lines
+        # Line-level filtering
         out: list[str] = []
         prev = None
         for line in cleaned.split("\n"):
             stripped = line.strip()
-            # Drop known TUI noise
+            # Drop known TUI noise patterns
             if stripped and Orchestrator._TUI_NOISE_RE.match(stripped):
+                continue
+            # Drop short alphabetic fragments (spinner redraw artifacts
+            # like "R", "Ro", "em", "boul", "ecmb").  Preserves code
+            # tokens like "}", "]", "{", digits, and indented content.
+            if 0 < len(stripped) <= 5 and stripped.isalpha():
+                continue
+            # Drop standalone orphaned symbols (e.g. "…" from spinner)
+            if stripped in {"…", "·", "–", "—", "•"}:
+                continue
+            # Drop bare ⏺ markers and gutted tool calls (e.g. "⏺Write("
+            # left after hyperlink stripping)
+            if stripped == "⏺" or re.match(r"^⏺\w*\(\s*\)?$", stripped):
+                continue
+            # Drop lines containing TUI chrome substrings (catches
+            # concatenated chrome like "esctointerruptUpdateavailable...")
+            # but preserve agent output lines (⏺, ⎿).
+            if (stripped
+                    and not stripped.startswith(("⏺", "⎿"))
+                    and Orchestrator._TUI_CHROME_RE.search(stripped)):
+                continue
+            # Drop lines with very low space density — collapsed cursor-
+            # positioning artifacts (e.g. "Ineedhelpplanningthistask...").
+            # Preserves agent output (⏺/⎿), user input (❯), and
+            # indented content (code/JSON).
+            if (len(stripped) > 15
+                    and not stripped.startswith(("⏺", "⎿", "❯"))
+                    and not line.startswith((" ", "\t"))
+                    and stripped.count(" ") / len(stripped) < 0.05):
                 continue
             # Deduplicate consecutive identical lines
             if stripped == prev:
@@ -890,6 +978,20 @@ Do not take any further actions after writing the plan."""
         cleaned = "\n".join(out)
         # Collapse 3+ consecutive blank lines to 2
         cleaned = re.sub(r"(\n\s*){3,}", "\n\n", cleaned)
+
+        # Deduplicate repeated paragraph blocks (caused by session
+        # restarts after [Request interrupted by user]).
+        paragraphs = cleaned.split("\n\n")
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for para in paragraphs:
+            key = para.strip()
+            if key and key in seen:
+                continue
+            seen.add(key)
+            deduped.append(para)
+        cleaned = "\n\n".join(deduped)
+
         return cleaned.strip()
 
     # ------------------------------------------------------------------

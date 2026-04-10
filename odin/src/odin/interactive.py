@@ -17,6 +17,7 @@ Two modes:
 Transcript is for debugging only — plan data is NOT extracted from it.
 """
 
+import platform
 import shlex
 import subprocess
 import uuid
@@ -184,11 +185,18 @@ class InteractivePlanSession:
         the web UI) becomes the agent's terminal.  No tmux session is
         created — no status bar, no sizing indirection.
 
-        Returns None (no transcript capture in direct mode).
+        Uses ``script`` to capture terminal output for the planning trace
+        while preserving full interactivity.
+
+        Returns path to the transcript log file (for trace capture),
+        or None if capture failed.
         """
         session_id = uuid.uuid4().hex[:12]
         output_dir = Path(self.log_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Transcript capture file
+        log_file = output_dir / f"interactive_plan_{session_id}.direct.log"
 
         # Write system prompt to file (same as tmux path)
         prompt_file = output_dir / f"system_prompt_{session_id}.txt"
@@ -221,11 +229,23 @@ class InteractivePlanSession:
                 cmd_parts.append(shlex.quote(arg))
         cmd_str = " ".join(cmd_parts)
 
-        # Run directly — stdin/stdout/stderr inherited from the caller.
+        # Wrap with `script` to capture terminal output while preserving
+        # full interactivity.  The -q flag suppresses start/done messages.
+        if platform.system() == "Darwin":
+            # macOS: script -q file command args...
+            run_cmd = ["script", "-q", str(log_file), "bash", "-c", cmd_str]
+        else:
+            # Linux: script -q -c command file
+            run_cmd = [
+                "script", "-q", "-c",
+                f"bash -c {shlex.quote(cmd_str)}", str(log_file),
+            ]
+
+        # Run — stdin/stdout/stderr inherited via the PTY that script creates.
         # KeyboardInterrupt (Ctrl+C from the PTY) is caught so that the
         # orchestrator can still check for the plan file and create tasks.
         try:
-            subprocess.run(["bash", "-c", cmd_str], cwd=working_dir)
+            subprocess.run(run_cmd, cwd=working_dir)
         except KeyboardInterrupt:
             pass
 
@@ -234,6 +254,14 @@ class InteractivePlanSession:
             prompt_file.unlink()
         except OSError:
             pass
+
+        # Return transcript if it has meaningful content
+        if log_file.exists():
+            raw = log_file.read_text(errors="replace").strip()
+            if len(raw) > 20:
+                clean_path = log_file.with_suffix(".clean.log")
+                clean_path.write_text(_strip_ansi(raw))
+                return str(clean_path)
 
         return None
 
