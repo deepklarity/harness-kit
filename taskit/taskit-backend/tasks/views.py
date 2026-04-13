@@ -2289,6 +2289,45 @@ class TaskViewSet(viewsets.ModelViewSet):
             return paginator.get_paginated_response(TaskHistorySerializer(page, many=True).data)
         return Response(TaskHistorySerializer(histories, many=True).data)
 
+    @action(detail=True, methods=["get"], url_path="session")
+    def session(self, request, pk=None):
+        """Return the current (or most recent) session metadata for a task.
+
+        A session is one run of either task execution or reflection. The
+        response shape mirrors SessionInfo and is consumed by the frontend to
+        render the 'Open current session' button label and by the session
+        WebSocket consumer to know which JSONL file to tail.
+        """
+        from pathlib import Path
+        from .session_resolver import resolve_session, _log_dir_for_task
+        from .execution.utils import resolve_working_dir
+
+        task = get_object_or_404(
+            Task.objects.select_related("board", "spec"), pk=pk,
+        )
+        info = resolve_session(task)
+
+        # Diagnostic fields — helps debug path mismatches between odin and resolver.
+        working_dir = resolve_working_dir(task)
+        log_dir = _log_dir_for_task(task)
+        diag = {
+            "working_dir": working_dir,
+            "log_dir": str(log_dir) if log_dir else None,
+            "log_dir_exists": log_dir.is_dir() if log_dir else False,
+            "trace_files": sorted(str(p.name) for p in log_dir.glob("*.trace.jsonl")) if log_dir and log_dir.is_dir() else [],
+        }
+
+        if info is None:
+            return Response({
+                "available": False,
+                "task_id": task.id,
+                "diagnostic": diag,
+            })
+        payload = info.to_dict()
+        payload["available"] = True
+        payload["diagnostic"] = diag
+        return Response(payload)
+
     @action(detail=True, methods=["get", "post"])
     def comments(self, request, pk=None):
         task = get_object_or_404(Task, pk=pk)

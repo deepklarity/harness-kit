@@ -1166,7 +1166,7 @@ function HighlightedText({ text, search }: { text: string; search: ReturnType<ty
 // Main TraceViewer
 // ---------------------------------------------------------------------------
 
-export function TraceViewer({ traceText }: { traceText: string }) {
+export function TraceViewer({ traceText, className }: { traceText: string; className?: string }) {
     const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
     const [viewMode, setViewMode] = useState<'timeline' | 'raw'>('timeline');
     const search = useTextSearch(traceText);
@@ -1191,7 +1191,7 @@ export function TraceViewer({ traceText }: { traceText: string }) {
     }
 
     return (
-        <div className="mt-2 rounded-xl border border-zinc-800/80 bg-[#0e0e11] overflow-hidden shadow-sm flex flex-col max-h-[700px]">
+        <div className={cn("mt-2 rounded-xl border border-zinc-800/80 bg-[#0e0e11] overflow-hidden shadow-sm flex flex-col max-h-[700px]", className)}>
             {/* Header bar */}
             <div className="flex flex-wrap items-center justify-between px-3 py-1.5 bg-[#141417] border-b border-[#2b2b2e] shrink-0">
                 <div className="flex items-center gap-2">

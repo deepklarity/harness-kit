@@ -29,12 +29,13 @@ import { LabelPicker } from './LabelPicker';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { MarkdownEditor } from './MarkdownEditor';
 import { TraceViewer } from './TraceViewer';
+import { TaskSessionView, type SessionMeta } from './TaskSessionView';
 import {
     Pencil, Search, Trash2, Eye, Code, FileText, FolderOpen,
     GitBranch, Package, Terminal, User, ChevronRight, ChevronDown,
     HelpCircle, CornerDownRight, Send, ShieldCheck, Sparkles, Loader2,
     ZoomIn, ZoomOut, RotateCcw,
-    Bot,
+    Bot, Activity, ArrowLeft, Radio,
 } from 'lucide-react';
 import { useService } from '../contexts/ServiceContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -114,6 +115,10 @@ export function TaskDetailModal({
     const [openingProject, setOpeningProject] = useState(false);
     const [openEditorDropdown, setOpenEditorDropdown] = useState(false);
 
+    // Session streaming — toggles the modal body between details and live trace view.
+    const [sessionViewMode, setSessionViewMode] = useState<'details' | 'session'>('details');
+    const [sessionMeta, setSessionMeta] = useState<SessionMeta | null>(null);
+
     const [showAllHistory, setShowAllHistory] = useState(false);
     const [showAllComments, setShowAllComments] = useState(false);
     const [showDebugComments, setShowDebugComments] = useState(false);
@@ -167,6 +172,47 @@ export function TaskDetailModal({
     // Reflection state
     const [showReflectionModal, setShowReflectionModal] = useState(false);
     const [reflections, setReflections] = useState<ReflectionReport[]>([]);
+
+    // Poll session meta so the "Open current session" button label stays
+    // accurate (Task Execution vs Reflection) as state changes on the backend.
+    useEffect(() => {
+        if (!task.id) return;
+        let cancelled = false;
+        const apiBase = import.meta.env.VITE_HARNESS_TIME_API_URL || 'http://localhost:8000';
+
+        const fetchMeta = async () => {
+            try {
+                const resp = await fetch(`${apiBase}/tasks/${task.id}/session/`, {
+                    credentials: 'include',
+                });
+                if (!resp.ok) return;
+                const json = await resp.json();
+                if (cancelled) return;
+                setSessionMeta({
+                    available: !!json.available,
+                    sessionType: json.session_type ?? null,
+                    live: !!json.live,
+                    exists: !!json.exists,
+                    taskId: Number(json.task_id ?? task.id),
+                    reportId: json.report_id ?? null,
+                });
+            } catch {
+                // ignore — button stays with last-known meta
+            }
+        };
+
+        fetchMeta();
+        const interval = window.setInterval(fetchMeta, 5000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(interval);
+        };
+    }, [task.id]);
+
+    // Reset to details view whenever the task changes (e.g. navigating between tasks).
+    useEffect(() => {
+        setSessionViewMode('details');
+    }, [task.id]);
 
     // replaced
 
@@ -682,50 +728,55 @@ export function TaskDetailModal({
                         <CopyButton text={String(task.idShort)} />
                         <div className="flex-1" />
                     </div>
-                    {(ideOptions?.project_root || execContext.worktreePath) && (
-                        <div className="mb-3 flex items-center">
-                            <div className="flex">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className={`h-8 gap-2 text-xs font-medium ${ideOptions?.project_root && execContext.worktreePath ? 'rounded-r-none border-r-0' : ''}`}
-                                    onClick={handleOpenWorktree}
-                                    disabled={openingProject || loadingIdeOptions}
-                                >
-                                    <FolderOpen className="size-3.5" />
-                                    {preferredIde ? `Open in ${preferredIde.label}` : 'Open in Editor'}
-                                </Button>
-                                {ideOptions?.project_root && execContext.worktreePath && (
-                                    <Popover open={openEditorDropdown} onOpenChange={setOpenEditorDropdown}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="h-8 px-1.5 rounded-l-none"
-                                                disabled={openingProject || loadingIdeOptions}
-                                            >
-                                                <ChevronDown className="size-3.5" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-1" align="start">
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-8 gap-2 text-xs font-medium w-full justify-start"
-                                                onClick={() => {
-                                                    setOpenEditorDropdown(false);
-                                                    handleOpenProject();
-                                                }}
-                                            >
-                                                <FolderOpen className="size-3.5" />
-                                                Open project root
-                                            </Button>
-                                        </PopoverContent>
-                                    </Popover>
-                                )}
-                            </div>
+                    <div className="mb-3 flex items-center gap-2">
+                            {(ideOptions?.project_root || execContext.worktreePath) && (
+                                <div className="flex">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className={`h-8 gap-2 text-xs font-medium ${ideOptions?.project_root && execContext.worktreePath ? 'rounded-r-none border-r-0' : ''}`}
+                                        onClick={handleOpenWorktree}
+                                        disabled={openingProject || loadingIdeOptions}
+                                    >
+                                        <FolderOpen className="size-3.5" />
+                                        {preferredIde ? `Open in ${preferredIde.label}` : 'Open in Editor'}
+                                    </Button>
+                                    {ideOptions?.project_root && execContext.worktreePath && (
+                                        <Popover open={openEditorDropdown} onOpenChange={setOpenEditorDropdown}>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-8 px-1.5 rounded-l-none"
+                                                    disabled={openingProject || loadingIdeOptions}
+                                                >
+                                                    <ChevronDown className="size-3.5" />
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto p-1" align="start">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-8 gap-2 text-xs font-medium w-full justify-start"
+                                                    onClick={() => {
+                                                        setOpenEditorDropdown(false);
+                                                        handleOpenProject();
+                                                    }}
+                                                >
+                                                    <FolderOpen className="size-3.5" />
+                                                    Open project root
+                                                </Button>
+                                            </PopoverContent>
+                                        </Popover>
+                                    )}
+                                </div>
+                            )}
+                            <SessionToggleButton
+                                viewMode={sessionViewMode}
+                                meta={sessionMeta}
+                                onToggle={() => setSessionViewMode(m => (m === 'session' ? 'details' : 'session'))}
+                            />
                         </div>
-                    )}
                     {editingField === 'title' ? (
                         <div className="flex gap-2">
                             <Input className="flex-1 text-xl font-bold" value={editValue}
@@ -749,6 +800,14 @@ export function TaskDetailModal({
                 </DialogHeader>
 
                 {/* SCROLLABLE BODY — flexbox so min-h-0 properly constrains each column */}
+                {sessionViewMode === 'session' ? (
+                    <div className="flex-1 min-h-0 flex">
+                        <TaskSessionView
+                            taskId={task.id}
+                            onMetaChange={setSessionMeta}
+                        />
+                    </div>
+                ) : (
                 <div className="flex-1 min-h-0 flex">
 
                     {/* LEFT COLUMN: Metadata — compact layout */}
@@ -1721,6 +1780,7 @@ export function TaskDetailModal({
                         </div>
                     </div>
                 </div>
+                )}
             </DialogContent>
 
             {/* Reference Image Lightbox */}
@@ -2558,5 +2618,62 @@ function ExecutingTimer({ task }: { task: Task }) {
                 <span className="text-muted-foreground/60">upd {lastActivity}s ago</span>
             )}
         </span>
+    );
+}
+
+function SessionToggleButton({
+    viewMode,
+    meta,
+    onToggle,
+}: {
+    viewMode: 'details' | 'session';
+    meta: SessionMeta | null;
+    onToggle: () => void;
+}) {
+    if (viewMode === 'session') {
+        return (
+            <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-2 text-xs font-medium"
+                onClick={onToggle}
+            >
+                <ArrowLeft className="size-3.5" />
+                Back to details
+            </Button>
+        );
+    }
+
+    const sessionTypeLabel =
+        meta?.sessionType === 'reflection'
+            ? 'Reflection'
+            : meta?.sessionType === 'task_execution'
+                ? 'Task Execution'
+                : null;
+
+    const liveDot = meta?.live && (
+        <span className="inline-flex items-center">
+            <Radio className="size-2.5 text-emerald-400 animate-pulse" />
+        </span>
+    );
+
+    const label = sessionTypeLabel
+        ? `Open current session (${sessionTypeLabel})`
+        : meta?.available
+            ? 'Open current session (last run)'
+            : 'Open current session';
+
+    return (
+        <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2 text-xs font-medium"
+            onClick={onToggle}
+            title={meta?.live ? 'Live session in progress' : 'Open the last session for this task'}
+        >
+            <Activity className="size-3.5" />
+            {label}
+            {liveDot}
+        </Button>
     );
 }

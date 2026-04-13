@@ -368,3 +368,224 @@ async def _complete_planning(spec_pk_str: str, session: dict):
             pass
 
     _active_sessions.pop(spec_pk_str, None)
+
+
+# ---------------------------------------------------------------------------
+# SessionConsumer — streams task execution / reflection JSONL traces live.
+#
+# One-way read-only stream. On connect, the consumer resolves which JSONL
+# file to tail (reflection RUNNING > task EXECUTING > most-recent on-disk),
+# sends the current contents as a chunk, then polls for appends. Rerun is
+# detected via (inode, size) change — on change, a reset frame is emitted
+# and streaming restarts from offset 0.
+#
+# Frames sent to client (JSON):
+#   {"type": "meta",  "session_type": "task_execution"|"reflection",
+#    "live": bool, "exists": bool, "task_id": int, "report_id": int|null}
+#   {"type": "chunk", "data": "<raw jsonl text>"}
+#   {"type": "reset", "session_type": ...}   # on rerun (new file/inode)
+#   {"type": "eof"}                          # run finished and file stable
+#   {"type": "error", "message": str}
+# ---------------------------------------------------------------------------
+
+_SESSION_POLL_INTERVAL = 0.5   # seconds between tail polls
+_SESSION_CHUNK_SIZE = 64 * 1024  # per-read cap for memory safety
+_SESSION_IDLE_EOF_POLLS = 4    # polls after terminal before emitting eof
+
+
+class SessionConsumer(AsyncWebsocketConsumer):
+
+    async def connect(self):
+        self.task_pk = int(self.scope["url_route"]["kwargs"]["task_pk"])
+        self._closed = False
+        self._poll_task: asyncio.Task | None = None
+        try:
+            task = await sync_to_async(
+                lambda: Task.objects.select_related("board", "spec").get(pk=self.task_pk)
+            )()
+        except Task.DoesNotExist:
+            await self.close(code=4004)
+            return
+        self.task = task
+        await self.accept()
+        self._poll_task = asyncio.create_task(self._stream_loop())
+
+    async def disconnect(self, close_code):
+        self._closed = True
+        task = self._poll_task
+        if task and not task.done():
+            task.cancel()
+
+    async def receive(self, text_data=None, bytes_data=None):
+        # Read-only stream; ignore client input.
+        return
+
+    # ---- internals ----------------------------------------------------
+
+    async def _resolve(self):
+        """Return fresh SessionInfo for this task (or None)."""
+        from .session_resolver import resolve_session
+
+        def _fetch():
+            task = Task.objects.select_related("board", "spec").get(pk=self.task_pk)
+            return task, resolve_session(task)
+
+        try:
+            task, info = await sync_to_async(_fetch)()
+            self.task = task
+            return info
+        except Task.DoesNotExist:
+            return None
+
+    async def _send_json(self, payload: dict) -> bool:
+        if self._closed:
+            return False
+        try:
+            await self.send(text_data=json.dumps(payload))
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _file_signature(path: str):
+        """Return (inode, size) for a path, or None if missing."""
+        try:
+            st = os.stat(path)
+            return (st.st_ino, st.st_size)
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            return None
+
+    @staticmethod
+    def _read_from(path: str, offset: int) -> tuple[bytes, int]:
+        """Read bytes from `offset` to EOF, capped at _SESSION_CHUNK_SIZE."""
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(offset)
+                data = fh.read(_SESSION_CHUNK_SIZE)
+                return data, offset + len(data)
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            return b"", offset
+
+    async def _stream_loop(self):
+        try:
+            info = await self._resolve()
+            if info is None:
+                logger.info("[session] task=%s — no session found", self.task_pk)
+                await self._send_json({
+                    "type": "meta",
+                    "available": False,
+                    "session_type": None,
+                    "live": False,
+                    "exists": False,
+                    "task_id": self.task_pk,
+                    "report_id": None,
+                })
+                # Keep connection open for a beat, then close; frontend will
+                # reopen when the task enters an executing state.
+                await self._send_json({"type": "eof"})
+                return
+
+            logger.info(
+                "[session] task=%s — resolved path=%s, type=%s, live=%s, exists=%s, size=%s",
+                self.task_pk, info.jsonl_path, info.session_type,
+                info.live, info.exists, info.size,
+            )
+
+            await self._send_json({
+                "type": "meta",
+                "available": True,
+                "session_type": info.session_type,
+                "live": info.live,
+                "exists": info.exists,
+                "task_id": info.task_id,
+                "report_id": info.report_id,
+                "jsonl_path": info.jsonl_path,
+            })
+
+            current_path = info.jsonl_path
+            current_session_type = info.session_type
+            current_sig = self._file_signature(current_path)
+            offset = 0
+            idle_polls_after_terminal = 0
+
+            logger.info(
+                "[session] task=%s — initial sig=%s",
+                self.task_pk, current_sig,
+            )
+
+            while not self._closed:
+                # Check if the active session has switched (e.g. task rerun
+                # replaced the file, or a reflection started). Re-resolve is
+                # cheap — one DB hit + two stats.
+                fresh = await self._resolve()
+                if fresh is None:
+                    await self._send_json({"type": "eof"})
+                    return
+
+                # Session kind changed (exec → reflection or vice versa):
+                if fresh.session_type != current_session_type or fresh.jsonl_path != current_path:
+                    await self._send_json({
+                        "type": "reset",
+                        "session_type": fresh.session_type,
+                        "live": fresh.live,
+                        "report_id": fresh.report_id,
+                    })
+                    current_path = fresh.jsonl_path
+                    current_session_type = fresh.session_type
+                    current_sig = self._file_signature(current_path)
+                    offset = 0
+                    idle_polls_after_terminal = 0
+
+                # Same path — check inode change (rerun replaced the file):
+                new_sig = self._file_signature(current_path)
+                if new_sig is not None and current_sig is not None and new_sig[0] != current_sig[0]:
+                    await self._send_json({
+                        "type": "reset",
+                        "session_type": current_session_type,
+                        "live": fresh.live,
+                        "report_id": fresh.report_id,
+                    })
+                    offset = 0
+                    current_sig = new_sig
+                    idle_polls_after_terminal = 0
+                elif new_sig is not None and current_sig is None:
+                    # File didn't exist on connect, now does.
+                    current_sig = new_sig
+                    idle_polls_after_terminal = 0
+
+                # Read any new bytes.
+                if new_sig is not None and new_sig[1] > offset:
+                    data, offset = await sync_to_async(self._read_from)(current_path, offset)
+                    if data:
+                        text = data.decode("utf-8", errors="replace")
+                        if not await self._send_json({"type": "chunk", "data": text}):
+                            return
+                        current_sig = (new_sig[0], offset)
+                        idle_polls_after_terminal = 0
+                        # Drain in a tight loop if more is available.
+                        while not self._closed:
+                            sig2 = self._file_signature(current_path)
+                            if sig2 is None or sig2[1] <= offset:
+                                break
+                            data, offset = await sync_to_async(self._read_from)(current_path, offset)
+                            if not data:
+                                break
+                            text = data.decode("utf-8", errors="replace")
+                            if not await self._send_json({"type": "chunk", "data": text}):
+                                return
+                            current_sig = (sig2[0], offset)
+
+                # Terminal detection: if the run is no longer live and the
+                # file has been stable for a few polls, emit eof and stop.
+                if not fresh.live:
+                    idle_polls_after_terminal += 1
+                    if idle_polls_after_terminal >= _SESSION_IDLE_EOF_POLLS:
+                        await self._send_json({"type": "eof"})
+                        return
+
+                await asyncio.sleep(_SESSION_POLL_INTERVAL)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("[session] stream_loop crashed for task=%s", self.task_pk)
+            await self._send_json({"type": "error", "message": str(exc)})
