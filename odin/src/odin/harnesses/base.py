@@ -13,6 +13,56 @@ from odin.models import AgentConfig, TaskResult
 # full output can exceed 64 KiB on a single line, causing LimitOverrunError).
 SUBPROCESS_STREAM_LIMIT = 10 * 1024 * 1024
 
+ODIN_STATUS_MARKER = "-------ODIN-STATUS-------"
+
+
+def validate_odin_status(stdout_text: str) -> tuple[bool, Optional[str]]:
+    """Verify the agent emitted a proper ODIN-STATUS block declaring SUCCESS.
+
+    Every task prompt tells the agent to end its output with:
+
+        -------ODIN-STATUS-------
+        SUCCESS or FAILED
+        -------ODIN-SUMMARY-------
+        <summary>
+
+    This helper guards against cases where the agent's CLI exits cleanly
+    (returncode 0) but the model silently truncated mid-generation, errored,
+    or never emitted the status block at all. Observed failure modes in
+    production: step_finish with reason="stop" and tokens.output=0, and
+    step_finish with reason="other" and tokens=0.
+
+    Handles both raw text output (plain agent stdout) and JSONL-stream output
+    (opencode / claude CLI emit the block inside a JSON string, so real
+    newlines appear as literal \\n escape sequences in the raw bytes).
+
+    Returns (success, error_message). success is True only when a trailing
+    ODIN-STATUS block with value "SUCCESS" is present.
+    """
+    if not stdout_text:
+        return False, (
+            "Agent produced no output; likely the CLI crashed or the model "
+            "terminated silently before emitting anything."
+        )
+    idx = stdout_text.rfind(ODIN_STATUS_MARKER)
+    if idx == -1:
+        return False, (
+            "Agent did not emit an ODIN-STATUS block. Likely the model "
+            "truncated mid-generation or the response terminated silently "
+            "(e.g. provider hit output cap, network drop, or unknown error)."
+        )
+    tail = stdout_text[idx + len(ODIN_STATUS_MARKER):]
+    # Normalise JSON escape sequences so "\\n" and real "\n" are treated the
+    # same. Opencode / Claude Code stream JSONL events where the agent's text
+    # is embedded inside a JSON string, leaving backslash-n in the raw bytes.
+    normalised = tail.replace("\\n", "\n").replace("\\r", "\r")
+    first_token = normalised.split(None, 1)[0] if normalised.split() else ""
+    if first_token == "SUCCESS":
+        return True, None
+    if first_token == "FAILED":
+        return False, "Agent explicitly reported FAILED in ODIN-STATUS block."
+    return False, f"ODIN-STATUS block has unexpected value: {first_token!r}"
+
 
 class BaseHarness(ABC):
     """Base class for all agent harnesses.

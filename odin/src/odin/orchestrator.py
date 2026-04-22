@@ -16,7 +16,7 @@ from odin.config import load_config
 from odin.cost_tracking import CostStore, CostTracker
 from odin.dependencies import DepStatus, check_deps, get_failed_deps, get_unmet_deps
 from odin.harnesses import get_harness
-from odin.harnesses.base import extract_text_from_stream, stream_json_is_complete
+from odin.harnesses.base import extract_text_from_stream, stream_json_is_complete, validate_odin_status
 from odin.interactive import InteractivePlanSession
 from odin.logging import OdinLogger, setup_logger, TaskContextAdapter
 from odin.models import CostTier, OdinConfig, TaskResult
@@ -3041,9 +3041,11 @@ SUCCESS or FAILED
             stdout_text = output_path.read_text()
 
         if exit_code == 0:
+            agent_success, agent_error = validate_odin_status(stdout_text)
             return TaskResult(
-                success=True,
+                success=agent_success,
                 output=stdout_text,
+                error=agent_error,
                 duration_ms=round(duration, 1),
                 agent=agent_name,
             )

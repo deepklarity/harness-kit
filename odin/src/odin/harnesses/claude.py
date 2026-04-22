@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import AsyncIterator
 
-from odin.harnesses.base import BaseHarness, read_with_tee, read_with_trace, extract_text_from_stream, SUBPROCESS_STREAM_LIMIT
+from odin.harnesses.base import BaseHarness, read_with_tee, read_with_trace, extract_text_from_stream, SUBPROCESS_STREAM_LIMIT, validate_odin_status
 from odin.harnesses.registry import register_harness
 from odin.models import AgentConfig, TaskResult
 
@@ -148,9 +148,11 @@ class ClaudeHarness(BaseHarness):
             self._current_pid = None
             meta = {"usage": usage} if usage else {}
             if proc.returncode == 0:
+                agent_success, agent_error = validate_odin_status(stdout_text)
                 return TaskResult(
-                    success=True,
+                    success=agent_success,
                     output=stdout_text,
+                    error=agent_error,
                     duration_ms=round(duration, 1),
                     agent=self.name,
                     metadata=meta,
