@@ -398,7 +398,7 @@ class OdinCLI:
             odin plan specs/poem_spec.md --quick       Direct plan, no exploration
             odin plan --prompt "Write a haiku" --auto
             odin plan spec.md --auto --base-agent codex
-            odin plan spec.md --auto --base-agent claude --base-model claude-sonnet-4-5
+            odin plan spec.md --auto --base-agent claude --base-model claude-sonnet-4-6
             odin plan spec.md --auto --skip-reflection
 
         Args:
@@ -612,11 +612,11 @@ class OdinCLI:
 
         Examples:
             odin set-model a1b2 gemini-2.5-pro
-            odin set-model d4e5 claude-sonnet-4-5
+            odin set-model d4e5 claude-sonnet-4-6
 
         Args:
             task_id: Task ID or unique prefix.
-            model: Model name to use (e.g. gemini-2.5-pro, o3, claude-opus-4).
+            model: Model name to use (e.g. gemini-2.5-pro, o3, claude-opus-4-7).
         """
         full_id = self._resolve_id(task_id)
         cfg = self._get_config()
@@ -751,7 +751,7 @@ class OdinCLI:
         self,
         task_id: str,
         report_id: Optional[str] = None,
-        model: str = "claude-opus-4-6",
+        model: str = "claude-opus-4-7",
         agent: str = "claude",
     ):
         """Run a reflection audit on a completed task.
@@ -761,7 +761,7 @@ class OdinCLI:
         by the TaskIt backend as a subprocess (not directly by users).
 
         Examples:
-            odin reflect 42 --report-id 7 --model claude-opus-4-6
+            odin reflect 42 --report-id 7 --model claude-opus-4-7
             odin reflect 42 --report-id 7 --agent gemini --model gemini-2.5-pro
 
         Args:

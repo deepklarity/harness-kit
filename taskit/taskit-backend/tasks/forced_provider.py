@@ -1,4 +1,4 @@
-"""Forced Gemini/Qwen provider configuration and validation."""
+"""Forced Gemini provider configuration and validation."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-ALLOWED_FORCED_PROVIDERS = {"gemini", "qwen"}
+ALLOWED_FORCED_PROVIDERS = {"gemini"}
 
 
 @dataclass(frozen=True)

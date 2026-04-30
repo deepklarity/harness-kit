@@ -1,4 +1,4 @@
-"""Forced Gemini/Qwen provider configuration for Odin."""
+"""Forced Gemini provider configuration for Odin."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Optional
 
 from odin.models import OdinConfig
 
-ALLOWED_FORCED_PROVIDERS = {"gemini", "qwen"}
+ALLOWED_FORCED_PROVIDERS = {"gemini"}
 
 
 @dataclass(frozen=True)

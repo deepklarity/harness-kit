@@ -94,7 +94,7 @@ def _make_long_claude_trace_comment(task, input_tokens, output_tokens, total_cha
     the modelUsage summary as the VERY LAST line. The orchestrator truncates
     traces that exceed the limit. This helper simulates that production scenario.
     """
-    model_usage_line = json.dumps({"modelUsage": {"claude-sonnet-4-5": {
+    model_usage_line = json.dumps({"modelUsage": {"claude-sonnet-4-6": {
         "inputTokens": input_tokens,
         "outputTokens": output_tokens,
         "cacheReadInputTokens": 0,
@@ -132,21 +132,14 @@ class TestPricingUtility(APITestCase):
         from tasks.pricing import get_pricing_table
         table = get_pricing_table()
         self.assertIsInstance(table, dict)
-        self.assertIn("claude-sonnet-4-5", table)
+        self.assertIn("claude-sonnet-4-6", table)
 
     def test_pricing_table_known_model(self):
         from tasks.pricing import get_pricing_table
         table = get_pricing_table()
-        entry = table["claude-sonnet-4-5"]
+        entry = table["claude-sonnet-4-6"]
         self.assertEqual(entry["input_price_per_1m_tokens"], 3.00)
         self.assertEqual(entry["output_price_per_1m_tokens"], 15.00)
-
-    def test_pricing_table_qwen_has_pricing(self):
-        from tasks.pricing import get_pricing_table
-        table = get_pricing_table()
-        entry = table["coder-model"]
-        self.assertEqual(entry["input_price_per_1m_tokens"], 1.00)
-        self.assertEqual(entry["output_price_per_1m_tokens"], 5.00)
 
     def test_pricing_table_nonexistent_model(self):
         from tasks.pricing import get_pricing_table
@@ -155,15 +148,9 @@ class TestPricingUtility(APITestCase):
 
     def test_estimate_task_cost_known(self):
         from tasks.pricing import estimate_task_cost
-        cost = estimate_task_cost("claude-sonnet-4-5", 1000, 500)
+        cost = estimate_task_cost("claude-sonnet-4-6", 1000, 500)
         # (1000/1M)*3.00 + (500/1M)*15.00 = 0.003 + 0.0075 = 0.0105
         self.assertAlmostEqual(cost, 0.0105, places=6)
-
-    def test_estimate_task_cost_qwen(self):
-        from tasks.pricing import estimate_task_cost
-        cost = estimate_task_cost("coder-model", 1000, 500)
-        # (1000/1M)*1.00 + (500/1M)*5.00 = 0.001 + 0.0025 = 0.0035
-        self.assertAlmostEqual(cost, 0.0035, places=6)
 
     def test_estimate_task_cost_unknown_model(self):
         from tasks.pricing import estimate_task_cost
@@ -172,7 +159,7 @@ class TestPricingUtility(APITestCase):
 
     def test_estimate_task_cost_null_tokens(self):
         from tasks.pricing import estimate_task_cost
-        cost = estimate_task_cost("claude-sonnet-4-5", None, None)
+        cost = estimate_task_cost("claude-sonnet-4-6", None, None)
         self.assertIsNone(cost)
 
     def test_estimate_task_cost_nonexistent_model(self):
@@ -186,7 +173,7 @@ class TestTaskDetailCostEstimation(APITestCase):
 
     def test_task_detail_includes_estimated_cost(self):
         board = self.make_board()
-        task = self.make_task(board, model_name="claude-sonnet-4-5")
+        task = self.make_task(board, model_name="claude-sonnet-4-6")
         _make_trace_comment(task, input_tokens=10000, output_tokens=5000)
         resp = self.client.get(f"/tasks/{task.id}/detail/")
         self.assertEqual(resp.status_code, 200)
@@ -196,20 +183,11 @@ class TestTaskDetailCostEstimation(APITestCase):
 
     def test_task_detail_null_usage_returns_null_cost(self):
         board = self.make_board()
-        task = self.make_task(board, model_name="claude-sonnet-4-5")
+        task = self.make_task(board, model_name="claude-sonnet-4-6")
         # No trace comment → no usage → null cost
         resp = self.client.get(f"/tasks/{task.id}/detail/")
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(resp.data["estimated_cost_usd"])
-
-    def test_task_detail_qwen_returns_cost(self):
-        board = self.make_board()
-        task = self.make_task(board, model_name="coder-model")
-        _make_trace_comment(task, input_tokens=10000, output_tokens=5000, fmt="gemini")
-        resp = self.client.get(f"/tasks/{task.id}/detail/")
-        self.assertEqual(resp.status_code, 200)
-        # (10000/1M)*1.00 + (5000/1M)*5.00 = 0.01 + 0.025 = 0.035
-        self.assertAlmostEqual(resp.data["estimated_cost_usd"], 0.035, places=4)
 
     def test_task_detail_unknown_model_returns_null_cost(self):
         board = self.make_board()
@@ -222,7 +200,7 @@ class TestTaskDetailCostEstimation(APITestCase):
     def test_task_detail_includes_usage_field(self):
         """The new top-level 'usage' field is populated from trace comment."""
         board = self.make_board()
-        task = self.make_task(board, model_name="claude-sonnet-4-5")
+        task = self.make_task(board, model_name="claude-sonnet-4-6")
         _make_trace_comment(task, input_tokens=10000, output_tokens=5000)
         resp = self.client.get(f"/tasks/{task.id}/detail/")
         self.assertIsNotNone(resp.data["usage"])
@@ -244,7 +222,7 @@ class TestTaskDetailCostEstimation(APITestCase):
         This is the exact production scenario where cost shows 'unknown'.
         """
         board = self.make_board()
-        task = self.make_task(board, model_name="claude-sonnet-4-5")
+        task = self.make_task(board, model_name="claude-sonnet-4-6")
         _make_long_claude_trace_comment(task, input_tokens=10000, output_tokens=5000)
 
         resp = self.client.get(f"/tasks/{task.id}/detail/")
@@ -275,7 +253,7 @@ class TestBaseTaskSerializerCost(APITestCase):
     def test_task_list_includes_estimated_cost(self):
         """Tasks in board detail should include estimated_cost_usd."""
         board = self.make_board()
-        task = self.make_task(board, model_name="claude-sonnet-4-5")
+        task = self.make_task(board, model_name="claude-sonnet-4-6")
         _make_trace_comment(task, input_tokens=10000, output_tokens=5000, total_tokens=15000)
         resp = self.client.get(f"/boards/{board.id}/")
         self.assertEqual(resp.status_code, 200)
@@ -288,13 +266,14 @@ class TestBaseTaskSerializerCost(APITestCase):
         """Tasks nested in spec detail should include estimated_cost_usd."""
         board = self.make_board()
         spec = self.make_spec(board)
-        task = self.make_task(board, spec=spec, model_name="coder-model")
+        task = self.make_task(board, spec=spec, model_name="minimax-coding-plan/MiniMax-M2.7")
         _make_trace_comment(task, input_tokens=5000, output_tokens=2000, fmt="gemini")
         resp = self.client.get(f"/specs/{spec.id}/")
         self.assertEqual(resp.status_code, 200)
         tasks = resp.data["tasks"]
         self.assertEqual(len(tasks), 1)
-        self.assertAlmostEqual(tasks[0]["estimated_cost_usd"], 0.015, places=4)
+        # (5000/1M)*0.30 + (2000/1M)*1.20 = 0.0015 + 0.0024 = 0.0039
+        self.assertAlmostEqual(tasks[0]["estimated_cost_usd"], 0.0039, places=4)
 
     def test_task_no_usage_returns_null_cost(self):
         """Task with no trace comment should have null cost."""
@@ -313,7 +292,7 @@ class TestSpecCostSummary(APITestCase):
         board = self.make_board()
         spec = self.make_spec(board)
         task = self.make_task(
-            board, title="Task 1", spec=spec, model_name="claude-sonnet-4-5",
+            board, title="Task 1", spec=spec, model_name="claude-sonnet-4-6",
         )
         _make_trace_comment(task, input_tokens=10000, output_tokens=5000, total_tokens=15000)
         resp = self.client.get(f"/specs/{spec.id}/")
@@ -328,9 +307,9 @@ class TestSpecCostSummary(APITestCase):
         """cost_summary must include total_input_tokens and total_output_tokens."""
         board = self.make_board()
         spec = self.make_spec(board)
-        t1 = self.make_task(board, title="T1", spec=spec, model_name="claude-sonnet-4-5")
+        t1 = self.make_task(board, title="T1", spec=spec, model_name="claude-sonnet-4-6")
         _make_trace_comment(t1, input_tokens=8000, output_tokens=2000, total_tokens=10000)
-        t2 = self.make_task(board, title="T2", spec=spec, model_name="coder-model")
+        t2 = self.make_task(board, title="T2", spec=spec, model_name="minimax-coding-plan/MiniMax-M2.7")
         _make_trace_comment(t2, input_tokens=3000, output_tokens=1000, total_tokens=4000, fmt="gemini")
         resp = self.client.get(f"/specs/{spec.id}/")
         summary = resp.data["cost_summary"]
@@ -342,10 +321,10 @@ class TestSpecCostSummary(APITestCase):
         board = self.make_board()
         spec = self.make_spec(board)
         # Task with known pricing and usage (claude)
-        t1 = self.make_task(board, title="Task 1", spec=spec, model_name="claude-sonnet-4-5")
+        t1 = self.make_task(board, title="Task 1", spec=spec, model_name="claude-sonnet-4-6")
         _make_trace_comment(t1, input_tokens=10000, output_tokens=5000, total_tokens=15000)
-        # Task with known pricing and usage (qwen)
-        t2 = self.make_task(board, title="Task 2", spec=spec, model_name="coder-model")
+        # Task with known pricing and usage (minimax)
+        t2 = self.make_task(board, title="Task 2", spec=spec, model_name="minimax-coding-plan/MiniMax-M2.7")
         _make_trace_comment(t2, input_tokens=5000, output_tokens=2000, total_tokens=7000, fmt="gemini")
         # Task with truly unknown model pricing
         t3 = self.make_task(board, title="Task 3", spec=spec, model_name="totally-fake-model-xyz")
@@ -358,14 +337,14 @@ class TestSpecCostSummary(APITestCase):
         self.assertIn("cost_summary", resp.data)
 
         summary = resp.data["cost_summary"]
-        # claude: (10000/1M)*3.00 + (5000/1M)*15.00 = 0.105
-        # qwen:   (5000/1M)*1.00  + (2000/1M)*5.00  = 0.015
-        # total = 0.12
-        self.assertAlmostEqual(summary["total_cost_usd"], 0.12, places=4)
+        # claude:  (10000/1M)*3.00 + (5000/1M)*15.00 = 0.105
+        # minimax: (5000/1M)*0.30  + (2000/1M)*1.20  = 0.0039
+        # total = 0.1089
+        self.assertAlmostEqual(summary["total_cost_usd"], 0.1089, places=4)
         self.assertEqual(summary["total_tokens"], 23500)  # 15000 + 7000 + 1500
         self.assertEqual(summary["tasks_with_unknown_cost"], 1)  # fake model; no-usage task not counted
-        self.assertIn("claude-sonnet-4-5", summary["cost_by_model"])
-        self.assertIn("coder-model", summary["cost_by_model"])
+        self.assertIn("claude-sonnet-4-6", summary["cost_by_model"])
+        self.assertIn("minimax-coding-plan/MiniMax-M2.7", summary["cost_by_model"])
 
     def test_spec_diagnostic_no_tasks(self):
         board = self.make_board()
@@ -384,45 +363,40 @@ class TestAllHarnessModelPricing(APITestCase):
 
     This is the canary test: if any model in agent_models.json has null
     pricing, the UI shows "unknown" cost which is exactly the bug we're
-    preventing. Tests cover: claude, codex, gemini, qwen, minimax, glm.
+    preventing. Tests cover: claude, codex, gemini, minimax, glm.
     """
 
     # Every model from agent_models.json with expected pricing
     EXPECTED_PRICING = {
         # Claude harness
+        "claude-sonnet-4-6":   (3.00, 15.00),
+        "claude-opus-4-7":     (5.00, 25.00),
         "claude-sonnet-4-5":   (3.00, 15.00),
-        "claude-opus-4":       (15.00, 75.00),
         "claude-opus-4-6":     (5.00, 25.00),
         "claude-haiku-4-5":    (1.00, 5.00),
         # Codex harness
-        "gpt-5.3-codex":      (1.75, 14.00),
         "gpt-5.4":             (2.50, 15.00),
+        "gpt-5.5":             (5.00, 30.00),
         "gpt-5.4-mini":        (0.75, 4.50),
+        "gpt-5.3-codex":       (1.75, 14.00),
+        "gpt-5.2":             (1.75, 14.00),
         # Gemini harness
-        "gemini-2.5-pro":           (1.25, 10.00),
-        "gemini-2.5-flash":         (0.30, 2.50),
-        "gemini-2.5-flash-lite":    (0.10, 0.40),
-        "gemini-3.1-pro-preview":     (2.00, 12.00),
-        "gemini-3-flash-preview":   (0.50, 3.00),
-        # Qwen harness
-        "coder-model":        (1.00, 5.00),
+        "gemini-3-flash-preview":      (0.50, 3.00),
+        "gemini-3.1-pro-preview":      (2.00, 12.00),
+        "gemini-3.1-flash-lite-preview": (0.25, 1.50),
+        "gemini-2.5-pro":              (1.25, 10.00),
+        "gemini-2.5-flash":            (0.30, 2.50),
+        "gemini-2.5-flash-lite":       (0.10, 0.40),
         # MiniMax harness
-        "minimax-coding-plan/MiniMax-M2":   (0.30, 1.20),
-        "minimax-coding-plan/MiniMax-M2.1": (0.30, 1.20),
-        "minimax-coding-plan/MiniMax-M2.5": (0.30, 1.20),
-        "minimax-coding-plan/MiniMax-M2.5-highspeed": (0.60, 2.40),
         "minimax-coding-plan/MiniMax-M2.7": (0.30, 1.20),
-        "minimax-coding-plan/MiniMax-M2.7-highspeed": (0.60, 2.40),
+        "minimax-coding-plan/MiniMax-M2.5": (0.30, 1.20),
+        "minimax-coding-plan/MiniMax-M2.1": (0.30, 1.20),
+        "minimax-coding-plan/MiniMax-M2":   (0.30, 1.20),
         # GLM harness
-        "zai-coding-plan/glm-5":           (1.00, 3.20),
-        "zai-coding-plan/glm-5-turbo":     (1.20, 4.00),
         "zai-coding-plan/glm-4.7":         (0.60, 2.20),
-        "zai-coding-plan/glm-4.7-flash":   (0.00, 0.00),
-        "zai-coding-plan/glm-4.6":         (0.60, 2.20),
-        "zai-coding-plan/glm-4.6v":        (0.30, 0.90),
+        "zai-coding-plan/glm-5.1":         (1.40, 4.40),
+        "zai-coding-plan/glm-5-turbo":     (1.20, 4.00),
         "zai-coding-plan/glm-4.5-air":     (0.20, 1.10),
-        "zai-coding-plan/glm-4.5-flash":   (0.00, 0.00),
-        "zai-coding-plan/glm-4.5v":        (0.60, 1.80),
     }
 
     def setUp(self):

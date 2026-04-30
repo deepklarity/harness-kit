@@ -26,7 +26,7 @@ class TestDefaultConfig:
         cfg = _default_config("test")
         assert "claude" in cfg.agents
         assert "gemini" in cfg.agents
-        assert "qwen" in cfg.agents
+        assert "minimax" in cfg.agents
 
     def test_default_config_base_agent(self):
         cfg = _default_config("test")
@@ -45,7 +45,7 @@ class TestDefaultConfig:
         cfg = _default_config("test")
         assert cfg.agents["claude"].cost_tier == CostTier.HIGH
         assert cfg.agents["gemini"].cost_tier == CostTier.LOW
-        assert cfg.agents["qwen"].cost_tier == CostTier.LOW
+        assert cfg.agents["minimax"].cost_tier == CostTier.LOW
 
     def test_default_cli_agents_enabled(self):
         cfg = _default_config("test")
@@ -82,14 +82,14 @@ agents:
         config_file = tmp_path / "config.yaml"
         config_file.write_text("""
 base_agent: claude
-base_model: claude-sonnet-4-5
+base_model: claude-sonnet-4-6
 agents:
   claude:
     enabled: true
 """)
         cfg = load_config(str(config_file))
         assert cfg.base_agent == "claude"
-        assert cfg.base_model == "claude-sonnet-4-5"
+        assert cfg.base_model == "claude-sonnet-4-6"
 
     def test_empty_yaml_returns_defaults(self, tmp_path):
         config_file = tmp_path / "config.yaml"
@@ -119,14 +119,14 @@ agents:
 class TestConfigHierarchy:
     def test_explicit_path_takes_priority(self, tmp_path):
         explicit = tmp_path / "explicit.yaml"
-        explicit.write_text("base_agent: qwen\nagents:\n  qwen:\n    enabled: true")
+        explicit.write_text("base_agent: minimax\nagents:\n  minimax:\n    enabled: true")
 
         local = tmp_path / ".odin" / "config.yaml"
         local.parent.mkdir(parents=True)
         local.write_text("base_agent: gemini\nagents:\n  gemini:\n    enabled: true")
 
         cfg = load_config(str(explicit))
-        assert cfg.base_agent == "qwen"
+        assert cfg.base_agent == "minimax"
 
     def test_no_config_uses_defaults(self, tmp_path):
         with patch("odin.config.LOCAL_CONFIG_PATH", tmp_path / "nonexistent_local.yaml"), \
@@ -177,12 +177,12 @@ class TestForcedProviderEnv:
     def test_forced_provider_uses_pinned_model(self):
         with patch.dict(
             os.environ,
-            {"FORCED_BASE_PROVIDER": "qwen", "FORCED_BASE_MODEL": "coder-model"},
+            {"FORCED_BASE_PROVIDER": "gemini", "FORCED_BASE_MODEL": "gemini-3.1-pro-preview"},
             clear=False,
-        ), patch("odin.forced_provider.shutil.which", return_value="/usr/bin/qwen"):
+        ), patch("odin.forced_provider.shutil.which", return_value="/usr/bin/gemini"):
             cfg = _default_config("test")
-        assert cfg.forced_base_provider == "qwen"
-        assert cfg.forced_base_model == "coder-model"
+        assert cfg.forced_base_provider == "gemini"
+        assert cfg.forced_base_model == "gemini-3.1-pro-preview"
 
     def test_invalid_forced_provider_raises(self):
         with patch.dict(os.environ, {"FORCED_BASE_PROVIDER": "claude", "FORCED_BASE_MODEL": ""}, clear=False):
@@ -210,12 +210,12 @@ class TestParseModels:
 class TestParseModelRouting:
     def test_valid_list(self):
         raw = [
-            {"agent": "qwen", "model": "coder-model"},
+            {"agent": "minimax", "model": "minimax-coding-plan/MiniMax-M2.7"},
             {"agent": "gemini", "model": "gemini-2.5-flash"},
         ]
         result = _parse_model_routing(raw)
         assert len(result) == 2
-        assert result[0].agent == "qwen"
+        assert result[0].agent == "minimax"
         assert result[1].model == "gemini-2.5-flash"
 
     def test_empty_returns_empty(self):

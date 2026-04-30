@@ -35,18 +35,26 @@ class TestLoadPricingTable:
             pytest.skip("agent_models.json not found")
 
         table = load_pricing_table(str(agent_models_path))
-        input_price, output_price = table["claude-sonnet-4-5"]
+        input_price, output_price = table["claude-sonnet-4-6"]
         assert input_price == 3.00
         assert output_price == 15.00
 
     def test_unknown_model_has_none_prices(self, tmp_path):
         """Models with null pricing should have None values."""
-        agent_models_path = Path(__file__).resolve().parents[3] / "taskit" / "taskit-backend" / "data" / "agent_models.json"
-        if not agent_models_path.exists():
-            pytest.skip("agent_models.json not found")
+        data = {
+            "agents": {
+                "test": {
+                    "models": [
+                        {"name": "no-price-model", "input_price_per_1m_tokens": None, "output_price_per_1m_tokens": None},
+                    ]
+                }
+            }
+        }
+        path = tmp_path / "models.json"
+        path.write_text(json.dumps(data))
 
-        table = load_pricing_table(str(agent_models_path))
-        input_price, output_price = table["coder-model"]
+        table = load_pricing_table(str(path))
+        input_price, output_price = table["no-price-model"]
         assert input_price is None
         assert output_price is None
 
@@ -76,21 +84,21 @@ class TestEstimateCost:
     @pytest.fixture
     def pricing(self):
         return {
-            "claude-sonnet-4-5": (3.00, 15.00),
-            "coder-model": (None, None),
+            "claude-sonnet-4-6": (3.00, 15.00),
+            "no-price-model": (None, None),
             "gemini-2.5-flash": (0.15, 0.60),
         }
 
     def test_known_model(self, pricing):
-        """claude-sonnet-4-5, 1000 in / 500 out → $0.0105."""
-        cost = estimate_cost("claude-sonnet-4-5", 1000, 500, pricing)
+        """claude-sonnet-4-6, 1000 in / 500 out → $0.0105."""
+        cost = estimate_cost("claude-sonnet-4-6", 1000, 500, pricing)
         # (1000 / 1_000_000) * 3.00 + (500 / 1_000_000) * 15.00
         # = 0.003 + 0.0075 = 0.0105
         assert cost == pytest.approx(0.0105)
 
     def test_unknown_model(self, pricing):
         """Model with null pricing returns None."""
-        cost = estimate_cost("coder-model", 1000, 500, pricing)
+        cost = estimate_cost("no-price-model", 1000, 500, pricing)
         assert cost is None
 
     def test_missing_model(self, pricing):
@@ -100,17 +108,17 @@ class TestEstimateCost:
 
     def test_zero_tokens(self, pricing):
         """Zero tokens → $0.00."""
-        cost = estimate_cost("claude-sonnet-4-5", 0, 0, pricing)
+        cost = estimate_cost("claude-sonnet-4-6", 0, 0, pricing)
         assert cost == 0.0
 
     def test_null_tokens(self, pricing):
         """None tokens → None (can't estimate)."""
-        cost = estimate_cost("claude-sonnet-4-5", None, None, pricing)
+        cost = estimate_cost("claude-sonnet-4-6", None, None, pricing)
         assert cost is None
 
     def test_partial_null_tokens(self, pricing):
         """One token count None → None."""
-        cost = estimate_cost("claude-sonnet-4-5", 1000, None, pricing)
+        cost = estimate_cost("claude-sonnet-4-6", 1000, None, pricing)
         assert cost is None
 
     def test_large_token_count(self, pricing):

@@ -23,10 +23,19 @@ class Command(BaseCommand):
             "--dry-run", action="store_true",
             help="Print what would be done without making changes",
         )
+        parser.add_argument(
+            "--prune", action="store_true",
+            help=(
+                "Make the JSON authoritative: drop models not in the JSON, "
+                "and clear available_models for agent users not in the JSON. "
+                "User records are preserved (to keep FK integrity for historical tasks)."
+            ),
+        )
 
     def handle(self, *args, **options):
         filepath = Path(options["file"])
         dry_run = options["dry_run"]
+        prune = options["prune"]
 
         with open(filepath) as f:
             data = json.load(f)
@@ -42,7 +51,8 @@ class Command(BaseCommand):
             new_models = agent_data.get("models", [])
 
             if dry_run:
-                self.stdout.write(f"[DRY RUN] Would create/update {email} with {len(new_models)} models")
+                mode = "PRUNE" if prune else "MERGE"
+                self.stdout.write(f"[DRY RUN/{mode}] Would create/update {email} with {len(new_models)} models")
                 continue
 
             user, created = User.objects.get_or_create(
@@ -90,14 +100,40 @@ class Command(BaseCommand):
                     merged.append(model)
                     added += 1
 
-            # Keep any user-added models not in the seed file
-            for leftover in existing_by_name.values():
-                merged.append(leftover)
+            removed = 0
+            if prune:
+                # JSON is authoritative — drop anything not in the seed file
+                removed = len(existing_by_name)
+            else:
+                # Default: preserve user-added models not in the seed file
+                for leftover in existing_by_name.values():
+                    merged.append(leftover)
 
             user.available_models = merged
             user.save()
 
             verb = "Created" if created else "Updated"
+            suffix = f", {removed} removed" if prune and removed else ""
             self.stdout.write(self.style.SUCCESS(
-                f"{verb} {email} — {len(merged)} models total ({added} new, {updated} updated)"
+                f"{verb} {email} — {len(merged)} models total ({added} new, {updated} updated{suffix})"
             ))
+
+        # Prune mode also cleans up agents not in the JSON (e.g. removed providers).
+        # We clear available_models rather than deleting the User to preserve any
+        # FK references from historical tasks/comments/history rows.
+        if prune:
+            seeded_emails = {f"{name}@odin.agent" for name in agents.keys()}
+            stale_agents = User.objects.filter(
+                email__endswith="@odin.agent",
+            ).exclude(email__in=seeded_emails)
+
+            for stale in stale_agents:
+                if dry_run:
+                    self.stdout.write(f"[DRY RUN/PRUNE] Would clear models on {stale.email}")
+                    continue
+                if stale.available_models:
+                    stale.available_models = []
+                    stale.save()
+                    self.stdout.write(self.style.WARNING(
+                        f"Cleared models on {stale.email} (no longer in seed file)"
+                    ))

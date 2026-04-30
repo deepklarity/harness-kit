@@ -25,13 +25,13 @@ class TestForcedProviderConfig(SimpleTestCase):
         self.assertEqual(selection.provider, "gemini")
         self.assertEqual(selection.model, "gemini-3-flash-preview")
 
-    @override_settings(FORCED_BASE_PROVIDER="qwen", FORCED_BASE_MODEL="coder-model")
-    @patch("tasks.forced_provider.shutil.which", return_value="/usr/bin/qwen")
+    @override_settings(FORCED_BASE_PROVIDER="gemini", FORCED_BASE_MODEL="gemini-3.1-pro-preview")
+    @patch("tasks.forced_provider.shutil.which", return_value="/usr/bin/gemini")
     def test_selection_uses_pinned_model(self, _mock_which):
         selection = get_forced_provider_selection()
         self.assertTrue(selection.enabled)
-        self.assertEqual(selection.provider, "qwen")
-        self.assertEqual(selection.model, "coder-model")
+        self.assertEqual(selection.provider, "gemini")
+        self.assertEqual(selection.model, "gemini-3.1-pro-preview")
 
     @override_settings(FORCED_BASE_PROVIDER="claude", FORCED_BASE_MODEL=None)
     def test_invalid_provider_raises(self):
@@ -72,8 +72,8 @@ class TestForcedProviderEndpoints(APITestCase):
         self.assertEqual(report.reviewer_model, "gemini-2.5-pro")
         mock_delay.assert_called_once_with(report.id)
 
-    @override_settings(FORCED_BASE_PROVIDER="qwen", FORCED_BASE_MODEL="coder-model")
-    @patch("tasks.forced_provider.shutil.which", return_value="/usr/bin/qwen")
+    @override_settings(FORCED_BASE_PROVIDER="gemini", FORCED_BASE_MODEL="gemini-3.1-pro-preview")
+    @patch("tasks.forced_provider.shutil.which", return_value="/usr/bin/gemini")
     @patch("tasks.dag_executor.execute_reflection.delay")
     def test_auto_reflection_uses_forced_provider(self, mock_delay, _mock_which):
         task = self.make_task(self.board, status=TaskStatus.IN_PROGRESS)
@@ -84,6 +84,6 @@ class TestForcedProviderEndpoints(APITestCase):
         )
         self.assertEqual(resp.status_code, 200)
         report = ReflectionReport.objects.get(task=task)
-        self.assertEqual(report.reviewer_agent, "qwen")
-        self.assertEqual(report.reviewer_model, "coder-model")
+        self.assertEqual(report.reviewer_agent, "gemini")
+        self.assertEqual(report.reviewer_model, "gemini-3.1-pro-preview")
         mock_delay.assert_called_once_with(report.id)

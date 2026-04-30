@@ -25,8 +25,8 @@ class TestSeedModelsCommand(APITestCase):
         call_command("seedmodels", stdout=out)
         output = out.getvalue()
 
-        # Should create 6 agent users
-        self.assertEqual(User.objects.filter(email__endswith="@odin.agent").count(), 6)
+        # Should create 5 agent users (claude, codex, gemini, glm, minimax)
+        self.assertEqual(User.objects.filter(email__endswith="@odin.agent").count(), 5)
         self.assertIn("claude@odin.agent", output)
 
     def test_seedmodels_populates_models(self):
@@ -35,8 +35,8 @@ class TestSeedModelsCommand(APITestCase):
         claude = User.objects.get(email="claude@odin.agent")
         self.assertGreater(len(claude.available_models), 0)
         model_names = [m["name"] for m in claude.available_models]
-        self.assertIn("claude-sonnet-4-5", model_names)
-        self.assertIn("claude-opus-4", model_names)
+        self.assertIn("claude-sonnet-4-6", model_names)
+        self.assertIn("claude-opus-4-7", model_names)
 
     def test_seedmodels_sets_color(self):
         call_command("seedmodels", stdout=StringIO())
@@ -76,10 +76,10 @@ class TestTaskModelName(APITestCase):
         board = self.make_board()
         resp = self.make_task_via_api(
             board, title="Task with model",
-            model_name="claude-sonnet-4-5",
+            model_name="claude-sonnet-4-6",
         )
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["model_name"], "claude-sonnet-4-5")
+        self.assertEqual(resp.data["model_name"], "claude-sonnet-4-6")
 
     def test_create_task_model_name_from_metadata(self):
         """When no explicit model_name, fallback to metadata.selected_model."""
@@ -98,13 +98,13 @@ class TestTaskModelName(APITestCase):
 
         self.make_task_via_api(
             board, title="Task with model",
-            model_name="claude-sonnet-4-5",
+            model_name="claude-sonnet-4-6",
             assignee_id=user.id,
         )
 
         user.refresh_from_db()
         model_names = [m["name"] for m in user.available_models]
-        self.assertIn("claude-sonnet-4-5", model_names)
+        self.assertIn("claude-sonnet-4-6", model_names)
 
     def test_create_task_uses_assignee_default_model_when_missing(self):
         board = self.make_board()
@@ -112,8 +112,8 @@ class TestTaskModelName(APITestCase):
             name="claude",
             email="claude@odin.agent",
             available_models=[
-                {"name": "claude-opus-4", "description": "strong", "is_default": False},
-                {"name": "claude-sonnet-4-5", "description": "fast", "is_default": True},
+                {"name": "claude-opus-4-7", "description": "strong", "is_default": False},
+                {"name": "claude-sonnet-4-6", "description": "fast", "is_default": True},
             ],
         )
         resp = self.make_task_via_api(
@@ -121,7 +121,7 @@ class TestTaskModelName(APITestCase):
             assignee_id=user.id,
         )
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["model_name"], "claude-sonnet-4-5")
+        self.assertEqual(resp.data["model_name"], "claude-sonnet-4-6")
 
     def test_create_task_explicit_model_overrides_assignee_default(self):
         board = self.make_board()
@@ -142,23 +142,23 @@ class TestTaskModelName(APITestCase):
 
     def test_update_task_model_name_tracked_in_history(self):
         board = self.make_board()
-        task = self.make_task(board, model_name="claude-sonnet-4-5")
+        task = self.make_task(board, model_name="claude-sonnet-4-6")
 
         resp = self.client.put(
             f"/tasks/{task.id}/",
-            {"model_name": "claude-opus-4", "updated_by": "admin@example.com"},
+            {"model_name": "claude-opus-4-7", "updated_by": "admin@example.com"},
             format="json",
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["model_name"], "claude-opus-4")
+        self.assertEqual(resp.data["model_name"], "claude-opus-4-7")
 
         # Check history was created
         history_resp = self.client.get(f"/tasks/{task.id}/history/")
         history = self.results(history_resp)
         model_changes = [h for h in history if h["field_name"] == "model_name"]
         self.assertEqual(len(model_changes), 1)
-        self.assertEqual(model_changes[0]["old_value"], "claude-sonnet-4-5")
-        self.assertEqual(model_changes[0]["new_value"], "claude-opus-4")
+        self.assertEqual(model_changes[0]["old_value"], "claude-sonnet-4-6")
+        self.assertEqual(model_changes[0]["new_value"], "claude-opus-4-7")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -170,13 +170,13 @@ class TestUserAvailableModels(APITestCase):
 
     def test_available_models_in_user_response(self):
         models = [
-            {"name": "claude-sonnet-4-5", "description": "fast", "is_default": True},
+            {"name": "claude-sonnet-4-6", "description": "fast", "is_default": True},
         ]
         user = self.make_user(available_models=models)
         resp = self.client.get(f"/users/{user.id}/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.data["available_models"]), 1)
-        self.assertEqual(resp.data["available_models"][0]["name"], "claude-sonnet-4-5")
+        self.assertEqual(resp.data["available_models"][0]["name"], "claude-sonnet-4-6")
 
     def test_update_user_available_models(self):
         user = self.make_user()
