@@ -17,7 +17,7 @@ agents:
   qwen:
     cli_command: qwen
   minimax:
-    cli_command: kilo
+    cli_command: opencode
     api_key: ${MINIMAX_API_KEY}
   glm:
     cli_command: opencode

@@ -322,7 +322,7 @@ def _default_config(source: str) -> OdinConfig:
             premium_model="gemini-3.1-pro-preview",
         ),
         "minimax": AgentConfig(
-            cli_command="kilo",
+            cli_command="opencode",
             capabilities=["coding", "writing"],
             cost_tier=CostTier.LOW,
             models={

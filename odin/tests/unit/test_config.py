@@ -50,7 +50,7 @@ class TestDefaultConfig:
     def test_default_cli_agents_enabled(self):
         cfg = _default_config("test")
         assert cfg.agents["minimax"].enabled is True
-        assert cfg.agents["minimax"].cli_command == "kilo"
+        assert cfg.agents["minimax"].cli_command == "opencode"
         assert cfg.agents["glm"].enabled is True
         assert cfg.agents["glm"].cli_command == "opencode"
 
