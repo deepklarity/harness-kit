@@ -606,15 +606,32 @@ function App() {
     };
     const handleStopExecution = async (taskId: string, targetStatus: string): Promise<boolean> => {
         try {
-            await service.stopExecution(taskId, targetStatus);
+            const result = await service.stopExecution(taskId, targetStatus);
             if (selectedTask?.id === taskId) {
                 const detail = await service.fetchTaskDetail(taskId);
                 setSelectedTask(detail);
             }
+            // The stop command reported an error, but the backend applied the
+            // transition anyway (the signal likely landed — this is recoverable).
+            // Surface it as a non-blocking info toast, not a destructive one.
+            if (result?.stop_warning) {
+                toast({
+                    title: 'Task moved',
+                    description: `Stop signal warning: ${result.stop_warning}`,
+                });
+            }
             return true;
         } catch (e) {
             console.error('Failed to stop execution', e);
-            toast({ title: 'Error', description: 'Failed to stop execution', variant: 'destructive' });
+            // With the new backend flow, a thrown error here means a genuine
+            // 409 (unexpected terminal transition during stop) or network/5xx.
+            // Prefer the backend's detail message if present.
+            const detail = parseApiDetail(e);
+            toast({
+                title: 'Could not move task',
+                description: detail || 'The task transitioned to an unexpected state while stopping. Refresh to see its current status.',
+                variant: 'destructive',
+            });
             return false;
         }
     };

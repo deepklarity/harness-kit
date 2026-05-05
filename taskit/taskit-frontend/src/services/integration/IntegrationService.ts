@@ -40,6 +40,12 @@ export interface DirectoryEntry {
     has_children: boolean;
 }
 
+export interface StopExecutionResult {
+    /** Populated when the stop signal reported an error but the transition
+     *  was still applied. Surface as a non-blocking info toast, not an error. */
+    stop_warning?: string;
+}
+
 export interface DirectoryCheckResult {
     odin_exists: boolean;
     linked_board: { id: number; name: string } | null;
@@ -120,7 +126,7 @@ export interface IntegrationService {
         labelIds?: number[]; modelName?: string; dependsOn?: string[];
         kanbanTargetIndex?: number; kanbanTargetStatus?: string; skipReflection?: boolean;
     }): Promise<void>;
-    stopExecution(taskId: string, targetStatus: string): Promise<void>;
+    stopExecution(taskId: string, targetStatus: string): Promise<StopExecutionResult>;
     stopRuntimeTask(taskId: string, targetStatus?: string): Promise<void>;
     fetchOdinStatus(params?: { spec?: string; agent?: string; status?: string }): Promise<OdinStatusResponse>;
     fetchForcedProviderStatus(): Promise<ForcedProviderStatus>;

@@ -1,4 +1,4 @@
-import type { IntegrationService, AuthState, DirectoryEntry, TaskSearchResult } from '../integration/IntegrationService';
+import type { IntegrationService, AuthState, DirectoryEntry, TaskSearchResult, StopExecutionResult } from '../integration/IntegrationService';
 import type {
     AgentConfig,
     Board as DashBoard,
@@ -1055,13 +1055,14 @@ export class HarnessTimeService implements IntegrationService {
         await this.post(`/api/tasks/${Number(taskId)}/`, body, 'PUT');
     }
 
-    async stopExecution(taskId: string, targetStatus: string): Promise<void> {
+    async stopExecution(taskId: string, targetStatus: string): Promise<StopExecutionResult> {
         const email = this.baseUrl.includes('localhost') ? 'admin@example.com' : 'unknown@example.com';
-        await this.post(`/api/tasks/${Number(taskId)}/stop_execution/`, {
+        const body = await this.post<{ stop_warning?: string }>(`/api/tasks/${Number(taskId)}/stop_execution/`, {
             updated_by: email,
             target_status: targetStatus,
             reason: 'user_drag_stop_confirm',
         });
+        return { stop_warning: body?.stop_warning };
     }
 
     async stopRuntimeTask(taskId: string, targetStatus = 'TODO'): Promise<void> {

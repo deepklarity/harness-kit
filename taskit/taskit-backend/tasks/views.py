@@ -160,6 +160,9 @@ def _clear_stop_guards(metadata):
     metadata.pop("ignore_execution_results", None)
     metadata.pop("stopped_run_token", None)
     metadata.pop("execution_stopped_at", None)
+    metadata.pop("pending_stop_target", None)
+    metadata.pop("pending_stop_updated_by", None)
+    metadata.pop("pending_stop_reason", None)
 
 
 def _trigger_auto_reflection(task):
@@ -1788,39 +1791,265 @@ def _task_response(task_id):
     return TaskSerializer(task).data
 
 
-def _attempt_odin_stop(task, force=False):
-    """Try odin CLI stop first; fall back to execution strategy stop when needed."""
-    from .integrations.odin_runtime import stop_with_odin
-    stop_result = stop_with_odin(task.id, force=force)
-    if stop_result.get("ok"):
-        return stop_result
+def _pre_stop_mark(task, target_status, updated_by, reason):
+    """Record the user's stop intent in task.metadata BEFORE touching the process.
 
-    from .execution import get_strategy
-    strategy = get_strategy()
-    if not strategy:
-        return stop_result
+    This is the lynchpin of the stop flow: if the stop signal races with the
+    DAG executor's subprocess monitor, the executor must be able to see these
+    flags and honor the user's target status instead of synthesizing FAILED.
 
-    fallback = strategy.stop(task, force=force)
-    if fallback.get("ok"):
-        fallback["engine"] = f"{fallback.get('engine', 'strategy')} (fallback)"
-        fallback["fallback_used"] = True
-        fallback["odin_error"] = stop_result.get("error", "")
-        return fallback
+    Critically, we also flip active_execution.cancel_requested here — that's
+    the exact flag the dag_executor polling loop watches on every 1-second
+    poll (see _run_subprocess_with_cancellation in dag_executor.py). Writing
+    it here guarantees process termination via os.killpg regardless of
+    whether the subsequent _attempt_odin_stop call lands cleanly.
+
+    All guard keys are written in a single atomic save — do not split this
+    across multiple .save() calls.
+    """
+    metadata = dict(task.metadata or {})
+    active = dict(metadata.get("active_execution") or {})
+    run_token = active.get("run_token")
+
+    # Flip the kill switch the dag_executor polling loop is watching.
+    active["cancel_requested"] = True
+    metadata["active_execution"] = active
+
+    metadata["ignore_execution_results"] = True
+    metadata["pending_stop_target"] = target_status
+    metadata["pending_stop_updated_by"] = updated_by
+    metadata["pending_stop_reason"] = reason
+    metadata["execution_stopped_at"] = timezone.now().isoformat()
+    if run_token:
+        metadata["stopped_run_token"] = run_token
+    task.metadata = metadata
+    task.save(update_fields=["metadata", "last_updated_at"])
+
+
+def _perform_stop_flow(task, target_status, updated_by, reason, force=False):
+    """Shared stop-then-transition pipeline for both stop endpoints.
+
+    Returns (response_body, http_status_code). The caller wraps it in a Response.
+
+    Flow:
+      1. Write guard metadata (single DB call) — user intent is now authoritative.
+      2. Attempt to stop the process. A failure here is NOT fatal; the signal
+         may have landed anyway, and even if it didn't, our guard ensures the
+         DAG executor will still route the task to the user's target.
+      3. Refresh and check status:
+         - Still EXECUTING → apply transition ourselves.
+         - Already at target_status → DAG executor honored the guard; return current state.
+         - Some other status → genuine unexpected transition, return 409.
+      4. If the stop command reported an error, surface it as stop_warning
+         (non-fatal) on an otherwise successful 200 response.
+    """
+    _pre_stop_mark(task, target_status, updated_by, reason)
+
+    stop_result = _attempt_odin_stop(task, force=force)
+
+    task.refresh_from_db()
+    if task.status != TaskStatus.EXECUTING:
+        if task.status == target_status:
+            # DAG executor raced ahead and honored the guard. Return the live state.
+            body = {"task": _task_response(task.id), "stop": stop_result}
+            if not stop_result.get("ok"):
+                body["stop_warning"] = stop_result.get("error") or "Stop command reported an error; DAG executor applied the transition."
+            return body, status.HTTP_200_OK
+        # Unexpected terminal state (e.g., a different path wrote a non-target status).
+        return (
+            {
+                "detail": f"Task moved to {task.status} during stop; expected {target_status}.",
+                "stop": stop_result,
+            },
+            status.HTTP_409_CONFLICT,
+        )
+
+    payload = _apply_stop_transition(task, target_status, updated_by, reason, stop_result)
+    if not stop_result.get("ok"):
+        payload["stop_warning"] = stop_result.get("error") or "Stop command reported an error; transition applied anyway."
+    return payload, status.HTTP_200_OK
+
+
+def _kill_tmux_session_if_present(task):
+    """Kill the tmux session hosting the agent, if one exists.
+
+    This is THE essential termination step. odin exec runs CLI agents
+    (claude, gemini, codex, qwen, glm) inside a *detached* tmux session
+    via `tmux new-session -d` — see odin/src/odin/orchestrator.py
+    `_execute_via_tmux` and odin/src/odin/tmux.py `launch()`.
+
+    Consequences for the kill path:
+      * The tmux server is a separate daemon with its own process group.
+      * The agent process lives inside that tmux session, NOT in odin's
+        process group.
+      * `os.killpg(odin_pid, SIGTERM)` kills only the odin Python wrapper;
+        the agent keeps running, posting proof-of-work, making git commits,
+        etc., until it finishes naturally.
+
+    odin writes the session name to `task.metadata["tmux_session"]`
+    (orchestrator.py:2913). We read it here and issue
+    `tmux kill-session -t <name>` to actually stop the work.
+
+    Returns:
+      None — no tmux path is applicable (no metadata or tmux not on PATH).
+      dict with "ok": bool — tmux kill attempted, result inside.
+    """
+    import shutil
+    import subprocess
+
+    session_name = (task.metadata or {}).get("tmux_session")
+    if not session_name:
+        return None
+
+    if not shutil.which("tmux"):
+        return None
+
+    try:
+        result = subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "engine": "tmux",
+            "error": f"tmux kill-session timed out for {session_name}",
+        }
+    except Exception as exc:  # pragma: no cover - unexpected env failure
+        logger.exception("tmux kill-session failed for task %s", task.id)
+        return {
+            "ok": False,
+            "engine": "tmux",
+            "error": f"tmux kill-session raised: {exc}",
+        }
+
+    if result.returncode == 0:
+        return {
+            "ok": True,
+            "engine": "tmux",
+            "details": f"Killed tmux session {session_name}.",
+        }
+
+    # "can't find session" / "no such session" means the session is already
+    # gone — either it finished on its own or someone else killed it. Either
+    # way, from our perspective the agent isn't running, so treat as success.
+    stderr = (result.stderr or "").strip().lower()
+    if "can't find session" in stderr or "no such session" in stderr or "no server running" in stderr:
+        return {
+            "ok": True,
+            "engine": "tmux",
+            "details": f"Tmux session {session_name} already gone.",
+        }
 
     return {
         "ok": False,
-        "engine": "odin_cli+strategy",
-        "error": stop_result.get("error") or fallback.get("error") or "Failed to stop execution.",
-        "odin_stop": stop_result,
-        "strategy_stop": fallback,
+        "engine": "tmux",
+        "error": f"tmux kill-session exit={result.returncode}: {result.stderr.strip()}",
+    }
+
+
+def _attempt_odin_stop(task, force=False):
+    """Terminate a running task's agent AND its odin wrapper.
+
+    Two independent kill paths, both attempted:
+
+      1. Tmux session kill (primary) — reads task.metadata["tmux_session"]
+         and runs `tmux kill-session`. This is what actually stops the
+         agent (claude/gemini/codex/etc.) which runs inside a detached
+         tmux session spawned by odin. Killing odin's process group alone
+         does NOT reach the agent — see _kill_tmux_session_if_present.
+
+      2. Execution strategy stop (secondary) — kills the odin wrapper
+         process group via os.killpg and sets active_execution.cancel_requested
+         so the dag_executor polling loop unblocks promptly. Without this,
+         the odin wrapper might linger for a few seconds waiting on tmux.
+
+    Overall outcome:
+      - ok=True if EITHER path succeeded. Tmux kill alone is sufficient
+        to stop the agent's work — the odin wrapper will exit shortly
+        after it sees the session is gone. Strategy kill alone is
+        sufficient only for the non-tmux execution fallback (rare).
+      - ok=False only if both paths were attempted and both failed.
+
+    Legacy fallback: odin CLI `stop` command. Only tried if both primary
+    paths fail. Has a known bug (reads metadata["subprocess_pid"] which
+    taskit doesn't populate) but harmless to call.
+
+    Belt-and-suspenders: even if this returns ok=False, the dag_executor
+    polling loop will pick up active_execution.cancel_requested (written
+    by _pre_stop_mark) and kill the odin wrapper within ~1 second.
+    """
+    from .execution import get_strategy
+    from .integrations.odin_runtime import stop_with_odin
+
+    # Step 1: Kill the tmux session hosting the agent. This is the critical
+    # step — without it, the agent keeps running regardless of anything else.
+    tmux_result = _kill_tmux_session_if_present(task)
+
+    # Step 2: Stop the odin wrapper process group via the execution strategy.
+    strategy = get_strategy()
+    strategy_result = None
+    if strategy:
+        strategy_result = strategy.stop(task, force=force)
+
+    tmux_ok = bool(tmux_result and tmux_result.get("ok"))
+    strategy_ok = bool(strategy_result and strategy_result.get("ok"))
+
+    if tmux_ok or strategy_ok:
+        engines = []
+        if tmux_ok:
+            engines.append("tmux")
+        if strategy_ok:
+            engines.append((strategy_result or {}).get("engine", "strategy"))
+        return {
+            "ok": True,
+            "engine": "+".join(engines),
+            "details": (tmux_result or {}).get("details") or (strategy_result or {}).get("details", ""),
+            "tmux_stop": tmux_result,
+            "strategy_stop": strategy_result,
+        }
+
+    # Both primary paths failed (or weren't applicable). Last-resort CLI
+    # fallback — preserves the old behavior for tmux-based manual workflows.
+    cli_result = stop_with_odin(task.id, force=force)
+    if cli_result.get("ok"):
+        cli_result["engine"] = f"{cli_result.get('engine', 'odin_cli')} (fallback)"
+        cli_result["fallback_used"] = True
+        cli_result["tmux_stop"] = tmux_result
+        cli_result["strategy_stop"] = strategy_result
+        return cli_result
+
+    return {
+        "ok": False,
+        "engine": "tmux+strategy+odin_cli",
+        "error": (
+            (tmux_result or {}).get("error")
+            or (strategy_result or {}).get("error")
+            or cli_result.get("error")
+            or "Failed to stop execution."
+        ),
+        "tmux_stop": tmux_result,
+        "strategy_stop": strategy_result or {"ok": False, "error": "No execution strategy configured."},
+        "odin_stop": cli_result,
     }
 
 
 def _apply_stop_transition(task, target_status, updated_by, reason, stop_result):
-    """Persist post-stop status/metadata/history/comment updates."""
+    """Persist post-stop status/metadata/history/comment updates.
+
+    Note: _pre_stop_mark has already written ignore_execution_results,
+    stopped_run_token, and the pending_stop_* keys. Here we consume the
+    pending_* keys (they've been applied) while keeping the durable guards
+    in place so any late execution_result webhook still gets discarded.
+    """
     run_token = ((task.metadata or {}).get("active_execution") or {}).get("run_token")
     metadata = dict(task.metadata or {})
     metadata.pop("active_execution", None)
+    metadata.pop("pending_stop_target", None)
+    metadata.pop("pending_stop_updated_by", None)
+    metadata.pop("pending_stop_reason", None)
     metadata["stop_generation"] = int(metadata.get("stop_generation", 0) or 0) + 1
     metadata["execution_stopped_at"] = timezone.now().isoformat()
     metadata["ignore_execution_results"] = True
@@ -2159,25 +2388,13 @@ class TaskViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        stop_result = _attempt_odin_stop(task)
-        if not stop_result.get("ok"):
-            return Response(
-                {"detail": stop_result.get("error", "Failed to stop execution."), "stop": stop_result},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        task.refresh_from_db()
-        if task.status != TaskStatus.EXECUTING:
-            return Response(
-                {"detail": f"Task status changed to {task.status}; refusing post-stop move.", "stop": stop_result},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        target_status = d["target_status"]
-        updated_by = d["updated_by"]
-        reason = (d.get("reason") or "").strip() or "user_drag_stop_confirm"
-        payload = _apply_stop_transition(task, target_status, updated_by, reason, stop_result)
-        return Response(payload)
+        body, http_status = _perform_stop_flow(
+            task=task,
+            target_status=d["target_status"],
+            updated_by=d["updated_by"],
+            reason=(d.get("reason") or "").strip() or "user_drag_stop_confirm",
+        )
+        return Response(body, status=http_status)
 
     @action(detail=True, methods=["post"])
     def assign(self, request, pk=None):
@@ -4111,28 +4328,14 @@ def runtime_stop(request):
             status=status.HTTP_409_CONFLICT,
         )
 
-    stop_result = _attempt_odin_stop(task, force=d.get("force", False))
-    if not stop_result.get("ok"):
-        return Response(
-            {"detail": stop_result.get("error", "Failed to stop execution."), "stop": stop_result},
-            status=status.HTTP_409_CONFLICT,
-        )
-
-    task.refresh_from_db()
-    if task.status != TaskStatus.EXECUTING:
-        return Response(
-            {"detail": f"Task status changed to {task.status}; refusing post-stop move.", "stop": stop_result},
-            status=status.HTTP_409_CONFLICT,
-        )
-
-    payload = _apply_stop_transition(
+    body, http_status = _perform_stop_flow(
         task=task,
         target_status=d["target_status"],
         updated_by=d["updated_by"],
         reason=(d.get("reason") or "").strip() or "runtime_monitor_stop",
-        stop_result=stop_result,
+        force=d.get("force", False),
     )
-    return Response(payload)
+    return Response(body, status=http_status)
 
 
 # ── Presets ──────────────────────────────────────────────────────

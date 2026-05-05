@@ -187,10 +187,238 @@ class TestTaskLifecycle(APITestCase):
         self.assertEqual(task.metadata.get("stopped_run_token"), "run_1")
         self.assertIn("last_stop_request", task.metadata)
 
-    @patch("tasks.execution.get_strategy")
-    def test_stop_execution_failure_keeps_executing(self, mock_get_strategy):
-        mock_strategy = mock_get_strategy.return_value
-        mock_strategy.stop.return_value = {"ok": False, "engine": "local", "error": "cannot kill"}
+    @patch("tasks.views._attempt_odin_stop")
+    def test_stop_execution_pre_mark_lands_before_stop_call(self, mock_attempt_stop):
+        """The guard metadata — including active_execution.cancel_requested, the
+        flag the dag_executor polling loop watches — must be in the DB *before*
+        any stop signal is dispatched. This test intercepts the stop call and
+        verifies the task row has been updated at the moment _attempt_odin_stop
+        is invoked."""
+        task = self.make_task(
+            self.board,
+            status="EXECUTING",
+            assignee=self.user,
+            metadata={"active_execution": {"run_token": "run_42", "pid": 9999}},
+        )
+        captured = {}
+
+        def _capture_then_succeed(task_arg, force=False):
+            # At the moment the stop dispatcher is called, verify the DB
+            # already has the user's intent persisted.
+            fresh = Task.objects.get(pk=task_arg.id)
+            md = fresh.metadata or {}
+            active = md.get("active_execution") or {}
+            captured["ignore_execution_results"] = md.get("ignore_execution_results")
+            captured["pending_stop_target"] = md.get("pending_stop_target")
+            captured["pending_stop_updated_by"] = md.get("pending_stop_updated_by")
+            captured["pending_stop_reason"] = md.get("pending_stop_reason")
+            captured["stopped_run_token"] = md.get("stopped_run_token")
+            captured["active_cancel_requested"] = active.get("cancel_requested")
+            captured["active_pid"] = active.get("pid")
+            captured["active_run_token"] = active.get("run_token")
+            return {"ok": True, "engine": "mock-stop"}
+
+        mock_attempt_stop.side_effect = _capture_then_succeed
+
+        resp = self.client.post(f"/tasks/{task.id}/stop_execution/", {
+            "updated_by": "alice@test.com",
+            "target_status": "TODO",
+            "reason": "user_drag_stop_confirm",
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(captured["ignore_execution_results"])
+        self.assertEqual(captured["pending_stop_target"], "TODO")
+        self.assertEqual(captured["pending_stop_updated_by"], "alice@test.com")
+        self.assertEqual(captured["pending_stop_reason"], "user_drag_stop_confirm")
+        self.assertEqual(captured["stopped_run_token"], "run_42")
+        # Critical: the cancel flag that the dag_executor polling loop watches
+        # must already be True, at exactly this path, before the stop dispatch.
+        self.assertTrue(captured["active_cancel_requested"])
+        # And we must not have clobbered existing active_execution fields.
+        self.assertEqual(captured["active_pid"], 9999)
+        self.assertEqual(captured["active_run_token"], "run_42")
+
+    def test_attempt_odin_stop_calls_strategy_when_no_tmux(self):
+        """When no tmux session is recorded in metadata, the execution
+        strategy's stop() handles termination (kills the odin wrapper
+        process group via os.killpg)."""
+        from tasks.views import _attempt_odin_stop
+        from unittest.mock import patch, MagicMock
+
+        task = self.make_task(
+            self.board,
+            status="EXECUTING",
+            assignee=self.user,
+            metadata={"active_execution": {"run_token": "run_1", "pid": 4321}},
+        )
+
+        mock_strategy = MagicMock()
+        mock_strategy.stop.return_value = {"ok": True, "engine": "celery_dag"}
+
+        with patch("tasks.execution.get_strategy", return_value=mock_strategy), \
+             patch("tasks.integrations.odin_runtime.stop_with_odin") as mock_stop_with_odin:
+            result = _attempt_odin_stop(task)
+
+        self.assertTrue(result.get("ok"))
+        self.assertIn("celery_dag", result.get("engine", ""))
+        mock_strategy.stop.assert_called_once()
+        # Strategy succeeded → broken CLI fallback must NOT be called.
+        mock_stop_with_odin.assert_not_called()
+
+    def test_attempt_odin_stop_falls_back_to_cli_when_strategy_fails(self):
+        """If both tmux and strategy paths fail, the CLI is the last-resort
+        fallback. This preserves backward compatibility for legacy flows
+        without re-introducing the false-positive bug from CLI-first ordering."""
+        from tasks.views import _attempt_odin_stop
+        from unittest.mock import patch, MagicMock
+
+        task = self.make_task(
+            self.board,
+            status="EXECUTING",
+            assignee=self.user,
+            metadata={"active_execution": {"run_token": "run_1", "pid": 4321}},
+        )
+
+        mock_strategy = MagicMock()
+        mock_strategy.stop.return_value = {"ok": False, "engine": "celery_dag", "error": "no pid"}
+
+        with patch("tasks.execution.get_strategy", return_value=mock_strategy), \
+             patch("tasks.integrations.odin_runtime.stop_with_odin") as mock_stop_with_odin:
+            mock_stop_with_odin.return_value = {"ok": True, "engine": "odin_cli"}
+            result = _attempt_odin_stop(task)
+
+        self.assertTrue(result.get("ok"))
+        self.assertIn("fallback", result.get("engine", ""))
+        mock_strategy.stop.assert_called_once()
+        mock_stop_with_odin.assert_called_once()
+
+    def test_attempt_odin_stop_kills_tmux_session_when_recorded(self):
+        """When the task metadata carries a tmux_session, _attempt_odin_stop
+        must issue `tmux kill-session -t <name>`. This is the ONLY path that
+        actually terminates the agent (claude/gemini/codex), because odin
+        exec runs the agent inside a detached tmux session whose process
+        group is independent of the odin wrapper. Killing only the odin
+        wrapper leaves the agent running and posting proof-of-work."""
+        from tasks.views import _attempt_odin_stop
+        from unittest.mock import patch, MagicMock
+
+        task = self.make_task(
+            self.board,
+            status="EXECUTING",
+            assignee=self.user,
+            metadata={
+                "active_execution": {"run_token": "run_1", "pid": 4321},
+                "tmux_session": "odin-abc12345",
+            },
+        )
+
+        mock_strategy = MagicMock()
+        mock_strategy.stop.return_value = {"ok": True, "engine": "celery_dag"}
+
+        fake_tmux_run = MagicMock(return_value=MagicMock(returncode=0, stderr=""))
+
+        with patch("shutil.which", return_value="/usr/bin/tmux"), \
+             patch("subprocess.run", fake_tmux_run), \
+             patch("tasks.execution.get_strategy", return_value=mock_strategy), \
+             patch("tasks.integrations.odin_runtime.stop_with_odin") as mock_stop_with_odin:
+            result = _attempt_odin_stop(task)
+
+        # tmux kill-session must have been invoked with the recorded session name.
+        tmux_calls = [
+            call for call in fake_tmux_run.call_args_list
+            if call[0] and call[0][0] and call[0][0][:2] == ["tmux", "kill-session"]
+        ]
+        self.assertEqual(len(tmux_calls), 1, "tmux kill-session was not called")
+        self.assertIn("odin-abc12345", tmux_calls[0][0][0])
+
+        self.assertTrue(result.get("ok"))
+        self.assertIn("tmux", result.get("engine", ""))
+        mock_stop_with_odin.assert_not_called()
+
+    def test_attempt_odin_stop_tmux_success_makes_overall_ok_even_if_strategy_fails(self):
+        """If killing the tmux session succeeded, the agent is stopped — the
+        overall stop result must be ok=True even if the strategy couldn't
+        find a PID. The odin wrapper will exit on its own once the tmux
+        session is gone."""
+        from tasks.views import _attempt_odin_stop
+        from unittest.mock import patch, MagicMock
+
+        task = self.make_task(
+            self.board,
+            status="EXECUTING",
+            assignee=self.user,
+            metadata={
+                "active_execution": {"run_token": "run_1"},  # no pid
+                "tmux_session": "odin-deadbeef",
+            },
+        )
+
+        mock_strategy = MagicMock()
+        mock_strategy.stop.return_value = {"ok": False, "engine": "celery_dag", "error": "no pid"}
+
+        with patch("shutil.which", return_value="/usr/bin/tmux"), \
+             patch("subprocess.run", return_value=MagicMock(returncode=0, stderr="")), \
+             patch("tasks.execution.get_strategy", return_value=mock_strategy), \
+             patch("tasks.integrations.odin_runtime.stop_with_odin") as mock_stop_with_odin:
+            result = _attempt_odin_stop(task)
+
+        self.assertTrue(result.get("ok"))
+        self.assertIn("tmux", result.get("engine", ""))
+        self.assertEqual(result.get("tmux_stop", {}).get("ok"), True)
+        self.assertEqual(result.get("strategy_stop", {}).get("ok"), False)
+        mock_stop_with_odin.assert_not_called()
+
+    def test_attempt_odin_stop_treats_dead_tmux_session_as_success(self):
+        """If tmux reports the session doesn't exist, treat as success —
+        the agent isn't running from our perspective. This prevents false
+        failures when the session finished on its own between the time we
+        read metadata and the time we tried to kill it."""
+        from tasks.views import _kill_tmux_session_if_present
+        from unittest.mock import patch, MagicMock
+
+        task = self.make_task(
+            self.board,
+            status="EXECUTING",
+            assignee=self.user,
+            metadata={"tmux_session": "odin-ghost"},
+        )
+
+        fake_result = MagicMock(returncode=1, stderr="can't find session: odin-ghost")
+        with patch("shutil.which", return_value="/usr/bin/tmux"), \
+             patch("subprocess.run", return_value=fake_result):
+            result = _kill_tmux_session_if_present(task)
+
+        self.assertTrue(result.get("ok"))
+        self.assertIn("already gone", result.get("details", ""))
+
+    def test_kill_tmux_session_returns_none_when_no_metadata(self):
+        """No tmux_session in metadata → return None, caller falls back to
+        strategy. This is the expected path for tasks that never used tmux
+        (local execution fallback, tests, etc.)."""
+        from tasks.views import _kill_tmux_session_if_present
+
+        task = self.make_task(
+            self.board,
+            status="EXECUTING",
+            assignee=self.user,
+            metadata={"active_execution": {"pid": 1234}},
+        )
+
+        self.assertIsNone(_kill_tmux_session_if_present(task))
+
+    @patch("tasks.views._attempt_odin_stop")
+    def test_stop_execution_stop_error_still_applies_transition(self, mock_attempt_stop):
+        """When the stop command reports an error but the process may have been
+        killed anyway, the endpoint still applies the user's target transition
+        and returns 200 with a stop_warning. Dropping the stop on the floor
+        would let the DAG executor race ahead and write FAILED — see the race
+        condition fix in _perform_stop_flow."""
+        mock_attempt_stop.return_value = {
+            "ok": False,
+            "engine": "odin_cli+strategy",
+            "error": "cannot kill: process already gone",
+        }
         task = self.make_task(
             self.board,
             status="EXECUTING",
@@ -202,10 +430,18 @@ class TestTaskLifecycle(APITestCase):
             "updated_by": "alice@test.com",
             "target_status": "TODO",
         }, format="json")
-        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("stop_warning", resp.data)
+        self.assertIn("cannot kill", resp.data["stop_warning"])
 
         task.refresh_from_db()
-        self.assertEqual(task.status, "EXECUTING")
+        self.assertEqual(task.status, "TODO")
+        self.assertTrue(task.metadata.get("ignore_execution_results"))
+        self.assertEqual(task.metadata.get("stopped_run_token"), "run_1")
+        # Pending keys should be consumed by _apply_stop_transition.
+        self.assertNotIn("pending_stop_target", task.metadata)
+        self.assertNotIn("pending_stop_updated_by", task.metadata)
+        self.assertNotIn("pending_stop_reason", task.metadata)
 
     def test_update_status_blocked_while_executing(self):
         task = self.make_task(self.board, status="EXECUTING", assignee=self.user)

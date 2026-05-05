@@ -36,11 +36,12 @@ except ImportError:
 
 from django.conf import settings
 from django.db import models, transaction
+from django.utils import timezone
 
 from .dependencies import DepStatus, check_deps
 from .execution.utils import resolve_working_dir
 from .kanban_ordering import move_task
-from .models import Task, TaskComment, TaskHistory, TaskStatus
+from .models import CommentType, Task, TaskComment, TaskHistory, TaskStatus
 from .scheduling import maybe_finalize_schedule_run
 from .utils.logger import setup_logger
 
@@ -224,20 +225,57 @@ def execute_single_task(task_id, run_token=None):
         logger.info("Task %s status already changed to %s by odin", task_id, task.status)
         return
 
-    # Odin didn't update — set final status ourselves
-    if exit_code == 0:
+    # Check for a user-requested stop that landed in metadata before the
+    # process exited. The stop_execution endpoint writes these flags *before*
+    # signalling the process, so we MUST honor them here — this is not a
+    # failure, it is a deliberate stop, and we route the task to the user's
+    # target status instead of FAILED.
+    metadata = dict(task.metadata or {})
+    pending_stop_target = metadata.get("pending_stop_target")
+    guard_honored = bool(metadata.get("ignore_execution_results") and pending_stop_target)
+
+    if guard_honored:
+        new_status = pending_stop_target
+        actor = metadata.get("pending_stop_updated_by") or "odin+dag-executor@system"
+        stop_reason = metadata.get("pending_stop_reason") or "user_stop"
+        verb = "Stopped"
+        excerpt = ""
+    elif exit_code == 0:
         new_status = TaskStatus.REVIEW
+        actor = "odin+dag-executor@system"
         verb = "Completed"
+        excerpt = ""
     else:
         new_status = TaskStatus.FAILED
+        actor = "odin+dag-executor@system"
         verb = "Failed"
+        excerpt = _read_log_tail(log_file)
 
     task.kanban_position = move_task(task, target_status=new_status, target_index=None)
     task.status = new_status
-    metadata = dict(task.metadata or {})
     metadata.pop("active_execution", None)
-    excerpt = _read_log_tail(log_file) if new_status == TaskStatus.FAILED else ""
-    if new_status == TaskStatus.FAILED:
+
+    if guard_honored:
+        # We've applied the user's intent — clear the pending_* keys so they
+        # don't leak into a future execution. Leave ignore_execution_results
+        # and stopped_run_token intact so any late execution_result webhook
+        # still gets discarded by downstream guards.
+        metadata.pop("pending_stop_target", None)
+        metadata.pop("pending_stop_updated_by", None)
+        metadata.pop("pending_stop_reason", None)
+        metadata["stop_generation"] = int(metadata.get("stop_generation", 0) or 0) + 1
+        metadata["last_stop_request"] = {
+            "actor": actor,
+            "target_status": new_status,
+            "reason": stop_reason,
+            "at": timezone.now().isoformat(),
+            "origin": "taskit_dag_executor",
+        }
+        logger.info(
+            "[task:%s] User stop honored in dag_executor: target=%s actor=%s",
+            task_id, new_status, actor,
+        )
+    elif new_status == TaskStatus.FAILED:
         failure_type, reason = _classify_failure(exit_code, failure_stage, excerpt)
         metadata["last_failure_type"] = failure_type
         metadata["last_failure_reason"] = reason
@@ -246,6 +284,7 @@ def execute_single_task(task_id, run_token=None):
             "[task:%s] Fallback failure synthesized: type=%s stage=%s reason=%s",
             task_id, failure_type, failure_stage, reason[:200],
         )
+
     task.metadata = metadata
     task.save(update_fields=["status", "kanban_position", "metadata", "last_updated_at"])
 
@@ -255,21 +294,30 @@ def execute_single_task(task_id, run_token=None):
         field_name="status",
         old_value=TaskStatus.EXECUTING,
         new_value=new_status,
-        changed_by="odin+dag-executor@system",
+        changed_by=actor,
     )
 
     # Merge is deferred until reflection passes (REVIEW → TESTING) so that
     # reflection-driven re-executions are included in the spec branch.
     # See views.py _merge_task_on_reflection_pass().
 
-    if new_status == TaskStatus.REVIEW:
+    if guard_honored:
+        TaskComment.objects.create(
+            task=task,
+            schedule_run=task.current_schedule_run,
+            author_email=actor,
+            author_label="taskit-dag-executor",
+            content=f"Execution stopped by user. Status changed to {new_status}.",
+            comment_type=CommentType.STATUS_UPDATE,
+        )
+    elif new_status == TaskStatus.REVIEW:
         from .views import _trigger_auto_reflection
         _trigger_auto_reflection(task)
 
     # On failure, preserve the worktree so a human can inspect it.
     # The branch is already preserved by not merging.
 
-    if new_status == TaskStatus.FAILED:
+    if not guard_honored and new_status == TaskStatus.FAILED:
         failure_type = metadata.get("last_failure_type", "agent_execution_failure")
         reason = metadata.get("last_failure_reason", f"odin exec exited with code {exit_code}")
         body = [
