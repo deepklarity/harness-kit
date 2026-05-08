@@ -19,8 +19,25 @@ from unittest.mock import patch
 
 from .base import APITestCase
 from tasks.models import (
-    ReflectionReport, ReflectionStatus, TaskStatus,
+    ReflectionReport, ReflectionStatus, TaskStatus, User, UserRole,
 )
+
+
+def _ensure_claude_reviewer():
+    """Create a claude agent User with available_models so _find_first_available_reviewer
+    can return a real reviewer. Required after the auto-reflection availability check
+    was added to _trigger_auto_reflection.
+    """
+    User.objects.get_or_create(
+        email="claude@odin.agent",
+        defaults={
+            "name": "Claude",
+            "role": UserRole.AGENT,
+            "available_models": [
+                {"name": "claude-sonnet-4-5-20250929", "is_default": True},
+            ],
+        },
+    )
 
 
 class TestAutoReflectionViaUpdate(APITestCase):
@@ -29,6 +46,7 @@ class TestAutoReflectionViaUpdate(APITestCase):
     def setUp(self):
         super().setUp()
         self.board = self.make_board()
+        _ensure_claude_reviewer()
 
     def _update_status(self, task_id, new_status, updated_by="admin@test.com"):
         return self.client.put(
@@ -196,6 +214,7 @@ class TestAutoReflectionViaExecutionResult(APITestCase):
     def setUp(self):
         super().setUp()
         self.board = self.make_board()
+        _ensure_claude_reviewer()
 
     def _post_execution_result(self, task_id, success=True, status="REVIEW"):
         return self.client.post(

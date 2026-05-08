@@ -1818,6 +1818,7 @@ export function TaskDetailModal({
                 <ReflectionModal
                     taskId={task.id}
                     taskIdShort={task.idShort}
+                    agents={allMembers.filter(m => m.role === 'AGENT' || m.email.endsWith('@odin.agent'))}
                     onClose={() => setShowReflectionModal(false)}
                     onSubmit={handleTriggerReflection}
                 />

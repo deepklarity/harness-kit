@@ -148,7 +148,10 @@ class ClaudeHarness(BaseHarness):
             self._current_pid = None
             meta = {"usage": usage} if usage else {}
             if proc.returncode == 0:
-                agent_success, agent_error = validate_odin_status(stdout_text)
+                if context.get("validate_status", True):
+                    agent_success, agent_error = validate_odin_status(stdout_text)
+                else:
+                    agent_success, agent_error = True, None
                 return TaskResult(
                     success=agent_success,
                     output=stdout_text,

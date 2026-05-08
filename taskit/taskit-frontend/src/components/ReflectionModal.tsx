@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
-import type { ReflectionRequest } from '../types';
+import { useEffect, useMemo, useState } from 'react';
+import type { Member, ReflectionRequest } from '../types';
 import { useService } from '../contexts/ServiceContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -12,18 +11,10 @@ import { Sparkles } from 'lucide-react';
 interface ReflectionModalProps {
     taskId: string;
     taskIdShort: number;
+    agents: Member[];
     onClose: () => void;
     onSubmit: (params: ReflectionRequest) => Promise<void>;
 }
-
-const AGENTS = ['claude', 'gemini', 'codex', 'qwen'];
-
-const DEFAULT_MODELS: Record<string, string> = {
-    claude: 'claude-opus-4-6',
-    gemini: 'gemini-2.5-pro',
-    codex: 'codex-5.2',
-    qwen: 'coder-model',
-};
 
 const CONTEXT_OPTIONS = [
     { key: 'description', label: 'Description' },
@@ -33,10 +24,32 @@ const CONTEXT_OPTIONS = [
     { key: 'metadata', label: 'Metadata (model, tokens, duration)' },
 ];
 
-export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: ReflectionModalProps) {
+function getDefaultModel(agent: Member | undefined): string {
+    if (!agent || !agent.availableModels || agent.availableModels.length === 0) return '';
+    return agent.availableModels.find(m => m.is_default)?.name || agent.availableModels[0].name;
+}
+
+export function ReflectionModal({ taskId, taskIdShort, agents, onClose, onSubmit }: ReflectionModalProps) {
     const service = useService();
-    const [agent, setAgent] = useState('claude');
-    const [model, setModel] = useState(DEFAULT_MODELS.claude);
+
+    // Only these agents are supported as reflection reviewers.
+    const REFLECTION_ALLOWED_AGENTS = new Set(['claude', 'gemini', 'codex']);
+    const reviewerAgents = useMemo(
+        () => agents.filter(
+            a => a.availableModels && a.availableModels.length > 0
+                && REFLECTION_ALLOWED_AGENTS.has(a.username.toLowerCase())
+        ),
+        [agents],
+    );
+
+    const [agentUsername, setAgentUsername] = useState<string>(() => reviewerAgents[0]?.username ?? '');
+    const selectedAgent = useMemo(
+        () => reviewerAgents.find(a => a.username === agentUsername),
+        [reviewerAgents, agentUsername],
+    );
+    const availableModels = selectedAgent?.availableModels ?? [];
+
+    const [model, setModel] = useState<string>(() => getDefaultModel(reviewerAgents[0]));
     const [forcedProviderLabel, setForcedProviderLabel] = useState('');
     const [isForcedProvider, setIsForcedProvider] = useState(false);
     const [customPrompt, setCustomPrompt] = useState('');
@@ -52,7 +65,7 @@ export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: Refl
                 if (!active || !status.enabled || !status.provider || !status.model) return;
                 setIsForcedProvider(true);
                 setForcedProviderLabel(`${status.provider}/${status.model}`);
-                setAgent(status.provider);
+                setAgentUsername(status.provider);
                 setModel(status.model);
             })
             .catch(() => {
@@ -63,9 +76,16 @@ export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: Refl
         return () => { active = false; };
     }, [service, taskId]);
 
+    // When the agent changes (and we're not in forced-provider mode), default to that agent's
+    // default model. Avoid clobbering the model selection that was set from forced-provider.
+    useEffect(() => {
+        if (isForcedProvider) return;
+        const next = getDefaultModel(selectedAgent);
+        setModel(next);
+    }, [selectedAgent, isForcedProvider]);
+
     const handleAgentChange = (newAgent: string) => {
-        setAgent(newAgent);
-        setModel(DEFAULT_MODELS[newAgent] || '');
+        setAgentUsername(newAgent);
     };
 
     const toggleContext = (key: string) => {
@@ -78,7 +98,7 @@ export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: Refl
         setIsSubmitting(true);
         try {
             await onSubmit({
-                reviewer_agent: agent,
+                reviewer_agent: agentUsername,
                 reviewer_model: model,
                 custom_prompt: customPrompt || undefined,
                 context_selections: contextSelections,
@@ -126,13 +146,13 @@ export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: Refl
                             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
                                 Agent
                             </label>
-                            <Select value={agent} onValueChange={handleAgentChange} disabled={isForcedProvider}>
+                            <Select value={agentUsername} onValueChange={handleAgentChange} disabled={isForcedProvider}>
                                 <SelectTrigger className="h-9">
-                                    <SelectValue />
+                                    <SelectValue placeholder="Select agent..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {AGENTS.map(a => (
-                                        <SelectItem key={a} value={a}>{a}</SelectItem>
+                                    {reviewerAgents.map(a => (
+                                        <SelectItem key={a.username} value={a.username}>{a.username}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
@@ -141,13 +161,26 @@ export function ReflectionModal({ taskId, taskIdShort, onClose, onSubmit }: Refl
                             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
                                 Model
                             </label>
-                            <Input
-                                value={model}
-                                onChange={e => setModel(e.target.value)}
-                                placeholder="e.g. claude-opus-4-6"
-                                className="h-9 font-mono text-sm"
-                                disabled={isForcedProvider}
-                            />
+                            {availableModels.length > 0 ? (
+                                <Select value={model} onValueChange={setModel} disabled={isForcedProvider}>
+                                    <SelectTrigger className="h-9">
+                                        <SelectValue placeholder="Select model..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {availableModels.map(m => (
+                                            <SelectItem key={m.name} value={m.name}>
+                                                <span className="font-mono text-sm">
+                                                    {m.name}{m.is_default ? ' (default)' : ''}
+                                                </span>
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            ) : (
+                                <p className="text-xs text-muted-foreground mt-2">
+                                    No models configured for this agent.
+                                </p>
+                            )}
                         </div>
                     </div>
                     {isForcedProvider && (

@@ -628,6 +628,9 @@ class SpecDiagnosticSerializer(serializers.ModelSerializer):
         return compute_spec_cost_summary(obj.tasks.all())
 
 
+REFLECTION_ALLOWED_AGENTS = {"claude", "gemini", "codex"}
+
+
 class ReflectionRequestSerializer(serializers.Serializer):
     reviewer_agent = serializers.CharField(default="claude")
     reviewer_model = serializers.CharField(default="claude-opus-4-6")
@@ -638,6 +641,14 @@ class ReflectionRequestSerializer(serializers.Serializer):
         default=["description", "comments", "execution_result", "dependencies", "metadata"],
     )
     requested_by = serializers.EmailField(required=False, default="")
+
+    def validate_reviewer_agent(self, value):
+        if (value or "").strip().lower() not in REFLECTION_ALLOWED_AGENTS:
+            allowed = ", ".join(sorted(REFLECTION_ALLOWED_AGENTS))
+            raise serializers.ValidationError(
+                f"Agent '{value}' is not supported as a reflection reviewer. Allowed: {allowed}."
+            )
+        return value
 
 
 class UserIdeSettingUpdateSerializer(serializers.Serializer):

@@ -565,6 +565,10 @@ def reflect_task(
             "model": model,
             "trace_file": trace_file,
             "output_file": output_file,
+            # Reflection prompts ask for ### Quality Assessment ... ### Verdict,
+            # not the -------ODIN-STATUS------- envelope. Skip envelope
+            # validation so a clean reviewer run isn't reported as failed.
+            "validate_status": False,
         }
 
         # 5. Execute reviewer via harness

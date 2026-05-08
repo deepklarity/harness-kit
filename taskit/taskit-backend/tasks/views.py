@@ -25,7 +25,7 @@ from .kanban_ordering import KANBAN_COLUMNS, get_statuses_for_column, move_task
 from .models import (
     Board, BoardMembership, CommentAttachment, CommentType, Label,
     ReflectionReport, ReflectionStatus, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
-    TaskComment, TaskHistory, TaskSchedule, TaskScheduleRun, TaskStatus, User, UserSetting,
+    TaskComment, TaskHistory, TaskSchedule, TaskScheduleRun, TaskStatus, User, UserRole, UserSetting,
 )
 from .scheduling import (
     compute_schedule_next_run,
@@ -104,13 +104,48 @@ WEEKDAY_KEYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 
 
+REFLECTION_PREFERRED_AGENTS = ["claude", "gemini", "codex"]
+
+
+def _find_first_available_reviewer(board=None):
+    """Return (agent_name, model_name) for the first allowed reviewer with models.
+
+    Looks at User rows with role=AGENT (email ends with @odin.agent) and picks
+    the first one in REFLECTION_PREFERRED_AGENTS order that has at least one
+    available_model. If the chosen agent is "claude" and the board has a
+    reflection_model override, that override is preferred over the user's
+    own default model (preserves previous board.reflection_model behavior).
+    Returns (None, None) if no allowed reviewer is available.
+    """
+    agent_users = User.objects.filter(role=UserRole.AGENT, email__iendswith="@odin.agent")
+    by_agent = {}
+    for u in agent_users:
+        local = u.email.split("@")[0]
+        name = local.split("+")[0].lower()
+        if name not in by_agent and u.available_models:
+            by_agent[name] = u
+
+    for agent in REFLECTION_PREFERRED_AGENTS:
+        u = by_agent.get(agent)
+        if not u:
+            continue
+        models = u.available_models or []
+        if agent == "claude" and board and getattr(board, "reflection_model", None):
+            return agent, board.reflection_model
+        default = next((m.get("name") for m in models if m.get("is_default")), None)
+        if not default and models:
+            default = models[0].get("name")
+        if default:
+            return agent, default
+
+    return None, None
+
+
 def _reflection_reviewer_defaults(board=None):
     selection = get_forced_provider_selection()
     if selection.enabled:
         return selection.provider, selection.model
-    if board and board.reflection_model:
-        return "claude", board.reflection_model
-    return "claude", "claude-sonnet-4-5-20250929"
+    return _find_first_available_reviewer(board=board)
 
 
 def _normalize_directory_name(directory_name):
@@ -189,6 +224,14 @@ def _trigger_auto_reflection(task):
         return
 
     reviewer_agent, reviewer_model = _reflection_reviewer_defaults(board=task.board)
+    if not reviewer_agent or not reviewer_model:
+        logger.info(
+            "[task:%s] Skipping auto-reflection: no reviewer agent (%s) is available — dispatching merge+advance directly",
+            task.id, "/".join(REFLECTION_PREFERRED_AGENTS),
+        )
+        _merge_task_on_reflection_pass(task)
+        return
+
     report = ReflectionReport.objects.create(
         task=task,
         reviewer_agent=reviewer_agent,
