@@ -221,6 +221,22 @@ class TestCodexHarnessMcpFlags:
         cmd = harness.build_execute_command("do something", {})
         assert "--json" in cmd
 
+    def test_default_uses_bypass_flag_not_deprecated_full_auto(self, codex_config):
+        """Default execute_args must use --dangerously-bypass-approvals-and-sandbox.
+
+        codex 0.128.0 deprecated --full-auto and remapped it to
+        --sandbox workspace-write, which always invokes bwrap. On hosts where
+        AppArmor restricts unprivileged user namespaces (Ubuntu 23.10+ default),
+        bwrap fails with `RTM_NEWADDR: Operation not permitted` before any
+        command runs, and codex also cancels MCP calls through the same gate.
+        --dangerously-bypass-approvals-and-sandbox is the only flag that skips
+        both the sandbox setup and the MCP/shell approval gate.
+        """
+        harness = CodexHarness(codex_config)
+        cmd = harness.build_execute_command("do something", {})
+        assert "--dangerously-bypass-approvals-and-sandbox" in cmd
+        assert "--full-auto" not in cmd
+
 
 # ── MCP config generation (orchestrator) ──────────────────────
 

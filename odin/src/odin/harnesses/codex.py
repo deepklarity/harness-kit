@@ -25,7 +25,7 @@ class CodexHarness(BaseHarness):
 
     def build_execute_command(self, prompt: str, context: dict) -> list[str] | None:
         cmd = [self._cli, "exec", "--skip-git-repo-check", "--json"]
-        extra = self.config.execute_args or "--full-auto"
+        extra = self.config.execute_args or "--dangerously-bypass-approvals-and-sandbox"
         cmd.extend(shlex.split(extra))
         if context.get("model"):
             cmd.extend(["--model", context["model"]])
