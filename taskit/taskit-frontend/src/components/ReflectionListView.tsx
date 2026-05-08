@@ -109,7 +109,7 @@ export function ReflectionListView({ onTaskClick, boardName }: ReflectionListVie
                         <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="ALL">All Status</SelectItem>
+                        <SelectItem value="ALL">All Statuses</SelectItem>
                         <SelectItem value="PENDING">Pending</SelectItem>
                         <SelectItem value="RUNNING">Running</SelectItem>
                         <SelectItem value="COMPLETED">Completed</SelectItem>

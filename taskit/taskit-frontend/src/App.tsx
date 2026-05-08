@@ -415,9 +415,30 @@ function App() {
         if (value === ALL_BOARDS_ID) {
             updateSearchParam('board', null);
             navigate('/settings?tab=boards');
-        } else {
-            updateSearchParam('board', value);
+            return;
         }
+
+        // Spec detail/debug pages belong to a single board. When switching
+        // boards, drop back to the new board's specs list instead of staying
+        // on the old board's spec.
+        if (/^\/specs\/[^/]+/.test(location.pathname)) {
+            navigate(`/specs?board=${value}`);
+            return;
+        }
+
+        // Same for reflection detail pages — a report belongs to one board.
+        if (/^\/reflections\/[^/]+/.test(location.pathname)) {
+            navigate(`/reflections?board=${value}`);
+            return;
+        }
+
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('board', value);
+            next.delete('created_from');
+            next.delete('created_to');
+            return next;
+        }, { replace: true });
     };
 
     const handleNavChange = (value: string) => {
@@ -763,6 +784,7 @@ function App() {
                                 onTaskMove={handleKanbanTaskMove}
                                 onStopExecution={handleStopExecution}
                                 onDeleteTask={handleDeleteTask}
+                                onCreateSpec={() => openCreateModal('spec')}
                             />
                         } />
                         {/* Backwards-compat redirects */}
@@ -779,7 +801,7 @@ function App() {
                                 <SpecsPage selectedBoard={boardFilter} refreshKey={refreshKey} currentBoard={currentBoard} onSpecClick={(s: Spec) => {
                                     const board = searchParams.get('board');
                                     navigate(board ? `/specs/${s.id}?board=${board}` : `/specs/${s.id}`);
-                                }} onDataChange={() => setRefreshKey(k => k + 1)} />
+                                }} onDataChange={() => setRefreshKey(k => k + 1)} onCreateSpec={() => openCreateModal('spec')} />
                             </>
                         } />
                         <Route path="/specs/:specId" element={

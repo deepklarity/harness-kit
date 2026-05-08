@@ -17,9 +17,10 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, Terminal, Trash2 , ExternalLink} from 'lucide-react';
+import { Loader2, Plus, Trash2 , ExternalLink} from 'lucide-react';
 import { formatCost } from '@/utils/costEstimation';
-import { OdinGuideModal, OdinGuideContent } from '@/components/OdinGuideModal';
+import { OdinGuideModal } from '@/components/OdinGuideModal';
+import { BoardEmptyState } from '@/components/BoardEmptyState';
 import { CreateSpecModal } from '@/components/CreateSpecModal';
 import { FilterBar, MultiSelectFilter, PaginationControls, SearchBar, SortControl, DateRangeFilter } from '@/components/filters';
 
@@ -29,6 +30,7 @@ interface SpecsPageProps {
     currentBoard?: Board | null;
     onSpecClick: (spec: Spec) => void;
     onDataChange?: () => void;
+    onCreateSpec?: () => void;
 }
 
 function splitParam(value: string | null): string[] {
@@ -36,7 +38,7 @@ function splitParam(value: string | null): string[] {
     return value.split(',').map(v => v.trim()).filter(Boolean);
 }
 
-export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecClick, onDataChange }: SpecsPageProps) {
+export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecClick, onDataChange, onCreateSpec }: SpecsPageProps) {
     const service = useService();
     const { toast } = useToast();
     const navigate = useNavigate();
@@ -231,21 +233,10 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
             {loading ? (
                 <div className="text-sm text-muted-foreground py-8">Loading specs...</div>
             ) : isEmpty ? (
-                <Card className="max-w-lg mx-auto mt-8">
-                    <CardContent className="p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                            <Terminal className="size-5 text-muted-foreground" />
-                            <h3 className="text-base font-semibold">No specs yet</h3>
-                        </div>
-                        <p className="text-sm text-muted-foreground mb-4">
-                            Create a spec from your terminal and it will appear here automatically.
-                        </p>
-                        <OdinGuideContent
-                            workingDir={currentBoard?.workingDir}
-                            needsInit={!!currentBoard && !currentBoard.odinInitialized}
-                        />
-                    </CardContent>
-                </Card>
+                <BoardEmptyState
+                    onCreateSpec={() => onCreateSpec?.()}
+                    workingDir={currentBoard?.workingDir}
+                />
             ) : (
                 <>
                     <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5">

@@ -271,8 +271,10 @@ function DroppableColumn({
     const Icon = column.icon;
     const statusColor = getStatusColor(column.status);
     const isCollapsed = isFailed && failedCollapsed;
+    const matchStatuses = column.includeStatuses ?? [column.status];
+    const loadedInColumn = (allTasks ?? []).filter(t => matchStatuses.includes(t.currentStatus)).length;
     const displayCount = totalCount ?? tasks.length;
-    const hasMore = totalCount !== undefined && totalCount > tasks.length;
+    const hasMore = totalCount !== undefined && totalCount > loadedInColumn;
 
     return (
         <div className="flex-shrink-0 w-[280px]">
@@ -320,10 +322,10 @@ function DroppableColumn({
                                 <Button variant="ghost" size="sm" className="text-xs text-muted-foreground w-full"
                                     disabled={isLoadingMore}
                                     onClick={() => onLoadMore?.(column.status)}>
-                                    {isLoadingMore ? 'Loading...' : `Show ${totalCount! - tasks.length} more`}
+                                    {isLoadingMore ? 'Loading...' : `Show ${totalCount! - loadedInColumn} more`}
                                 </Button>
                             )}
-                            {!hasMore && tasks.length > COLUMN_TASK_LIMIT && (
+                            {!hasMore && loadedInColumn > COLUMN_TASK_LIMIT && (
                                 <Button variant="ghost" size="sm" className="text-xs text-muted-foreground w-full"
                                     onClick={() => onShowLess?.(column.status)}>
                                     Show less

@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import {
     BarChart3, LayoutDashboard, FileText, TrendingUp,
     Plus, LogOut, Settings,
-    Activity, Search, ChevronDown, Clock3, Sparkles, ListTodo, Gauge,
+    Activity, Search, ChevronDown, Clock3, Sparkles, ListTodo, Gauge, ScrollText,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -26,6 +26,7 @@ const VIEW_ROUTES: { id: ViewMode; path: string; label: string; icon: LucideIcon
     { id: 'overview', path: '/stats', label: 'Stats', icon: BarChart3 },
     { id: 'providers', path: '/providers', label: 'Providers', icon: Gauge },
     { id: 'analytics', path: '/analytics', label: 'Analytics', icon: TrendingUp },
+    { id: 'reflections', path: '/reflections', label: 'Reflections', icon: ScrollText },
 ];
 
 export { ALL_BOARDS_ID, VIEW_ROUTES };
@@ -54,7 +55,7 @@ export function AppHeader({
 }: AppHeaderProps) {
     const { user: authUser, authEnabled, logout } = useAuth();
     const [statsOpen, setStatsOpen] = useState(false);
-    const activeStatsView = VIEW_ROUTES.find(item => item.id === viewMode && ['overview', 'analytics', 'providers'].includes(item.id))
+    const activeStatsView = VIEW_ROUTES.find(item => item.id === viewMode && ['overview', 'analytics', 'providers', 'reflections'].includes(item.id))
         ?? VIEW_ROUTES.find(item => item.id === 'overview');
     const ActiveStatsIcon = activeStatsView?.icon ?? BarChart3;
 
@@ -138,7 +139,7 @@ export function AppHeader({
                                 size="sm"
                                 className={cn(
                                     "h-8 px-2.5 gap-1.5 text-xs font-medium transition-colors",
-                                    ['overview', 'analytics', 'providers'].includes(viewMode)
+                                    ['overview', 'analytics', 'providers', 'reflections'].includes(viewMode)
                                         ? "bg-muted text-foreground"
                                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                                 )}
@@ -191,6 +192,20 @@ export function AppHeader({
                                 >
                                     <Gauge className="size-3.5" />
                                     <span>Providers</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setStatsOpen(false);
+                                        onNavChange('reflections');
+                                    }}
+                                    className={cn(
+                                        "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
+                                        viewMode === 'reflections' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                                    )}
+                                >
+                                    <ScrollText className="size-3.5" />
+                                    <span>Reflections</span>
                                 </button>
                             </div>
                         </PopoverContent>

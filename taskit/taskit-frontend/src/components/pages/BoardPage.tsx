@@ -8,7 +8,7 @@ import { DependencyBoardView } from '@/components/DependencyBoardView';
 import { KanbanBoard } from '@/components/KanbanBoard';
 import { KanbanTaskSearch } from '@/components/KanbanTaskSearch';
 import { TimelineView } from '@/components/TimelineView';
-import { OdinGuideContent } from '@/components/OdinGuideModal';
+import { BoardEmptyState } from '@/components/BoardEmptyState';
 
 import { FilterBar, MultiSelectFilter, PaginationControls, SearchBar, SortControl, DateRangeFilter } from '@/components/filters';
 import { TaskList } from '@/components/TaskCard';
@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ClipboardList, Columns3, Calendar, GitBranch, Terminal } from 'lucide-react';
+import { ClipboardList, Columns3, Calendar, GitBranch } from 'lucide-react';
 import type { TaskSearchResult } from '@/services/integration/IntegrationService';
 import { didLeaveProgressStatus, markExecutionTransitionUnseen } from '@/utils/unseenStatusTransitions';
 
@@ -40,6 +40,7 @@ interface BoardPageProps {
     onTaskMove: (taskId: string, move: { status: string; targetIndex?: number }) => Promise<boolean>;
     onStopExecution: (taskId: string, targetStatus: string) => Promise<boolean>;
     onDeleteTask?: (taskId: string) => void;
+    onCreateSpec?: () => void;
 }
 
 // ─── View Toggle ────────────────────────────────────────────
@@ -296,7 +297,7 @@ function ListView({ selectedBoard, refreshKey = 0, memberMap, members, labels, o
 
 // ─── Kanban View ────────────────────────────────────────────
 
-function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap, members, labels, currentBoard, onTaskClick, onTaskMove, onStopExecution, onDeleteTask }: {
+function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap, members, labels, currentBoard, onTaskClick, onTaskMove, onStopExecution, onDeleteTask, onCreateSpec }: {
     selectedBoard?: string;
     refreshKey?: number;
     filteredMemberId?: string | null;
@@ -308,6 +309,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     onTaskMove: (taskId: string, move: { status: string; targetIndex?: number }) => Promise<boolean>;
     onStopExecution: (taskId: string, targetStatus: string) => Promise<boolean>;
     onDeleteTask?: (taskId: string) => void;
+    onCreateSpec?: () => void;
 }) {
     const service = useService();
 
@@ -319,7 +321,6 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     const scrolledTaskIdRef = useRef<string | null>(null);
 
     const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
-    const defaultsApplied = useRef(false);
     const hasLoadedOnce = useRef(false);
 
     const tasks = useMemo(() => Object.values(columnData).flatMap(c => c.tasks), [columnData]);
@@ -343,19 +344,6 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
             return next;
         }, { replace: true });
     }, [setSearchParams]);
-
-    useEffect(() => {
-        if (defaultsApplied.current) return;
-        defaultsApplied.current = true;
-        if (searchParams.has('created_from') || searchParams.has('created_to')) return;
-        const today = new Date();
-        setSearchParams(prev => {
-            const next = new URLSearchParams(prev);
-            next.set('created_from', format(subDays(today, 29), 'yyyy-MM-dd'));
-            next.set('created_to', format(today, 'yyyy-MM-dd'));
-            return next;
-        }, { replace: true });
-    }, [searchParams, setSearchParams]);
 
     const dateFrom = searchParams.get('created_from') || undefined;
     const dateTo = searchParams.get('created_to') || undefined;
@@ -502,6 +490,19 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     }, [setSearchParams]);
 
     const isEmpty = !loading && tasks.length === 0;
+    const boardHasTasks = (currentBoard?.taskCount ?? 0) > 0;
+    const isFilteredEmpty = isEmpty && boardHasTasks;
+    const showGetStarted = isEmpty && !isFilteredEmpty && !!currentBoard;
+
+    const clearDateFilter = useCallback(() => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.delete('created_from');
+            next.delete('created_to');
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
+
     const handleSearchSelect = useCallback((result: TaskSearchResult, scope: 'board' | 'global') => {
         setSearchParams(prev => {
             const next = new URLSearchParams(prev);
@@ -568,22 +569,23 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
             {error && <div className="text-sm text-destructive mb-3">{error}</div>}
             {loading ? (
                 <div className="text-sm text-muted-foreground py-8">Loading kanban...</div>
-            ) : isEmpty ? (
+            ) : isFilteredEmpty ? (
                 <Card className="max-w-lg mx-auto mt-8">
-                    <CardContent className="p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                            <Terminal className="size-5 text-muted-foreground" />
-                            <h3 className="text-base font-semibold">Get started with Odin</h3>
-                        </div>
+                    <CardContent className="p-6 text-center">
+                        <h3 className="text-base font-semibold mb-2">No tasks in this date range</h3>
                         <p className="text-sm text-muted-foreground mb-4">
-                            Create a spec from your terminal and tasks will appear here automatically.
+                            This board has tasks, but none were created between the selected dates.
                         </p>
-                        <OdinGuideContent
-                            workingDir={currentBoard?.workingDir}
-                            needsInit={!!currentBoard && !currentBoard.odinInitialized}
-                        />
+                        <Button size="sm" variant="outline" onClick={clearDateFilter}>
+                            Show all tasks
+                        </Button>
                     </CardContent>
                 </Card>
+            ) : showGetStarted ? (
+                <BoardEmptyState
+                    onCreateSpec={() => onCreateSpec?.()}
+                    workingDir={currentBoard?.workingDir}
+                />
             ) : (
                 <KanbanBoard
                     tasks={visibleTasks}
@@ -702,6 +704,7 @@ export function BoardPage({
     onTaskMove,
     onStopExecution,
     onDeleteTask,
+    onCreateSpec,
 }: BoardPageProps) {
     const [searchParams, setSearchParams] = useSearchParams();
     const rawView = searchParams.get('view');
@@ -751,6 +754,7 @@ export function BoardPage({
                     onTaskMove={onTaskMove}
                     onStopExecution={onStopExecution}
                     onDeleteTask={onDeleteTask}
+                    onCreateSpec={onCreateSpec}
                 />
             )}
             {view === 'timeline' && (

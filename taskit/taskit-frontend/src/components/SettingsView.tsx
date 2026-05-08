@@ -951,7 +951,16 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                                                     <React.Fragment key={board.id}>
                                                         <tr className={`hover:bg-muted/10 transition-colors ${isExpanded ? 'bg-muted/10' : ''}`}>
                                                             <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{board.id}</td>
-                                                            <td className="px-3 py-2 font-medium">{board.name}</td>
+                                                            <td className="px-3 py-2 font-medium">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => navigate(`/board?board=${board.id}`)}
+                                                                    className="text-left hover:text-primary hover:underline transition-colors"
+                                                                    title="Open kanban for this board"
+                                                                >
+                                                                    {board.name}
+                                                                </button>
+                                                            </td>
                                                             <td className="px-3 py-2">
                                                                 {board.isTrial && (
                                                                     <Badge variant="outline" className="text-[10px] gap-1 px-1.5 py-0 text-amber-600 border-amber-300 dark:text-amber-400 dark:border-amber-600">

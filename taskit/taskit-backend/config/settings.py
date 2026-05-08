@@ -50,17 +50,13 @@ MIDDLEWARE = [
     "tasks.middleware.TaskitAuthMiddleware",
 ]
 
-if AUTH_ENABLED:
-    CORS_ALLOW_ALL_ORIGINS = False
-    CORS_ALLOW_CREDENTIALS = True
-    CORS_ALLOWED_ORIGINS = [
-        item.strip()
-        for item in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:9200").split(",")
-        if item.strip()
-    ]
-else:
-    CORS_ALLOW_ALL_ORIGINS = True
-    CORS_ALLOW_CREDENTIALS = False
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    item.strip()
+    for item in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:9200").split(",")
+    if item.strip()
+]
 
 ROOT_URLCONF = "config.urls"
 
