@@ -88,6 +88,7 @@ class Board(models.Model):
     odin_initialized = models.BooleanField(default=False)
     skip_reflection = models.BooleanField(default=False)
     skip_proof = models.BooleanField(default=False)
+    auto_start_planned_tasks = models.BooleanField(default=False)
     reflection_model = models.CharField(max_length=255, null=True, blank=True)
     model_escalation_priority = models.JSONField(default=list, blank=True)
     escalation_enabled = models.BooleanField(default=True)

@@ -154,6 +154,7 @@ export interface Board {
     odinInitialized?: boolean;
     skipReflection?: boolean;
     skipProof?: boolean;
+    autoStartPlannedTasks?: boolean;
     reflectionModel?: string | null;
     modelEscalationPriority?: EscalationPriorityEntry[];
     escalationEnabled?: boolean;

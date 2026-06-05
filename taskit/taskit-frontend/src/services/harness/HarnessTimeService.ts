@@ -68,6 +68,7 @@ interface HarnessBoard {
     odin_initialized?: boolean;
     skip_reflection?: boolean;
     skip_proof?: boolean;
+    auto_start_planned_tasks?: boolean;
     reflection_model?: string | null;
     model_escalation_priority?: Array<{ agent_name: string; model_name: string }>;
     escalation_enabled?: boolean;
@@ -526,6 +527,7 @@ export class HarnessTimeService implements IntegrationService {
                 createdAt: b.created_at || new Date().toISOString(),
                 skipReflection: b.skip_reflection ?? false,
                 skipProof: b.skip_proof ?? false,
+                autoStartPlannedTasks: b.auto_start_planned_tasks ?? false,
                 reflectionModel: b.reflection_model || null,
                 modelEscalationPriority: b.model_escalation_priority || [],
                 escalationEnabled: b.escalation_enabled ?? true,
@@ -748,6 +750,7 @@ export class HarnessTimeService implements IntegrationService {
                 odinInitialized: b.odin_initialized || false,
                 skipReflection: b.skip_reflection ?? false,
                 skipProof: b.skip_proof ?? false,
+                autoStartPlannedTasks: b.auto_start_planned_tasks ?? false,
                 reflectionModel: b.reflection_model || null,
                 modelEscalationPriority: b.model_escalation_priority || [],
                 escalationEnabled: b.escalation_enabled ?? true,

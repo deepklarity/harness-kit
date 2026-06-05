@@ -224,6 +224,7 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
     const [currentSkip, setCurrentSkip] = useState(currentBoard?.skipReflection ?? false);
     const [currentModel, setCurrentModel] = useState(currentBoard?.reflectionModel || '');
     const [currentSkipProof, setCurrentSkipProof] = useState(currentBoard?.skipProof ?? false);
+    const [currentAutoStart, setCurrentAutoStart] = useState(currentBoard?.autoStartPlannedTasks ?? false);
     const [escalationPriority, setEscalationPriority] = useState<Array<{ agent_name: string; model_name: string }>>(
         currentBoard?.modelEscalationPriority || []
     );
@@ -238,6 +239,7 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
         setCurrentSkip(currentBoard?.skipReflection ?? false);
         setCurrentModel(currentBoard?.reflectionModel || '');
         setCurrentSkipProof(currentBoard?.skipProof ?? false);
+        setCurrentAutoStart(currentBoard?.autoStartPlannedTasks ?? false);
         setEscalationEnabled(currentBoard?.escalationEnabled ?? true);
         setFailureMaxRetries(currentBoard?.failureMaxRetries ?? 3);
 
@@ -507,6 +509,18 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
         }
     };
 
+    const handleCurrentBoardAutoStart = async (value: boolean) => {
+        if (!currentBoard) return;
+        setCurrentAutoStart(value);
+        try {
+            await service.updateBoard(currentBoard.id, { auto_start_planned_tasks: value });
+            toast({ title: 'Board updated' });
+        } catch {
+            setCurrentAutoStart(currentBoard.autoStartPlannedTasks ?? false);
+            toast({ title: 'Error', description: 'Failed to update auto-start setting.', variant: 'destructive' });
+        }
+    };
+
     const saveEscalationPriority = async (newList: Array<{ agent_name: string; model_name: string }>) => {
         if (!currentBoard) return;
         const prev = escalationPriority;
@@ -664,6 +678,23 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                                             <Switch
                                                 checked={currentSkipProof}
                                                 onCheckedChange={v => handleCurrentBoardProof(v)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="h-px bg-border" />
+
+                                    {/* Planning sub-section */}
+                                    <div>
+                                        <div className="text-sm font-medium mb-3">Planning</div>
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <div className="text-sm">Auto-start planned tasks</div>
+                                                <div className="text-xs text-muted-foreground mt-0.5">Tasks created by spec planning move straight to In Progress instead of waiting in To Do.</div>
+                                            </div>
+                                            <Switch
+                                                checked={currentAutoStart}
+                                                onCheckedChange={v => handleCurrentBoardAutoStart(v)}
                                             />
                                         </div>
                                     </div>

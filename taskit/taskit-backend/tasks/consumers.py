@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
-from .models import Spec, SpecComment, Task
+from .models import Spec, SpecComment, Task, TaskHistory, TaskStatus
 from .pty_session import PtySession
 
 logger = logging.getLogger(__name__)
@@ -304,6 +304,71 @@ class PlanningConsumer(AsyncWebsocketConsumer):
             pass
 
 
+def _auto_start_planned_tasks(spec: Spec) -> None:
+    """When the board's auto_start_planned_tasks flag is True, transition every
+    TODO task under this spec to IN_PROGRESS, write a TaskHistory record, and
+    dispatch execution for any task that has an assignee. No-op when the flag
+    is False, so existing boards retain current behavior.
+
+    Sync function so callers in async context wrap it via sync_to_async.
+    """
+    board = spec.board
+    if not board.auto_start_planned_tasks:
+        return
+
+    todo_tasks = list(Task.objects.filter(spec=spec, status=TaskStatus.TODO))
+    if not todo_tasks:
+        return
+
+    transitioned: list[Task] = []
+    histories: list[TaskHistory] = []
+    for task in todo_tasks:
+        try:
+            task.status = TaskStatus.IN_PROGRESS
+            task.save()
+            histories.append(TaskHistory(
+                task=task,
+                field_name="status",
+                old_value=TaskStatus.TODO,
+                new_value=TaskStatus.IN_PROGRESS,
+                changed_by="system@taskit",
+            ))
+            transitioned.append(task)
+        except Exception:
+            logger.exception(
+                "[auto_start] Failed to transition task %s to IN_PROGRESS", task.id,
+            )
+
+    if histories:
+        TaskHistory.objects.bulk_create(histories)
+
+    if not transitioned:
+        return
+
+    from .execution import get_strategy
+    strategy = get_strategy()
+    if strategy is None:
+        logger.warning(
+            "[auto_start] No execution strategy configured — %d tasks moved to "
+            "IN_PROGRESS but won't execute. Set ODIN_EXECUTION_STRATEGY in .env.",
+            len(transitioned),
+        )
+        return
+
+    for task in transitioned:
+        if not task.assignee_id:
+            logger.info(
+                "[auto_start] Task %s has no assignee — skipping execution trigger", task.id,
+            )
+            continue
+        try:
+            strategy.trigger(task)
+        except Exception:
+            logger.exception(
+                "[auto_start] Failed to trigger execution for task %s", task.id,
+            )
+
+
 async def _complete_planning(spec_pk_str: str, session: dict):
     """Merge odin-created tasks into the UI spec. Works whether a consumer
     is connected or not — if one is attached it receives the WS message."""
@@ -342,6 +407,14 @@ async def _complete_planning(spec_pk_str: str, session: dict):
         else:
             spec.status = Spec.STATUS_PLANNING_COMPLETE
         await spec.asave()
+
+        if spec.status == Spec.STATUS_PLANNING_COMPLETE:
+            try:
+                await sync_to_async(_auto_start_planned_tasks)(spec)
+            except Exception:
+                logger.exception(
+                    "[planning] Auto-start failed for spec_pk=%s — planning still complete", spec_pk_str,
+                )
     except Exception:
         logger.exception("[planning] Error in _complete_planning for spec_pk=%s", spec_pk_str)
         try:

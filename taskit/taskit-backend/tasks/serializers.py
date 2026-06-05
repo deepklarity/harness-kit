@@ -278,7 +278,7 @@ class BoardSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Board
-        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "skip_reflection", "skip_proof", "reflection_model", "model_escalation_priority", "escalation_enabled", "failure_max_retries", "created_at", "updated_at", "member_ids", "agents"]
+        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "skip_reflection", "skip_proof", "auto_start_planned_tasks", "reflection_model", "model_escalation_priority", "escalation_enabled", "failure_max_retries", "created_at", "updated_at", "member_ids", "agents"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_member_ids(self, obj):
