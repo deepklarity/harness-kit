@@ -88,13 +88,18 @@ while true; do
       next_hb=$(( now + hb_interval ))
     fi
   fi
+  oldprev="$prev"
   prev="$cur"
 
-  # per-task stall clock: reset on change, seed on first sight
+  # per-task stall clock: reset on change, seed on first sight.
+  # Compare against oldprev — prev was just overwritten with cur, so
+  # comparing against prev never detects a change and the clock never
+  # resets (a requeued task inherited its original clock and false-alarmed
+  # all shift).
   new_times=""
   for pair in $cur; do
     id="${pair%%:*}"
-    old=$(printf '%s\n' $prev | tr ' ' '\n' | grep "^$id:" | head -1)
+    old=$(printf '%s\n' $oldprev | tr ' ' '\n' | grep "^$id:" | head -1)
     seen=$(printf '%s\n' $task_times | tr ' ' '\n' | grep "^$id:" | head -1)
     if [ -z "$seen" ] || { [ -n "$old" ] && [ "$old" != "$pair" ]; }; then
       new_times="$new_times $id:$now"
