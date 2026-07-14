@@ -3,7 +3,7 @@ import { Activity, Loader2, Radar } from 'lucide-react';
 import { useService } from '@/contexts/ServiceContext';
 import { usePolling } from '@/hooks/usePolling';
 import { useToast } from '@/hooks/use-toast';
-import type { ProcessMonitorTask } from '@/types';
+import type { ProcessMonitorTask, ExecutorCapacity } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -47,6 +47,7 @@ export function ProcessMonitorModal({
     const [error, setError] = useState<string | null>(null);
     const [stoppingTaskId, setStoppingTaskId] = useState<number | null>(null);
     const [confirmTask, setConfirmTask] = useState<ProcessMonitorTask | null>(null);
+    const [capacity, setCapacity] = useState<ExecutorCapacity | null>(null);
 
     const loadRunningTasks = useCallback(async () => {
         if (!open) return;
@@ -67,12 +68,29 @@ export function ProcessMonitorModal({
         }
     }, [boardId, open, service]);
 
+    const loadCapacity = useCallback(async () => {
+        if (!open) return;
+        try {
+            const data = await service.fetchExecutorCapacity();
+            setCapacity(data);
+        } catch {
+            // ignore — capacity is decorative; keep last value
+        }
+    }, [open, service]);
+
     useEffect(() => {
         if (!open) return;
         void loadRunningTasks();
-    }, [open, refreshKey, loadRunningTasks]);
+        void loadCapacity();
+    }, [open, refreshKey, loadRunningTasks, loadCapacity]);
 
     usePolling(loadRunningTasks, {
+        enabled: open,
+        intervalMs: Number(import.meta.env.VITE_POLL_INTERVAL_MS || 15000),
+        immediate: false,
+    });
+
+    usePolling(loadCapacity, {
         enabled: open,
         intervalMs: Number(import.meta.env.VITE_POLL_INTERVAL_MS || 15000),
         immediate: false,
@@ -121,21 +139,41 @@ export function ProcessMonitorModal({
                                     {boardId ? `Board scoped: ${boardId}` : 'All boards'} · EXECUTING tasks only
                                 </DialogDescription>
                             </div>
-                            <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8"
-                                onClick={() => void loadRunningTasks()}
-                                disabled={loading}
-                            >
-                                {loading ? (
-                                    <>
-                                        <Loader2 className="size-3.5 animate-spin" /> Refreshing
-                                    </>
-                                ) : (
-                                    'Refresh'
+                            <div className="flex items-center gap-2">
+                                {capacity && (
+                                    <div
+                                        data-testid="capacity-readout"
+                                        data-capacity-state={capacity.running >= capacity.max ? 'saturated' : capacity.running > 0 ? 'partial' : 'idle'}
+                                        className={[
+                                            'inline-flex items-center gap-2 h-8 px-2.5 rounded-md border text-xs font-medium',
+                                            capacity.running >= capacity.max
+                                                ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                                                : capacity.running > 0
+                                                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                                    : 'border-border bg-muted/40 text-muted-foreground',
+                                        ].join(' ')}
+                                        title={`Sandbox capacity: ${capacity.running} running of ${capacity.max} max. Suggested ${capacity.suggested_max} for ~4 GB per sandbox.`}
+                                    >
+                                        <span className="text-[10px] uppercase tracking-wider opacity-70">Capacity</span>
+                                        <span className="font-mono tabular-nums">{capacity.running}/{capacity.max}</span>
+                                    </div>
                                 )}
-                            </Button>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8"
+                                    onClick={() => { void loadRunningTasks(); void loadCapacity(); }}
+                                    disabled={loading}
+                                >
+                                    {loading ? (
+                                        <>
+                                            <Loader2 className="size-3.5 animate-spin" /> Refreshing
+                                        </>
+                                    ) : (
+                                        'Refresh'
+                                    )}
+                                </Button>
+                            </div>
                         </div>
                     </DialogHeader>
 

@@ -1,0 +1,20 @@
+### Quality Assessment
+- MET: middleware uses TokenStore for new JWT path.
+- UNMET: legacy cookie path throws ImportError.
+- MET: new path tests pass.
+
+### Slop Detection
+None.
+
+### Actionable Improvements
+- Add TokenStore init for the cookie path.
+- Add a regression test.
+
+### Agent Optimization
+Token-light review; haiku handled this scope cleanly.
+
+### Quota / Resource Failure
+None.
+
+### Verdict
+NEEDS_WORK — partial refactor with a fixable import-time gap.

@@ -15,6 +15,65 @@ _DATE_SUFFIX_RE = re.compile(r"-\d{8}$")
 
 
 @functools.lru_cache(maxsize=1)
+def _agent_registry() -> dict:
+    """The full agents section of agent_models.json — including retired
+    agents/models kept for historical cost lookups (each flagged
+    ``"retired": true``). This is NOT the active lineup by itself; consult
+    get_active_agents() for that. Anything routing or defaulting
+    agents/models must consult this module, never DB copies (seedmodels
+    merges but does not prune) and never hardcoded lists (F45)."""
+    path = Path(__file__).resolve().parent.parent / "data" / "agent_models.json"
+    return json.loads(path.read_text()).get("agents", {})
+
+
+def get_active_agents() -> frozenset:
+    """Names of active/supported agents per agent_models.json.
+
+    Excludes agents flagged ``"retired": true`` — retired agents remain in
+    the registry (so historical tasks still price) but must never surface
+    in routing/UI as selectable.
+    """
+    return frozenset(
+        name for name, info in _agent_registry().items()
+        if not info.get("retired")
+    )
+
+
+def get_agent_default_model(agent_name: str) -> Optional[str]:
+    """Default model for an active agent per agent_models.json.
+
+    Resolution: model flagged is_default → agent's default_model key →
+    first listed model. None for unknown/retired agents or agents whose
+    only models are retired.
+    """
+    info = _agent_registry().get((agent_name or "").lower())
+    if not info or info.get("retired"):
+        return None
+    active_models = [m for m in info.get("models", []) if not m.get("retired")]
+    for model in active_models:
+        if model.get("is_default") and model.get("name"):
+            return model["name"]
+    if info.get("default_model"):
+        return info["default_model"]
+    return active_models[0].get("name") if active_models else None
+
+
+@functools.lru_cache(maxsize=1)
+def get_agent_cost_tiers() -> dict:
+    """Load each agent's cost_tier from agent_models.json.
+
+    Returns: {agent_name: cost_tier} e.g. {"claude": "high", "glm": "low"}.
+    Cached per-process (the file doesn't change at runtime).
+    """
+    path = Path(__file__).resolve().parent.parent / "data" / "agent_models.json"
+    data = json.loads(path.read_text())
+    return {
+        name: agent_info.get("cost_tier")
+        for name, agent_info in data.get("agents", {}).items()
+    }
+
+
+@functools.lru_cache(maxsize=1)
 def get_pricing_table() -> dict:
     """Load pricing data from agent_models.json as a flat dict.
 
@@ -169,4 +228,51 @@ def compute_spec_cost_summary(tasks, usage_by_task: dict | None = None) -> dict:
         "tokens_by_model": tokens_by_model,
         "total_duration_ms": round(total_duration_ms, 1),
         "tasks_with_unknown_cost": tasks_with_unknown_cost,
+    }
+
+
+def compute_spec_merge_summary(tasks) -> dict:
+    """Aggregate merge-attempt rollup across a spec's tasks (task #209).
+
+    Rolls up MergeAttempt rows the same way ``compute_spec_cost_summary``
+    rolls up ReflectionReport rows: one query, cost derived on read via
+    ``estimate_task_cost`` (never stored on the row).
+
+    Returns dict with: attempt_count, static_count, agent_count,
+    human_assisted_count, merge_cost_usd, mean_dispatch_lag_seconds
+    (None if no attempt captured a dispatch lag), conflicts_by_file.
+    """
+    from .models import MergeAttempt, MergeMode
+
+    task_ids = [t.id for t in tasks]
+    attempts = list(MergeAttempt.objects.filter(task_id__in=task_ids)) if task_ids else []
+
+    mode_counts = {MergeMode.STATIC: 0, MergeMode.AGENT: 0, MergeMode.HUMAN_ASSISTED: 0}
+    merge_cost = 0.0
+    lags = []
+    conflicts_by_file = {}
+
+    for attempt in attempts:
+        mode_counts[attempt.mode] = mode_counts.get(attempt.mode, 0) + 1
+
+        if attempt.agent_model:
+            usage = attempt.token_usage or {}
+            cost = estimate_task_cost(attempt.agent_model, usage.get("input_tokens"), usage.get("output_tokens"))
+            if cost is not None:
+                merge_cost += cost
+
+        if attempt.dispatched_at and attempt.started_at:
+            lags.append((attempt.started_at - attempt.dispatched_at).total_seconds())
+
+        for path in attempt.conflicting_files or []:
+            conflicts_by_file[path] = conflicts_by_file.get(path, 0) + 1
+
+    return {
+        "attempt_count": len(attempts),
+        "static_count": mode_counts[MergeMode.STATIC],
+        "agent_count": mode_counts[MergeMode.AGENT],
+        "human_assisted_count": mode_counts[MergeMode.HUMAN_ASSISTED],
+        "merge_cost_usd": round(merge_cost, 6),
+        "mean_dispatch_lag_seconds": round(sum(lags) / len(lags), 3) if lags else None,
+        "conflicts_by_file": conflicts_by_file,
     }

@@ -10,7 +10,7 @@ TaskIt is the isolated task-management backend. Odin communicates with it to cre
 
 ## Agent Harnesses
 
-Six agent harnesses are supported, split into CLI-based and API-based:
+Five agent harnesses are supported, split into CLI-based and API-based:
 
 ### CLI-based (subprocess execution)
 
@@ -21,7 +21,6 @@ These agents are invoked as subprocesses in non-interactive/pipe mode:
 | Claude | `claude`| `claude -p "prompt" --output-format text`         | high      |
 | Codex  | `codex` | `codex exec --skip-git-repo-check "prompt"`       | medium    |
 | Gemini | `gemini`| `gemini -p "prompt"`                              | low       |
-| Qwen   | `qwen`  | `qwen -p "prompt"`                                | low       |
 
 ### API-based (HTTP calls via httpx)
 

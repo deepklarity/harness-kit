@@ -1,213 +1,94 @@
 # Reflection Loop — Detailed Trace
 
+Line numbers verified against the spec branch. Backend paths under `taskit/taskit-backend/`, orchestrator/reviewer paths under `odin/`.
+
 ## 1. Manual reflection trigger
 
-**File**: `taskit/taskit-backend/tasks/views.py`
-**Function**: `TaskViewSet.reflect()` (line ~1167)
-**Called by**: `POST /tasks/:id/reflect/` (user action)
-**Calls**: `ReflectionReport.objects.create()`, `execute_reflection.delay()`
-
-Key logic:
-- Status gate: task must be REVIEW, DONE, or FAILED
-- Creates report with: reviewer_agent, reviewer_model, custom_prompt, context_selections, requested_by
-- Dispatches Celery task immediately
-
-Data in: `{"reviewer_agent": "claude", "reviewer_model": "claude-opus-4-6"}`
-Data out: ReflectionReport(status=PENDING), 202 Accepted
-
----
+**File**: `tasks/views.py`
+**Function**: `TaskViewSet.reflect()` — line ~3501 (`@action url_path="reflect"` at ~3500)
+Gates on `task.status in (REVIEW, DONE, FAILED)` (~3504), builds the report (from the serializer, or a forced provider), dispatches `execute_reflection.delay(report.id)` (~3532).
+Data out: `ReflectionReport(status=PENDING)`, 202 Accepted.
 
 ## 2. Auto-reflection trigger
 
-**File**: `taskit/taskit-backend/tasks/views.py`
-**Function**: `_trigger_auto_reflection(task)` (line 74)
-**Called by**: `dag_executor.py :: execute_single_task()` after setting REVIEW (line 246)
-**Calls**: `ReflectionReport.objects.create()`, `execute_reflection.delay()`
-
-Key logic:
-- Duplicate guard: checks for existing PENDING or RUNNING reflections on the task. Skips if one exists.
-- Hardcoded defaults: `reviewer_agent="claude"`, `reviewer_model="claude-sonnet-4-5-20250929"`
-- `requested_by="system@taskit"` distinguishes auto from manual
-- Context selections: description, comments, execution_result, dependencies, metadata
-
-Data in: task (already in REVIEW status)
-Data out: ReflectionReport(status=PENDING), Celery task dispatched
-
----
+**File**: `tasks/views.py`
+**Function**: `_trigger_auto_reflection(task)` — line ~277
+Called from **three** sites: `dag_executor.py :: execute_single_task()` (~607), `views.py` TaskViewSet update (~2862), `views.py` execution_result endpoint (~3397) — each when a task moves to REVIEW.
+- Duplicate guard: skips if a PENDING/RUNNING reflection already exists.
+- **Reviewer default is dynamic** — `_reflection_reviewer_defaults(board=task.board)` (~300) → `_find_first_available_reviewer()` (~123): available board-member agent from `REFLECTION_PREFERRED_AGENTS = ["gemini","codex","claude"]` (~109), randomized among the enabled set (`random.shuffle` ~194), each on its default/first `available_models` entry (~200). Board `reflection_model` or a forced-provider selection overrides (~175). `is_active` filter (~142) keeps retired providers out. **No `haiku` / `claude-sonnet-4-5-20250929` default exists in this path.**
+- Early exits that merge directly (no reviewer): `skip_reflection` (~283), "no reviewer available" (~301).
+- `requested_by="system@taskit"` distinguishes auto from manual.
 
 ## 3. Celery reflection execution
 
-**File**: `taskit/taskit-backend/tasks/dag_executor.py`
-**Function**: `execute_reflection(report_id)` (line 396)
-**Called by**: Celery (dispatched by either manual or auto trigger)
-**Calls**: `subprocess.run("odin reflect ...")`
+**File**: `tasks/dag_executor.py`
+**Function**: `execute_reflection(report_id)` — line ~1203
+- Guard: report must be PENDING (~1219); marks RUNNING (~1226).
+- Subprocess: `odin reflect <task_id> --report-id <id> --model <model> --agent <agent>` (~1234), run with `cwd=resolve_working_dir(task)` (~1232, 1256).
+- **Timeout = `DAG_EXECUTOR_REFLECTION_TIMEOUT_SECONDS`, default 1800s** (~1249) — *not* 300s.
+- Fallback if odin didn't PATCH (still RUNNING): FAILED on non-zero exit, else COMPLETED (~1274).
 
-Key logic:
-- Guards: report must be PENDING (line 412)
-- Marks RUNNING before subprocess (line 416)
-- Subprocess: `odin reflect <task_id> --report-id <id> --model <model> --agent <agent>`
-- 300s timeout (line 452)
-- Fallback: if odin didn't PATCH the report, sets COMPLETED (exit 0) or FAILED (exit != 0)
-
-Data in: report_id
-Data out: subprocess runs, odin PATCHes report directly
-
----
-
-## 4. Odin reflection orchestrator
+## 4. Odin reflection orchestrator + comment-assembly path
 
 **File**: `odin/src/odin/reflection.py`
-**Function**: `reflect_task()` (line ~238)
-**Called by**: `odin reflect` CLI command
-**Calls**: TaskIt API (GET task detail, PATCH report), harness.execute()
+**Function**: `reflect_task(task_id, report_id, model, agent, …)` — line ~553
+- Reviewer invoked via `harness.execute(prompt, context)` (~811, `get_harness` at ~806) with `read_only_workspace=True` (~800), `validate_status=False` (~794).
+- Prompt built by `build_reflection_prompt(task_context)` (~85, called ~759); report parsed by `parse_reflection_report(clean_output)` (~409, called ~857).
+- **Verdict extraction**: `parse_reflection_report` reads the `### Verdict` section, regex `^(PASS|NEEDS_WORK|FAIL)\b` (~482); unrecognized → `NEEDS_WORK` (~494); last-resort whole-output scan (~500); truly none → `verdict="ERROR"` (~516, the reviewer-failure sentinel). Values (convention, not a Django `choices=` enum): **PASS / NEEDS_WORK / FAIL**.
 
-Key logic:
-- Step 1: PATCH report status=RUNNING with assembled_prompt
-- Step 2: GET /tasks/:id/detail/ → gather task context
-  - Filters comments: skips status_update noise, CLI warnings, raw JSON
-  - Parses execution output via `extract_text_from_stream()` (JSONL → text)
-  - Truncates execution output to ~5000 chars
-- Step 3: `build_reflection_prompt(context)` — structured audit prompt
-  - Constraint-based: 5 exact section headers, exact verdict enum
-  - Agent runs in READ-ONLY mode (can grep/read, no file modifications)
-- Step 4: `harness.execute(prompt)` — reviewer agent runs
-- Step 5: `parse_reflection_report(output)` — extracts sections + verdict
-- Step 6: PATCH /reflections/:id/ with all results
+**The comment / context assembly** (what the reviewer actually sees), all in `reflect_task`:
+- `GET /tasks/:id/detail/` → `task_data` (~620); comments list (~627).
+- **Checkpoint detection** splits prior attempts from the current one: finds the latest `reflection`/`summary` comment (~632) and inserts a `--- CURRENT ATTEMPT (evaluate this) ---` separator (~646, ~667).
+- **Per-comment formatting**: `_format_comment_for_prompt(comment)` (~72) → clean + truncate (§5).
+- **Skip filters**: `Effective input` echoes (~657) and `{"type":"system"` hook JSON (~660) are dropped.
+- **Proof / screenshots**: `_extract_screenshot_urls()` (~358, called ~675) → `_download_screenshots()` (~374, called ~735); worktree staging `_stage_reflection_screenshots_for_workspace()` (~332).
+- **Execution output**: `raw_execution = metadata["full_output"]` → `extract_text_from_stream()` (~683).
+- Assembled `task_context` dict (~703); prompt built (~759); stored via `_patch_report({"status":"RUNNING","assembled_prompt":prompt})` (~764).
 
-Data in: task_id, report_id, model, agent
-Data out: PATCH with verdict (PASS/NEEDS_WORK/FAIL), sections, token usage
+## 5. Truncation / laundering / sanitization guards
 
----
+The assembled context and the reviewer's raw output both pass through cleaning guards so raw tool-stream noise, provider 429 dumps, and stutter never reach the reviewer or the stored report. Module constants: `_COMMENT_CHAR_LIMIT = 2000` (~25), `_NOISY_COMMENT_TYPES` (~27), `_NOISE_PATTERNS` (~28).
 
-## 5. Report result processing + status transitions
+| Guard | `reflection.py` location | What it does |
+|-------|--------------------------|--------------|
+| `_clean_comment_content()` | ~50 | Strips raw JSON lines and tool-stream noise patterns from non-proof comments |
+| `_truncate_comment_content()` | ~63 | Caps each noisy comment at 2000 chars, appends a `[truncated …]` marker |
+| `_format_comment_for_prompt()` | ~72 | Applies clean+truncate only to `_NOISY_COMMENT_TYPES`; proof comments pass through un-truncated (~79) |
+| Inline skip filters | ~657–661 | Drop "Effective input" echoes and system-hook JSON comments before assembly |
+| Execution-output cap | ~687 | `raw_execution[:5000]` fallback when the stream can't be parsed |
+| `_strip_odin_envelopes()` | ~267 | Removes `-------ODIN-STATUS-------` envelope framing from reviewer output |
+| `_sanitize_reflection_output()` | ~286 | Strips ANSI codes, seeks to the first report header (dropping provider retry/429 dumps), normalizes headers, drops stack-trace/noise-prefixed lines |
+| `_deduplicate_summary()` | ~247 | Removes stuttered/repeated verdict-summary lines |
+| PATCH output caps | ~846, ~868 | `clean_output[:10000]` and `_truncate_trace(raw_jsonl, 50000)` (imported from orchestrator, ~21) |
 
-**File**: `taskit/taskit-backend/tasks/views.py`
-**Function**: `ReflectionReportViewSet.partial_update()` (line ~1280)
-**Called by**: Odin PATCH /reflections/:id/
-**Calls**: `TaskComment.objects.create()`, task status transitions
+There is no function literally named "launder" — the laundering role is served by `_sanitize_reflection_output`, `_clean_comment_content`, and `_strip_odin_envelopes`.
 
-Key logic:
-- Updates only fields explicitly sent in request
-- Sets `completed_at` on terminal status (COMPLETED/FAILED)
-- On COMPLETED with verdict_summary: posts reflection comment on task
-  - Comment type: REFLECTION
-  - Content: `**Reflection: <VERDICT>**\n\n<verdict_summary>`
-  - Attachment: `{type: "reflection", report_id, verdict}`
+## 6. Report result processing + status transitions
 
-### PASS verdict (lines ~1319-1342)
-- Guard: task must still be in REVIEW (refresh_from_db)
-- Transition: REVIEW → TESTING
-- TaskHistory with `changed_by="system@taskit"`
-- Downstream tasks now unblocked (TESTING is in COMPLETED_STATUSES)
+**File**: `tasks/views.py`
+**Function**: `ReflectionReportViewSet.partial_update()` — line ~3566 (odin PATCHes here)
+- Posts a `TaskComment(type=REFLECTION)` on COMPLETED + summary (~3589): `**Reflection: <VERDICT>**\n\n<verdict_summary>`, attachment `{type:"reflection", report_id, verdict}`.
 
-### NEEDS_WORK or FAIL verdict (lines ~1350-1410)
-- Guard: task must still be in REVIEW
-- Counts completed reflections: `ReflectionReport.objects.filter(task=task, status=COMPLETED).count()`
-- If count >= 3: REVIEW → FAILED + comment "Task failed after 3 reflection attempts without passing"
-- If count < 3:
-  1. Calls `_maybe_reassign_on_quota_failure(task, report)` — see §5a below
-  2. REVIEW → IN_PROGRESS
-  3. Fires execution strategy (triggers re-execution, now potentially with new agent)
+**PASS** (~3610): if the task is still REVIEW → `_merge_task_on_reflection_pass(task)` (`views.py` ~327) → `merge_task_on_reflection.delay(task.id)` (Celery, `dag_executor.py` ~1288) which merges the task branch, then `_advance_task_to_testing(task)` (`dag_executor.py` ~1478) sets TESTING (~1493). **PASS merges first, then advances — it is not a direct REVIEW→TESTING flip.**
 
----
+**NEEDS_WORK or FAIL** (~3620, guard `verdict in ("NEEDS_WORK","FAIL")` at ~3624 — **FAIL is not advisory**):
+- `completed_count = ReflectionReport.filter(status=COMPLETED).count()` (~3629).
+- `≥ 3` → REVIEW → FAILED + "failed after 3 reflection attempts" (~3633).
+- `< 3` → snapshot pre-rework agent/model (~3665), `_maybe_reassign_on_quota_failure(task, report)` (~3676, see §7), `_record_rework_continuity(...)` (~3683), REVIEW → IN_PROGRESS (~3692), re-trigger execution gated on `DAG_EXECUTOR_MAX_CONCURRENCY` (~3712); at capacity → `_set_dispatch_blocked_reason(task, "concurrency_cap_reached")` (~3720).
 
-## 5a. Quota failure detection and agent reassignment
+## 7. Quota-failure reassignment (cross-reference)
 
-**File**: `taskit/taskit-backend/tasks/views.py`
-**Functions**: `_is_quota_failure()` (~line 116), `_find_alternative_agent()` (~line 146), `_maybe_reassign_on_quota_failure()` (~line 196)
-**Called by**: Auto-advance block (§5) before status transition to IN_PROGRESS
-**Side effects**: Updates task.assignee + task.model_name, creates TaskHistory entries, creates TaskComment
+`_maybe_reassign_on_quota_failure()` (`views.py` ~616), `_is_quota_failure()` (~358), `_find_alternative_agent()` (~507). Quota keywords are imported from `failure_tagger.QUOTA_KEYWORDS` (~355), not an inline list. As merged in **W3.11**, this verifies real usage via `harness_usage_status` (95% threshold) before switching — 429-with-headroom backs off the same agent; genuine exhaustion reassigns to a same-cost-tier fallback.
 
-### Detection: `_is_quota_failure(task, report)`
+Full trace: **`../../quota-failover-reassignment/`**. Do not restate the branch logic here.
 
-Three sources, checked in priority order:
-1. **Reflection field**: `report.quota_failure` is non-empty and not `"none."` — set by the reviewer agent's `### Quota / Resource Failure` section
-2. **Task metadata**: `task.metadata["last_failure_type"] == "llm_call_failure"` AND `last_failure_reason` contains a quota keyword — set by orchestrator's `_classify_failure()` during execution
-3. **Verdict summary**: `report.verdict_summary` contains a quota keyword — fallback when the reviewer mentions it in justification but didn't fill the dedicated field
+## 8. Re-execution after NEEDS_WORK
 
-Keywords: `"quota"`, `"rate limit"`, `"rate_limit"`, `"429"`, `"too many requests"`, `"usage limit"`, `"out of quota"`, `"quota exceeded"`, `"quota_failure"`
+After NEEDS_WORK moves a task to IN_PROGRESS and re-fires the execution strategy, `orchestrator.exec_task()` (~1341) rebuilds the prompt via `_build_reflection_context()` (~1674) + `_build_self_context()` (~1734): the latest NEEDS_WORK reflection is prepended as issues to address, plus the task's own latest `summary` comment. Continuity of assignee/model across the rework is recorded by `_record_rework_continuity()` (`views.py` ~756).
 
-### Reassignment: `_find_alternative_agent(task)`
+**Known gap**: only NEEDS_WORK reflection feedback is injected — status_update comments, proof, and prior execution output are not forwarded into the re-execution prompt, so the agent sees the critique but not everything it previously produced.
 
-1. Queries `BoardMembership` for `role=AGENT` users on the same board, excluding current `task.assignee_id`
-2. Fallback: any `role=AGENT` user system-wide, excluding current assignee
-3. Picks first candidate (ordered by ID)
-4. Model: uses `agent.available_models[0]` — handles both `[{"name": "..."}]` and `["..."]` formats
+## 9. ReflectionReport model
 
-If no alternative exists: logs warning, posts "no alternative agent available" comment, returns without reassignment. Task retries with the same agent.
-
-### Mutation: `_maybe_reassign_on_quota_failure(task, report)`
-
-When quota failure is detected and an alternative agent is found:
-- `task.assignee = new_agent`, `task.model_name = new_model`
-- `task.save(update_fields=["assignee_id", "model_name"])`
-- TaskHistory for `"assignee"` (old_name → new_name)
-- TaskHistory for `"model"` (old_model → new_model, only if changed)
-- TaskComment: `"Quota/rate-limit failure detected for {old}. Reassigned to {new} for retry."`
-
-This runs BEFORE the status transition to IN_PROGRESS, so when execution fires, it uses the new agent.
-
-### Origin: how quota failures reach task metadata
-
-```
-odin/src/odin/orchestrator.py :: _classify_failure() (~line 1817)
-  → keyword match "rate|quota|token|429" → failure_type = "llm_call_failure"
-  → bundled into execution_payload → POST /tasks/{id}/execution_result/
-
-taskit/taskit-backend/tasks/views.py :: execution_result() (~line 1080)
-  → stores in task.metadata: last_failure_type, last_failure_reason, last_failure_origin
-```
-
-### Origin: how quota_failure field reaches the reflection report
-
-```
-odin/src/odin/reflection.py :: build_reflection_prompt()
-  → includes "### Quota / Resource Failure" section in audit prompt
-  → instructs reviewer to output "QUOTA_FAILURE: <agent>" or "None."
-
-odin/src/odin/reflection.py :: parse_reflection_report()
-  → extracts "quota / resource failure" header → result["quota_failure"]
-
-odin/src/odin/reflection.py :: reflect_task()
-  → PATCH /reflections/{id}/ includes quota_failure field
-```
-
----
-
-## 6. Re-execution after NEEDS_WORK
-
-After NEEDS_WORK moves a task to IN_PROGRESS and fires the execution strategy:
-
-- `celery_dag` strategy: no-op at trigger time; `poll_and_execute()` picks it up on next 5s cycle
-- `local` strategy: immediately spawns subprocess
-- DAG executor checks deps again (should still be READY since upstream hasn't changed)
-- Task moves to EXECUTING → agent reworks → REVIEW → auto-reflection triggers again
-
-### Context passed to agent on re-execution
-
-`orchestrator.exec_task()` builds the prompt with three context layers:
-
-1. **Reflection feedback** (partial fix, 2026-02-27): `_build_reflection_context()` finds the latest NEEDS_WORK reflection comment and prepends it as "Address ALL of the following issues before resubmitting". **Limitation**: Only NEEDS_WORK verdicts are injected — if a task is manually retried after FAIL, the feedback is not forwarded.
-
-2. **Self-context**: `_build_self_context()` includes latest `summary` comment + human notes after it. Returns empty if no summary exists (common on first retry).
-
-3. **Upstream context**: Latest single comment per completed dependency.
-
-**Known gap**: Status_update comments, proof submissions, and agent execution output from previous rounds are NOT included in the re-execution prompt. The agent sees reflection feedback (if NEEDS_WORK) but not what it actually produced or attempted. See `docs/solutions/architecture/exec-task-context-injection-gap-20260227.md` for the full analysis and remaining fix plan.
-
----
-
-## 7. ReflectionReport model
-
-**File**: `taskit/taskit-backend/tasks/models.py`
-
-Fields relevant to the flow:
-- `status`: PENDING → RUNNING → COMPLETED/FAILED
-- `verdict`: PASS, NEEDS_WORK, FAIL (string, max 20 chars)
-- `verdict_summary`: justification text
-- `improvements`: actionable items (max 5)
-- `quota_failure`: "QUOTA_FAILURE: <agent>" or "None." or empty (set by reviewer)
-- `task` (FK): links report to task
-- `requested_by`: "system@taskit" (auto) or user email (manual)
-
-No task metadata counter — loop count derived from completed report count in DB.
+**File**: `tasks/models.py`
+Relevant fields: `status` (PENDING→RUNNING→COMPLETED/FAILED), `verdict` (PASS/NEEDS_WORK/FAIL), `verdict_summary`, `improvements`, `quota_failure` (~445), `task` (FK), `requested_by`. No metadata counter — loop count is derived from the completed-report count.

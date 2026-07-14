@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -119,11 +119,6 @@ def _server_entry_gemini(env: dict) -> Dict:
     return {"taskit": {"command": "taskit-mcp", "env": env, "trust": True}}
 
 
-def _server_entry_qwen(env: dict) -> Dict:
-    """Return the taskit server dict for Qwen (with ``trust: true``)."""
-    return {"taskit": {"command": "taskit-mcp", "env": env, "trust": True}}
-
-
 def _server_entry_codex(env: dict) -> Dict:
     """Return the taskit TOML section lines as a dict (command + env)."""
     return {"taskit": {"command": "taskit-mcp", "env": env}}
@@ -149,11 +144,14 @@ def _server_entry_opencode(env: dict) -> Dict:
 _SERVER_ENTRY_MAP = {
     "claude": _server_entry_claude,
     "gemini": _server_entry_gemini,
-    "qwen": _server_entry_qwen,
     "codex": _server_entry_codex,
     "kilocode": _server_entry_kilocode,
     "minimax": _server_entry_opencode,
     "glm": _server_entry_opencode,
+    # agy (Google Antigravity) is gemini-cli's successor and writes its state
+    # dir to ~/.gemini (microsandbox.py::_CREDENTIAL_PATHS comment), so it
+    # reads the same .gemini/settings.json config — same entry (trust:true).
+    "agy": _server_entry_gemini,
 }
 
 
@@ -192,14 +190,6 @@ def format_gemini(env: dict) -> str:
     ``trust: true`` bypasses all tool-call confirmations so -p mode works.
     """
     return json.dumps({"mcpServers": _server_entry_gemini(env)}, indent=2)
-
-
-def format_qwen(env: dict) -> str:
-    """Qwen ``.qwen/settings.json`` format.
-
-    ``trust: true`` bypasses all tool-call confirmations so -p mode works.
-    """
-    return json.dumps({"mcpServers": _server_entry_qwen(env)}, indent=2)
 
 
 def format_codex(env: dict) -> str:
@@ -254,7 +244,7 @@ def format_claude_settings(mcps: List[str] | None = None) -> str:
     }, indent=2)
 
 
-def format_opencode(env: dict) -> str:
+def format_opencode(env: dict, sandboxed: bool = False) -> str:
     """OpenCode ``opencode.json`` format.
 
     OpenCode uses ``"environment"`` (not ``"env"``) for env vars,
@@ -263,8 +253,18 @@ def format_opencode(env: dict) -> str:
 
     ``permission`` with ``"allow"`` auto-approves MCP tools so they
     work in non-interactive ``--auto`` mode.
+
+    NOTE: do NOT blanket-allow ``external_directory`` on the HOST (tried and
+    reverted — finding F25): it unblocks git in linked worktrees but lets
+    agents roam the host filesystem (triggered macOS privacy prompts on
+    ~/Desktop). Pass ``sandboxed=True`` ONLY for VM-confined runs
+    (microsandbox/forkd): the guest FS contains nothing beyond what the
+    harness mounted, so the grant cannot reach the host — and without it
+    opencode auto-rejects worktree git/tool calls mid-run (F35).
     """
     permission = {t: "allow" for t in tool_names()}
+    if sandboxed:
+        permission.setdefault("external_directory", "allow")
     return json.dumps({
         "permission": permission,
         "mcp": _server_entry_opencode(env),
@@ -276,25 +276,28 @@ def format_opencode(env: dict) -> str:
 # ---------------------------------------------------------------------------
 
 # Agent name -> relative config path within working directory.
+# agy shares .gemini/settings.json with gemini (it is gemini-cli's successor
+# and writes state to ~/.gemini) — same sharing pattern as minimax+glm both
+# pointing at opencode.json. cli.py dedups on path so only one file is written.
 MCP_CONFIG_MAP: Dict[str, str] = {
     "claude":    ".mcp.json",
     "gemini":    ".gemini/settings.json",
-    "qwen":      ".qwen/settings.json",
     "codex":     ".codex/config.toml",
     "kilocode":  ".kilocode/mcp.json",
     "minimax":   "opencode.json",
     "glm":       "opencode.json",
+    "agy":       ".gemini/settings.json",
 }
 
 # Agent name -> formatter function.
 MCP_FORMATTERS: Dict[str, callable] = {
     "claude":    format_claude,
     "gemini":    format_gemini,
-    "qwen":      format_qwen,
     "codex":     format_codex,
     "kilocode":  format_kilocode,
     "minimax":   format_opencode,
     "glm":       format_opencode,
+    "agy":       format_gemini,
 }
 
 # Documents which CLIs require explicit tool approval and what config key
@@ -302,8 +305,21 @@ MCP_FORMATTERS: Dict[str, callable] = {
 AGENTS_WITH_TOOL_APPROVAL: Dict[str, str] = {
     "claude":    "permissions",     # .claude/settings.local.json -> permissions.allow
     "gemini":    "trust",           # .gemini/settings.json -> mcpServers.taskit.trust
-    "qwen":      "trust",           # .qwen/settings.json -> mcpServers.taskit.trust
     "kilocode":  "alwaysAllow",     # .kilocode/mcp.json -> mcpServers.taskit.alwaysAllow
     "minimax":   "permission",      # opencode.json -> permission
     "glm":       "permission",      # opencode.json -> permission
+    "agy":       "trust",           # .gemini/settings.json -> mcpServers.taskit.trust
 }
+
+# Single source of truth for paths the harness/MCP config generation writes
+# inside a worktree.  ``odin.worktree`` consumes this list to build the
+# worktree's ``.gitignore`` patterns, the auto-commit safety-net reset, and
+# the untracked-config cleanup.  Derived from ``MCP_CONFIG_MAP`` — adding a
+# new agent to the map automatically extends coverage.  Also includes
+# ``.claude`` (Claude's ``settings.local.json`` lives there) and ``*.orig``
+# (backup files from merge / overwrite that must never be committed).
+HARNESS_GENERATED_PATHS: Tuple[str, ...] = (
+    *dict.fromkeys(MCP_CONFIG_MAP.values()),
+    ".claude",
+    "*.orig",
+)

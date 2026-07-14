@@ -70,7 +70,7 @@ class TestDecomposeReturnsResult:
         mock_harness.execute = AsyncMock(return_value=fake_result)
 
         with patch("odin.orchestrator.get_harness", return_value=mock_harness):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 orch._decompose("plan prompt", str(odin_dirs["root"]), spec_id="sp_test_001")
             )
 
@@ -94,7 +94,7 @@ class TestDecomposeReturnsResult:
         mock_harness.execute_streaming = fake_streaming
 
         with patch("odin.orchestrator.get_harness", return_value=mock_harness):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 orch._decompose(
                     "plan prompt",
                     str(odin_dirs["root"]),
@@ -124,7 +124,7 @@ class TestDecomposeReturnsResult:
         mock_harness.execute = AsyncMock(return_value=fake_result)
 
         with patch("odin.orchestrator.get_harness", return_value=mock_harness):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 orch._decompose("plan prompt", str(odin_dirs["root"]), spec_id="sp_test_003")
             )
 

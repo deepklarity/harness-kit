@@ -1,4 +1,4 @@
-import type { IntegrationService, AuthState, DirectoryEntry, TaskSearchResult, StopExecutionResult } from '../integration/IntegrationService';
+import type { IntegrationService, AuthState, DirectoryEntry, TaskSearchResult, StopExecutionResult, TaskScheduleRunResult } from '../integration/IntegrationService';
 import type {
     AgentConfig,
     Board as DashBoard,
@@ -12,6 +12,7 @@ import type {
     Spec,
     SpecComment,
     SpecCommit,
+    SpecStory,
     SpecListQuery,
     Task as DashTask,
     TaskComment,
@@ -19,6 +20,7 @@ import type {
     TaskMutation,
     TimelineQuery,
     CommentType,
+    TaskEstimate,
     OdinStatusResponse,
     ReflectionReport,
     ReflectionRequest,
@@ -26,6 +28,7 @@ import type {
     ForcedProviderStatus,
     ProviderUsageResponse,
     AnalyticsCostSummary,
+    LeagueResponse,
     ProviderQuota,
     TaskSchedule,
     IdeOptions,
@@ -33,6 +36,11 @@ import type {
     TaskIdeOptions,
     KanbanColumnsResponse,
     KanbanLoadMoreResponse,
+    FactorySnapshot,
+    InboxSnapshot,
+    ExecutorCapacity,
+    ExecutorMaxConcurrency,
+    RoutingConfig,
 } from '../../types';
 
 export interface ParsedActor {
@@ -70,9 +78,13 @@ interface HarnessBoard {
     skip_proof?: boolean;
     auto_start_planned_tasks?: boolean;
     reflection_model?: string | null;
+    reflection_review_strategy?: Record<string, string> | null;
     model_escalation_priority?: Array<{ agent_name: string; model_name: string }>;
+    reviewer_order?: Array<{ agent_name: string; model_name: string }>;
     escalation_enabled?: boolean;
     failure_max_retries?: number;
+    routing_policy?: Record<string, unknown>;
+    allow_project_root_execution?: boolean;
     member_ids?: number[];
     agents?: AgentConfig[];
     tasks?: HarnessTask[];
@@ -142,6 +154,8 @@ interface HarnessTask {
     board_skip_reflection?: boolean;
     board_skip_proof?: boolean;
     board_escalation_enabled?: boolean;
+    needs_human?: boolean;
+    needs_human_reason?: string;
     schedule_summary?: {
         id: number;
         kind: 'ONE_TIME' | 'RECURRING';
@@ -226,10 +240,36 @@ interface HarnessSpec {
         total_duration_ms: number;
         tasks_with_unknown_cost: number;
     };
+    merge_summary?: {
+        attempt_count: number;
+        static_count: number;
+        agent_count: number;
+        human_assisted_count: number;
+        merge_cost_usd: number;
+        mean_dispatch_lag_seconds: number | null;
+        conflicts_by_file: Record<string, number>;
+    };
 }
 
 interface HarnessTaskDetail extends HarnessTask {
     spec_title?: string;
+    twins?: Array<{
+        task_id: number;
+        title: string;
+        outcome: string;
+        tokens: number | null;
+        duration_ms: number | null;
+        redo_rounds: number;
+        agent: string | null;
+        model: string | null;
+        score: number;
+        text_score: number;
+        structural_score: number;
+        proof_path: string;
+        warning?: { failure_class?: string | null; one_liner: string } | null;
+    }>;
+    estimate?: Record<string, unknown> | null;
+    actual?: { tokens: number | null; duration_ms: number | null; transition: string } | null;
     schedule_runs?: Array<{
         id: number;
         run_number: number;
@@ -522,16 +562,20 @@ export class HarnessTimeService implements IntegrationService {
                 members: boardMemberIds
                     .map(id => membersMap.get(id))
                     .filter((m): m is Member => !!m),
-                lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'],
+                lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED', 'CANCELED'],
                 totalActions: allTasks.reduce((sum, t) => sum + t.mutations.length, 0),
                 createdAt: b.created_at || new Date().toISOString(),
                 skipReflection: b.skip_reflection ?? false,
                 skipProof: b.skip_proof ?? false,
                 autoStartPlannedTasks: b.auto_start_planned_tasks ?? false,
                 reflectionModel: b.reflection_model || null,
+                reflectionReviewStrategy: b.reflection_review_strategy || null,
                 modelEscalationPriority: b.model_escalation_priority || [],
+                reviewerOrder: b.reviewer_order || [],
                 escalationEnabled: b.escalation_enabled ?? true,
                 failureMaxRetries: b.failure_max_retries ?? 3,
+                routingPolicy: b.routing_policy || {},
+                allowProjectRootExecution: b.allow_project_root_execution ?? false,
             });
         }
 
@@ -654,6 +698,9 @@ export class HarnessTimeService implements IntegrationService {
             })),
             scheduleSummary: raw.schedule_summary ?? undefined,
             scheduleRuns: raw.schedule_runs ?? undefined,
+            twins: raw.twins,
+            estimate: raw.estimate as TaskEstimate | null | undefined,
+            actual: raw.actual,
         };
     }
 
@@ -748,19 +795,23 @@ export class HarnessTimeService implements IntegrationService {
                 workingDir: b.working_dir || null,
                 timezone: b.timezone || 'UTC',
                 odinInitialized: b.odin_initialized || false,
+                claudeTokenConfigured: b.claude_token_configured ?? false,
                 skipReflection: b.skip_reflection ?? false,
                 skipProof: b.skip_proof ?? false,
                 autoStartPlannedTasks: b.auto_start_planned_tasks ?? false,
                 reflectionModel: b.reflection_model || null,
+                reflectionReviewStrategy: b.reflection_review_strategy || null,
                 modelEscalationPriority: b.model_escalation_priority || [],
+                reviewerOrder: b.reviewer_order || [],
                 escalationEnabled: b.escalation_enabled ?? true,
                 failureMaxRetries: b.failure_max_retries ?? 3,
+                routingPolicy: b.routing_policy || {},
+                allowProjectRootExecution: b.allow_project_root_execution ?? false,
                 memberIds: boardMemberIds,
                 agents: (b as { agents?: AgentConfig[] }).agents,
                 tasks: [],
                 members: [],
-                lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'],
-                totalActions: 0,
+                lists: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED', 'CANCELED'],
                 createdAt: b.created_at || new Date().toISOString(),
                 taskCount: (b as HarnessBoard & { task_count?: number }).task_count || 0,
                 memberCount: (b as HarnessBoard & { member_count?: number }).member_count || 0,
@@ -885,6 +936,10 @@ export class HarnessTimeService implements IntegrationService {
         return this.post<TaskSchedule>(`/api/schedules/${Number(scheduleId)}/cancel/`, {});
     }
 
+    async runScheduleNow(scheduleId: string): Promise<TaskScheduleRunResult> {
+        return this.post<TaskScheduleRunResult>(`/api/schedules/${Number(scheduleId)}/run_now/`, {});
+    }
+
     async deleteSchedule(scheduleId: string): Promise<void> {
         await this.del(`/api/schedules/${Number(scheduleId)}/`);
     }
@@ -972,6 +1027,11 @@ export class HarnessTimeService implements IntegrationService {
 
     async updateBoard(boardId: string, updates: Record<string, unknown>): Promise<unknown> {
         return this.post(`/api/boards/${boardId}/`, updates, 'PATCH');
+    }
+
+    /** Store the board's Claude Code OAuth token (write-only) into <working_dir>/.claude-token. */
+    async setClaudeToken(boardId: string, token: string): Promise<{ claude_token_configured: boolean }> {
+        return this.post(`/api/boards/${boardId}/claude-token/`, { token }, 'POST');
     }
 
     async createTask(
@@ -1118,6 +1178,18 @@ export class HarnessTimeService implements IntegrationService {
         return this.post<IdeSettings>('/api/user-settings/ide/', { preferred_ide_id: preferredIdeId }, 'PATCH');
     }
 
+    async fetchExecutorCapacity(): Promise<ExecutorCapacity> {
+        return this.get<ExecutorCapacity>('/executor/capacity/');
+    }
+
+    async fetchExecutorMaxConcurrency(): Promise<ExecutorMaxConcurrency> {
+        return this.get<ExecutorMaxConcurrency>('/executor/max-concurrency/');
+    }
+
+    async setExecutorMaxConcurrency(value: number): Promise<ExecutorMaxConcurrency> {
+        return this.post<ExecutorMaxConcurrency>('/executor/max-concurrency/', { value });
+    }
+
     async fetchTaskIdeOptions(taskId: string): Promise<TaskIdeOptions> {
         const raw = await this.get<HarnessTaskIdeOptions>(`/api/tasks/${Number(taskId)}/ide-options/`);
         return {
@@ -1211,6 +1283,12 @@ export class HarnessTimeService implements IntegrationService {
         return this.get<AnalyticsCostSummary>(`/api/analytics/cost-summary/${qs ? `?${qs}` : ''}`);
     }
 
+    async fetchLeague(boardId: string, params?: { since_spec?: string }): Promise<LeagueResponse> {
+        return this.get<LeagueResponse>(
+            `/api/boards/${Number(boardId)}/league/${this.buildQuery({ since_spec: params?.since_spec })}`,
+        );
+    }
+
     async fetchQuotaStatus(): Promise<ProviderQuota[]> {
         return this.get<ProviderQuota[]>('/api/analytics/quota-status/');
     }
@@ -1265,6 +1343,15 @@ export class HarnessTimeService implements IntegrationService {
         }));
     }
 
+    // task #328: the effective routing policy (built-in defaults + board
+    // `routing_policy` overrides already merged) for the Settings "Routing"
+    // read-side display — preference order, per-failure-class actions, and
+    // the capability-escalation ladder.
+    async fetchRoutingConfig(boardId: string): Promise<RoutingConfig> {
+        const resp = await this.get<{ routing_policy: RoutingConfig }>(`/api/boards/${Number(boardId)}/routing-config/`);
+        return resp.routing_policy;
+    }
+
     async toggleBoardAgent(boardId: string, agentName: string, enabled: boolean): Promise<{ name: string; enabled: boolean; board?: Record<string, unknown> }> {
         return this.post<{ name: string; enabled: boolean; board?: Record<string, unknown> }>(
             `/api/boards/${Number(boardId)}/agents/${encodeURIComponent(agentName)}/`,
@@ -1285,8 +1372,25 @@ export class HarnessTimeService implements IntegrationService {
         return this.get<PresetsResponse>('/api/presets/');
     }
 
+    async fetchFactorySnapshot(boardId: string): Promise<FactorySnapshot> {
+        return this.get<FactorySnapshot>(`/api/boards/${boardId}/factory/`);
+    }
+
+    async fetchInbox(boardId: string): Promise<InboxSnapshot> {
+        return this.get<InboxSnapshot>(`/api/boards/${boardId}/inbox/`);
+    }
+
+    async setErrorDisposition(eventId: number, disposition: 'fixed' | 'non-issue', note?: string): Promise<void> {
+        await this.post(`/errors/${eventId}/disposition/`, { disposition, note });
+    }
+
+    async reworkTask(taskId: string, instruction: string, authorEmail?: string): Promise<unknown> {
+        const email = authorEmail || (this.baseUrl.includes('localhost') ? 'admin@example.com' : 'unknown@example.com');
+        return this.post(`/api/tasks/${Number(taskId)}/rework/`, { instruction, created_by: email });
+    }
+
     getAvailableStatuses(): string[] {
-        return ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED'];
+        return ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'TESTING', 'DONE', 'FAILED', 'CANCELED'];
     }
 
     async createUser(name: string, email: string, color?: string): Promise<HarnessUser> {
@@ -1329,6 +1433,10 @@ export class HarnessTimeService implements IntegrationService {
 
     async fetchSpecCommits(specId: string): Promise<SpecCommit[]> {
         return this.get<SpecCommit[]>(`/api/specs/${Number(specId)}/commits/`);
+    }
+
+    async getSpecStory(specId: string): Promise<SpecStory> {
+        return this.get<SpecStory>(`/api/specs/${Number(specId)}/story/`);
     }
 
     private buildQuery(params: Record<string, unknown>): string {
@@ -1458,6 +1566,8 @@ export class HarnessTimeService implements IntegrationService {
             reflectionCostUsd: task.reflection_cost_usd ?? undefined,
             usage: task.usage ?? undefined,
             scheduleSummary: task.schedule_summary ?? undefined,
+            needsHuman: task.needs_human ?? false,
+            needsHumanReason: task.needs_human_reason || undefined,
         };
     }
 
@@ -1484,6 +1594,7 @@ export class HarnessTimeService implements IntegrationService {
             createdAt: s.created_at,
             cwd: typeof s.metadata?.working_dir === 'string' ? s.metadata.working_dir : undefined,
             costSummary: s.cost_summary || undefined,
+            mergeSummary: s.merge_summary || undefined,
             taskCount: s.task_count ?? tasks.length,
             comments,
             tasks: tasks.map(t => ({

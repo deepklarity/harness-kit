@@ -1,0 +1,246 @@
+You are auditing a task executed by an AI agent.
+
+
+## CTX — proof artifact (`.proof/task-185/proof.md`)
+
+The worker writes the canonical, complete proof file to `.proof/task-185/proof.md`
+in the worktree (read-only worktree mount; `cat`, `grep`, `head` freely).
+Raw suite outputs sit beside it as `.proof/task-185/<name>.txt` — full output, no
+cap. Read **`.proof/task-185/proof.md` first** — it is the primary, authoritative
+source for what the worker claims and where it lives.
+
+For each acceptance criterion, choose complete vs minimal context: read
+the full proof file once, then grep the section you need. Do NOT re-run
+the verify suites to fill gaps — the worker already attached raw outputs
+under `.proof/task-185/`. The proof path carries no truncation or size cap; read
+the full file when a criterion needs the full chain of evidence.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Work efficiently: batch independent file reads/greps into a single step, and do NOT re-read a file or re-run a search you have already done — each extra tool call is a full model round-trip.
+- **REPORT FORMAT: ONE fenced JSON block, then optionally a markdown rendering.** Your first non-blank line MUST be a single ```json ... ``` fence containing a JSON object with at minimum a `verdict` key. After the fence you MAY also emit the legacy `### Quality Assessment / ### Verdict` sections as a human-readable rendering of the same JSON — the JSON block is the source of truth, the rendering is for the board UI.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.** This task may have been attempted by multiple agents or models previously. Comments are separated by "--- CURRENT ATTEMPT ---" when prior attempts exist. Use earlier history for understanding context only — do NOT penalize the current agent for failures, quota issues, or code quality problems from previous agents/models. Your verdict must reflect solely the current agent's work.
+
+## TASK UNDER REVIEW
+Title: Per-task proof paths: .proof/task-<id>/ (W4.1)
+Status: DONE
+Agent: claude ((historical))
+Duration: N/Ams | Tokens: N/A
+
+## [CTX:description] Task Description
+Fable roadmap task Per-task proof paths: .proof/task-<id>/ (W4.1). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+
+## [CTX:execution_result] Execution Output
+Merge task 185: Per-task proof paths: .proof/task-<id>/ (W4.1)
+
+Task-Id: 185
+Spec-Id: sp_fable_w4
+
+
+ .proof/task-185/convention_grep.txt             |  26 ++++
+ .proof/task-185/odin_full_suite.txt             |  22 ++++
+ .proof/task-185/proof.md                        |  90 ++++++++++++++
+ .proof/task-185/proof_tests.txt                 |  49 ++++++++
+ odin/src/odin/orchestrator.py                   |  20 ++--
+ odin/src/odin/promote_check.py                  |  68 ++++++++---
+ odin/src/odin/reflection.py                     |  45 ++++---
+ odin/tests/mock/test_promote_check.py           | 151 ++++++++++++++++++++++--
+ odin/tests/unit/test_dag.py                     |  44 +++----
+ odin/tests/unit/test_reflection.py              |  56 +++++----
+ odin/tests/unit/test_reflection_input_bounds.py |  14 ++-
+ 11 files changed, 485 insertions(+), 100 deletions(-)
+
+
+## [CTX:comments] Comments & Proof
+--- CURRENT ATTEMPT ---
+Proof of work (committed at .proof/task-185/proof.md):
+
+# Task 185 — Per-task proof paths (`.proof/task-<id>/proof.md`)
+
+## Problem (root cause)
+
+The evidence protocol wrote every task's proof to the SAME shared path
+`.proof/proof.md`. The data is inherently per-task, but the path was not —
+so when two task branches merged to one spec branch, the second task's
+`.proof/proof.md` conflicted with the first (seen live: one task's merge
+deleted another's proof). The fix is at the path-convention layer: namespace
+by task id.
+
+## Changes
+
+### `odin/src/odin/promote_check.py`
+- Replaced `DEFAULT_PROOF_ARTIFACT = ".proof/proof.md"` with:
+  - `LEGACY_PROOF_ARTIFACT = ".proof/proof.md"` — kept for backward-compat fallback.
+  - `default_proof_artifact(task_id) -> str` — returns `.proof/task-<id>/proof.md`.
+- Rewrote the acceptance-artifacts gate: checks the per-task path first, falls
+  back to the legacy shared path for tasks created before the switch. Reports
+  whichever path was actually found; when neither exists, names the per-task
+  path as the expected (missing) one in the gap.
+
+### `odin/src/odin/reflection.py` (reviewer prompt)
+- `build_reflection_prompt`: the `## CTX — proof artifact` block now uses the
+  per-task path `.proof/task-<id>/proof.md` derived from `task_context["task_id"]`.
+  Defensive legacy fallback when `task_id` is absent so the prompt always names
+  a concrete path.
+- `reflect_task`: threads `task_id` into `task_context`.
+- Updated module comments that referenced the old shared path.
+
+### `odin/src/odin/orchestrator.py` (worker prompt)
+- `_wrap_prompt`: the proof step now instructs the worker to write/commit under
+  `.proof/task-<mcp_task_id>/` instead of the shared `.proof/`. All path
+  references (proof file, raw suite outputs, git add, comment pointer, truncation
+  rule) interpolate `mcp_task_id`.
+
+### Tests
+- **`test_promote_check.py`**: new `TestPerTaskProofGate` class (4 tests):
+  per-task proof found; legacy fallback accepted; two tasks' proof dirs coexist
+  without touching the same file; both-missing names the per-task path in the
+  gap. Updated `test_proof_md_missing_holds_the_gate` to assert the per-task gap
+  path. Updated fixture comment + class docstrings.
+- **`test_dag.py`**: `TestProofRoundTrip` updated to assert per-task paths
+  (`.proof/task-<id>/proof.md`); skip_proof test strengthened to assert no
+  `.proof/task-` prefix.
+- **`test_reflection.py`**: `_context()` now includes `task_id="42"`; all
+  proof-path assertions updated to `.proof/task-42/proof.md`; new
+  `test_prompt_falls_back_to_legacy_path_without_task_id` covers the defensive
+  fallback.
+- **`test_reflection_input_bounds.py`**: docstring + example comment content
+  updated to the per-task convention.
+
+## Acceptance criteria — MET
+
+1. **Two consecutive tasks' proofs coexist on one spec branch with no merge
+   conflict on `.proof/`** — MET. `test_two_tasks_proof_dirs_coexist` creates
+   `.proof/task-300/proof.md` and `.proof/task-301/proof.md` side by side; the
+   gate for each task finds its own file and never references the other's.
+   Because the paths are disjoint by task id, two branches merging cannot
+   touch the same file.
+2. **promote-check passes on both old and new layouts** — MET.
+   `test_per_task_proof_found` (new layout) and `test_falls_back_to_legacy_shared_proof`
+   (legacy layout via the `tmp_repo` fixture's `.proof/proof.md`) both assert
+   `recommendation == "promote"`.
+3. **odin suite green** — MET. 1445 passed, 4 skipped, 1 deselected
+   (pre-existing unrelated microsandbox tmpfs test — confirmed red on the clean
+   checkout before this change).
+
+## Verify (commands + results)
+
+| Check | Command | Result |
+|---|---|---|
+| Targeted proof tests | `python3 -m pytest tests/mock/test_promote_check.py::TestPerTaskProofGate tests/mock/test_promote_check.py::TestProofArtifactGate tests/unit/test_dag.py::TestProofRoundTrip tests/unit/test_reflection.py::TestBuildReflectionPrompt tests/unit/test_reflection_input_bounds.py -v` | 37 passed (`.proof/task-185/proof_tests.txt`) |
+| Full odin suite | `python3 -m pytest tests/ -q --deselect <pre-existing microsandbox>` | 1445 passed, 4 skipped (`.proof/task-185/odin_full_suite.txt`) |
+| Build (py_compile) | `python3 -m py_compile src/odin/promote_check.py src/odin/reflection.py src/odin/orchestrator.py` | BUILD OK |
+| Convention grep | `grep -rn '\.proof/proof\.md' odin/src/ odin/tests/` | Only legacy-fallback code/tests + historical comments remain (`.proof/task-185/convention_grep.txt`) |
+| Self-audit | `scripts/self_audit_diff.sh` | duplicates=0 commented_blocks=0 verdict=clean |
+| Worker prompt smoke | `_wrap_prompt(..., mcp_task_id='185')` renders | All `.proof/` references are `.proof/task-185/...` |
+
+## Backward compatibility
+
+The promote-check gate checks `.proof/task-<id>/proof.md` first and falls back
+to `.proof/proof.md`. Tasks created before this change (whose workers were told
+to write to the shared path) still pass the gate. The reviewer prompt points at
+the per-task path (the worker and reviewer prompts change together, so they stay
+in sync going forward).
+
+## Commit
+
+`62ce0b21` — `185: per-task proof paths (.proof/task-<id>/proof.md)`
+
+
+## [CTX:dependencies] Dependent Tasks
+No blocking dependencies.
+
+## [CTX:metadata] Task Metadata
+spec=sp_fable_w4/w5 task_id=185 status=DONE
+
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers. The JSON block
+is the source of truth for the parser; the markdown is a convenience
+rendering the parser will ignore if both are present.
+
+### Required JSON contract
+
+Your first non-blank line MUST be a fenced JSON block:
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification, the same one you'd put after ### Verdict.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason. Then defects (file:line).",
+  "slop_detection": "Specific AI slop found, or 'None.'",
+  "improvements": "Bullet list of up to 5 actionable items (what, where, why). 'None.' if clean.",
+  "agent_optimization": "Description clarity / model tier / token efficiency / prompt improvement.",
+  "quota_failure": "QUOTA_FAILURE: <agent_name> if the current attempt hit a quota/rate limit; otherwise 'None.'.",
+  "fix_list": ["targeted", "fix", "items", "for", "rework"]
+}
+```
+
+Rules:
+- `verdict` MUST be exactly `PASS`, `NEEDS_WORK`, or `FAIL` (uppercase). A
+  bare word with no review content (just "PASS" alone, or a verdict
+  keyword buried in CLI noise) is treated as a reviewer failure — the
+  system will NOT honor it. The JSON object must be the FIRST thing you
+  emit, complete and parseable, or your review will not be processed.
+  Do NOT skip the structured JSON just because the verdict is obvious;
+  emit the JSON with full sections, even if the verdict is PASS with
+  nothing else to flag.
+- `summary` is the one-sentence justification. It appears on the board
+  as the verdict summary. The "Evidence rules" below apply to it.
+- `fix_list` is REQUIRED for `NEEDS_WORK`: name the exact artifact or
+  change needed so the rework is scoped, not a blind redo. Empty list
+  `[]` is fine for `PASS` and `FAIL`.
+- `quality_assessment`, `slop_detection`, `improvements`,
+  `agent_optimization`, `quota_failure` are strings; default to
+  `"None."` when there's nothing to report.
+- Do NOT emit anything before the opening ```json fence. No
+  preamble, no narration, no permission requests, no conversational
+  text. The parser uses the JSON block as the first content and
+  anything before it is treated as noise.
+
+### Verdict rubric (applies to `verdict` in the JSON)
+
+Choose from what the evidence PROVES. Each rework round costs a full VM
+boot, environment rebuild, and tokens — so FAIL and NEEDS_WORK must be
+earned by substance, never spent on process trivia or invented rules.
+
+- PASS — every acceptance criterion is verifiably met and the work is
+  correct, safe, and builds/runs. Minor style or proof-formatting nits
+  do NOT block a PASS; put them in `improvements`.
+- NEEDS_WORK — the work is substantially correct but has a fixable
+  gap: a missing or truncated proof artifact, an unmet non-critical
+  criterion, or a process slip that does not make the code wrong. Pair
+  EVERY NEEDS_WORK with a TARGETED fix list (the `fix_list` field in
+  the JSON, or a list of items under "### Actionable Improvements" in
+  the rendering — name the exact artifact or change needed) so the
+  rework is scoped, not a blind redo.
+- FAIL — reserved for work that is WRONG, UNSAFE, or UNVERIFIABLE: it breaks the build or a downstream integration, corrupts state, crashes the orchestrator, contradicts a stated acceptance criterion, or supplies no evidence that the core behavior works. Also use FAIL for quota/resource exhaustion (justification must mention "quota" or "rate limit") so the system can reassign to a different agent.
+
+Evidence rules — apply these BEFORE choosing a verdict:
+- CITE OR DROP. Any claimed rule/policy/convention violation MUST quote the exact rule text and name the file it lives in (e.g. CLAUDE.md: "Never run ANY git stash command"). If you cannot quote and locate the rule, it does not exist for this review — you may NOT lower the verdict for it; raise it in `improvements` at most. A cited rule only counts if its stated scope actually covers this situation (a rule scoped to "shared repos / concurrent sessions" is not violated by an action inside the task's own isolated worktree). If a rule violation affects the verdict, include that exact citation in the report text.
+- A truncated, malformed, or missing proof artifact is a REQUEST, not a verdict. Name the specific artifact you need and ask for it (NEEDS_WORK at most). It only drives FAIL when it leaves the CORE behavior genuinely unverifiable AND no other evidence (code you can read, build output, comments) establishes correctness.
+- Judge the SUBSTANCE of the best available evidence. Tasks may span
+  several attempts; earlier attempts' partial numbers or
+  contradictions with history are NOT defects of the current work.
+- Formatting/completeness of proof comments is NOT a verdict criterion
+  when the underlying acceptance criteria are verifiably met; mention
+  formatting issues in `improvements` instead.
+- Comments authored by a human operator (non-agent email) are
+  authoritative context — do not contradict them.
+- Do not demand artifacts the environment cannot produce (e.g. an
+  ODIN-STATUS block when the run was concluded by an operator).
+
+### Optional markdown rendering (after the JSON block)
+
+After the JSON fence you MAY emit the legacy sections as a human-readable rendering of the same content. The parser uses the JSON as the source of truth and ignores the rendering, so emitting it is purely for the board UI. The rendering is OPTIONAL — the JSON block is sufficient on its own. The legacy section names, in order, are:
+
+- `### Quality Assessment`
+- `### Slop Detection`
+- `### Actionable Improvements`
+- `### Agent Optimization`
+- `### Quota / Resource Failure`
+- `### Verdict`

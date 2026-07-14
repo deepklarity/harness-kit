@@ -308,7 +308,7 @@ Use this when you want TaskIt and Odin-backed planning/review flows to run under
 
 | Variable | What to set | Why |
 |---|---|---|
-| `FORCED_BASE_PROVIDER` | `gemini` or `qwen` | Force supported planning/review flows onto a single provider |
+| `FORCED_BASE_PROVIDER` | `gemini` | Force supported planning/review flows onto a single provider |
 | `FORCED_BASE_MODEL` | provider model name | Optionally pin a specific model for that provider |
 
 Example:
@@ -320,8 +320,8 @@ FORCED_BASE_PROVIDER=gemini
 Pinned model example:
 
 ```dotenv
-FORCED_BASE_PROVIDER=qwen
-FORCED_BASE_MODEL=coder-model
+FORCED_BASE_PROVIDER=gemini
+FORCED_BASE_MODEL=gemini-2.5-pro
 ```
 
 Notes:
@@ -329,7 +329,7 @@ Notes:
 - `FORCED_BASE_MODEL` is optional.
 - If `FORCED_BASE_MODEL` is not set, the provider default model is used.
 - `FORCED_BASE_MODEL` must belong to the provider selected in `FORCED_BASE_PROVIDER`.
-- Forced provider mode currently supports only `gemini` and `qwen`.
+- Forced provider mode currently supports only `gemini`.
 - The corresponding CLI must be installed and available on `PATH`.
 
 ### Celery (optional, for `celery_dag`)

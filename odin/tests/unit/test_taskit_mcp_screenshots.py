@@ -112,7 +112,7 @@ class TestProofWithScreenshots:
         assert "not found" in result["screenshot_warning"]
 
     def test_proof_with_string_encoded_screenshot_paths(self, mock_client):
-        """Qwen sends list params as JSON strings — coercion handles it."""
+        """Some CLIs send list params as JSON strings — coercion handles it."""
         result = taskit_add_comment(
             content="Task complete",
             task_id="99",
@@ -123,7 +123,7 @@ class TestProofWithScreenshots:
         assert result == {"comment_id": 42, "screenshots_attached": 2}
 
     def test_proof_with_string_encoded_file_paths(self, mock_client):
-        """Qwen sends file_paths as JSON string — coercion handles it."""
+        """Some CLIs send file_paths as a JSON string — coercion handles it."""
         taskit_add_comment(
             content="Done",
             task_id="99",

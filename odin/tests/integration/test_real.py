@@ -1,9 +1,9 @@
 """Real integration tests that invoke actual CLI agents.
 
-Excluded from the default pytest run (requires gemini, qwen, codex CLIs on PATH).
+Excluded from the default pytest run (requires gemini, codex CLIs on PATH).
 Run explicitly: python -m pytest tests/integration/ -v
 
-Test 1: Harness availability — verify gemini, qwen, codex are on PATH
+Test 1: Harness availability — verify gemini, codex are on PATH
 Test 2: Single harness execute — send a simple prompt to gemini, get real output
 Test 3: Decomposition — use codex as base agent to decompose the poem spec into JSON sub-tasks
 Test 4: Full e2e — run the full pipeline, produce poem.html in a temp directory
@@ -40,7 +40,6 @@ class TestHarnessAvailability:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("agent_name,cli_cmd", [
         ("gemini", "gemini"),
-        ("qwen", "qwen"),
         ("codex", "codex"),
     ])
     async def test_harness_is_available(self, agent_name, cli_cmd):
@@ -50,7 +49,7 @@ class TestHarnessAvailability:
         assert available, f"{agent_name} CLI ({cli_cmd}) should be on PATH"
 
     def test_all_expected_harnesses_registered(self):
-        expected = {"claude", "codex", "gemini", "qwen", "minimax", "glm"}
+        expected = {"claude", "codex", "gemini", "minimax", "glm"}
         assert expected.issubset(set(HARNESS_REGISTRY.keys())), (
             f"Missing harnesses: {expected - set(HARNESS_REGISTRY.keys())}"
         )
@@ -76,21 +75,6 @@ class TestSingleHarnessExecute:
         assert len(result.output.strip()) > 0, "Gemini should return non-empty output"
         assert result.duration_ms is not None and result.duration_ms > 0
         assert result.agent == "Gemini"
-
-    @pytest.mark.asyncio
-    @pytest.mark.timeout(60)
-    async def test_qwen_returns_output(self, work_dir):
-        cfg = AgentConfig(cli_command="qwen", capabilities=["writing"])
-        harness = get_harness("qwen", cfg)
-
-        result = await harness.execute(
-            "Respond with exactly: HELLO_ODIN_TEST", {"working_dir": work_dir}
-        )
-
-        assert result.success, f"Qwen execute failed: {result.error}"
-        assert len(result.output.strip()) > 0, "Qwen should return non-empty output"
-        assert result.duration_ms is not None and result.duration_ms > 0
-        assert result.agent == "Qwen"
 
 
 # ---------------------------------------------------------------------------
@@ -471,30 +455,5 @@ class TestDiskWriteCapability:
         )
         print(f"\n  gemini wrote {filename}: {contents.strip()!r}")
 
-    @pytest.mark.asyncio
-    @pytest.mark.timeout(120)
-    async def test_qwen_can_write_file(self, work_dir):
-        filename = "qwen_test_output.txt"
-        cfg = AgentConfig(
-            cli_command="qwen",
-            capabilities=["coding"],
-            cost_tier=CostTier.LOW,
-        )
-        harness = get_harness("qwen", cfg)
 
-        prompt = self.WRITE_PROMPT_TEMPLATE.format(
-            filename=filename, agent="QWEN"
-        )
-        result = await harness.execute(prompt, {"working_dir": work_dir})
 
-        written = Path(work_dir) / filename
-        assert written.exists(), (
-            f"qwen did not create {filename}. "
-            f"success={result.success}, error={result.error}, "
-            f"output={result.output[:300]}"
-        )
-        contents = written.read_text()
-        assert "ODIN_WRITE_TEST_QWEN" in contents, (
-            f"File contents wrong: {contents!r}"
-        )
-        print(f"\n  qwen wrote {filename}: {contents.strip()!r}")

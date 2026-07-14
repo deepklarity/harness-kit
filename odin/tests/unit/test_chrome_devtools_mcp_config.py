@@ -72,12 +72,6 @@ class TestServerFragmentGemini:
         assert frag["chrome-devtools"]["command"] == "npx"
 
 
-class TestServerFragmentQwen:
-    def test_has_trust(self):
-        frag = server_fragment("qwen")
-        assert frag["chrome-devtools"]["trust"] is True
-
-
 class TestServerFragmentCodex:
     def test_returns_flag_list(self):
         frag = server_fragment("codex")
@@ -136,10 +130,6 @@ class TestHeadlessFlag:
         assert "--headless" in frag["chrome-devtools"]["args"]
         assert frag["chrome-devtools"]["trust"] is True
 
-    def test_qwen_headless(self):
-        frag = server_fragment("qwen", headless=True)
-        assert "--headless" in frag["chrome-devtools"]["args"]
-
     def test_codex_headless(self):
         frag = server_fragment("codex", headless=True)
         # Codex returns -c flag pairs; args should include --headless in the TOML array
@@ -171,3 +161,87 @@ class TestHeadlessFlag:
         original = list(_NPX_ARGS)
         server_fragment("claude", headless=True)
         assert _NPX_ARGS == original
+
+class TestForkdChromeArgs:
+    """Verify forkd can force chrome-devtools-mcp to use guest Chromium."""
+
+    def test_gemini_executable_path_and_chrome_args(self):
+        frag = server_fragment(
+            "gemini",
+            headless=True,
+            executable_path="/usr/bin/chromium",
+            chrome_args=["--no-sandbox", "--disable-dev-shm-usage"],
+            isolated=True,
+        )
+        args = frag["chrome-devtools"]["args"]
+        assert "--executablePath" in args
+        assert args[args.index("--executablePath") + 1] == "/usr/bin/chromium"
+        assert "--isolated" in args
+        assert "--chromeArg=--no-sandbox" in args
+        assert "--chromeArg=--disable-dev-shm-usage" in args
+
+    def test_opencode_executable_path_and_chrome_args(self):
+        frag = server_fragment(
+            "glm",
+            executable_path="/usr/bin/chromium",
+            chrome_args=["--no-sandbox"],
+            isolated=True,
+        )
+        cmd = frag["chrome-devtools"]["command"]
+        assert "--executablePath" in cmd
+        assert cmd[cmd.index("--executablePath") + 1] == "/usr/bin/chromium"
+        assert "--isolated" in cmd
+        assert "--chromeArg=--no-sandbox" in cmd
+
+
+class TestBrowserUrl:
+    """Microsandbox connects the in-guest MCP to a host-side browser over CDP.
+
+    The aarch64 libkrun microVM cannot launch Chromium (SIGTRAP in early
+    bring-up), so the MCP connects to a remote browser via ``--browserUrl``.
+    """
+
+    def test_claude_browser_url_emitted(self):
+        frag = server_fragment("claude", browser_url="http://127.0.0.1:9222")
+        args = frag["chrome-devtools"]["args"]
+        assert "--browserUrl" in args
+        assert args[args.index("--browserUrl") + 1] == "http://127.0.0.1:9222"
+
+    def test_opencode_browser_url_emitted(self):
+        frag = server_fragment("glm", browser_url="http://10.0.0.5:9222")
+        cmd = frag["chrome-devtools"]["command"]
+        assert "--browserUrl" in cmd
+        assert cmd[cmd.index("--browserUrl") + 1] == "http://10.0.0.5:9222"
+
+    def test_codex_browser_url_emitted(self):
+        # Codex returns a flat list of -c pairs; the args TOML carries --browserUrl.
+        flags = server_fragment("codex", browser_url="http://127.0.0.1:9222")
+        joined = " ".join(flags)
+        assert "--browserUrl" in joined
+        assert "http://127.0.0.1:9222" in joined
+
+    def test_browser_url_precedence_drops_launch_flags(self):
+        # --browserUrl connects to an existing browser; launch-only flags conflict
+        # in chrome-devtools-mcp and must be omitted when browser_url is set.
+        frag = server_fragment(
+            "claude",
+            headless=True,
+            executable_path="/usr/bin/chromium",
+            chrome_args=["--no-sandbox"],
+            isolated=True,
+            browser_url="http://127.0.0.1:9222",
+        )
+        args = frag["chrome-devtools"]["args"]
+        assert "--browserUrl" in args
+        assert "--headless" not in args
+        assert "--executablePath" not in args
+        assert "--isolated" not in args
+        assert not any(a.startswith("--chromeArg=") for a in args)
+
+    def test_no_browser_url_keeps_launch_behavior(self):
+        # Absent browser_url, the normal launch path is unchanged (regression guard).
+        frag = server_fragment("claude", headless=True)
+        args = frag["chrome-devtools"]["args"]
+        assert "--headless" in args
+        assert "--browserUrl" not in args
+

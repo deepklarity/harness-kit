@@ -2,7 +2,7 @@
 # Copy to: ~/.config/harness_usage_status/config.yaml
 #
 # Two types of providers:
-#   CLI-based: claude_code, codex, gemini, qwen — use installed CLI tools
+#   CLI-based: claude_code, codex, gemini — use installed CLI tools
 #   API-based: minimax, glm — use API keys for subscription quota endpoints
 #
 # API keys can be set via environment variables:
@@ -28,12 +28,6 @@ providers:
     # project_id: ""  # Cloud AI Companion project ID (auto-detected via loadCodeAssist if omitted)
     # NOTE: Uses OAuth creds from ~/.gemini/oauth_creds.json (or macOS Keychain).
     #   Calls the same API as `gemini /stats` — returns per-model quota buckets.
-
-  qwen:
-    enabled: false
-    # cli_command: "qwen"
-    # cli_path: "/usr/local/bin/qwen"
-    # NOTE: /stats is session-scoped only; no account-level quota API
 
   # --- API-based providers (subscription via API keys) ---
 

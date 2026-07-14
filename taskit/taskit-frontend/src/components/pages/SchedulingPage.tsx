@@ -3,9 +3,21 @@ import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import type { TaskSchedule } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
+import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { ToastAction } from '@/components/ui/toast';
 import { CalendarClock, History, Repeat } from 'lucide-react';
 import { FilterBar, SearchBar, MultiSelectFilter, SortControl, PaginationControls } from '@/components/filters';
 
@@ -99,11 +111,15 @@ const SORT_OPTIONS = [
 
 export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: SchedulingPageProps) {
     const service = useService();
+    const { toast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
+    const [expandedBriefs, setExpandedBriefs] = useState<Set<number>>(new Set());
     const [schedules, setSchedules] = useState<TaskSchedule[]>([]);
     const [count, setCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [confirmingRunScheduleId, setConfirmingRunScheduleId] = useState<string | null>(null);
+    const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
 
     const query = useMemo(() => {
         const page = Number(searchParams.get('page') || '1');
@@ -189,6 +205,41 @@ export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: S
         await refetch();
     };
 
+    const handleRunNow = async (schedule: TaskSchedule) => {
+        const scheduleKey = String(schedule.id);
+        if (runningScheduleId) return;
+        setRunningScheduleId(scheduleKey);
+        try {
+            const result = await service.runScheduleNow(scheduleKey);
+            const newTaskId = result?.task_id != null ? String(result.task_id) : null;
+            toast({
+                title: 'Manual run dispatched',
+                description: newTaskId
+                    ? `Task #${newTaskId} created from "${schedule.template.title}".`
+                    : `"${schedule.template.title}" fired successfully.`,
+                action: newTaskId ? (
+                    <ToastAction altText="Open created task" onClick={() => onTaskClick(newTaskId)}>
+                        Open task
+                    </ToastAction>
+                ) : undefined,
+            });
+            await refetch();
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Failed to run schedule';
+            toast({
+                title: 'Run now failed',
+                description: message,
+                variant: 'destructive',
+            });
+        } finally {
+            setRunningScheduleId(null);
+        }
+    };
+
+    const confirmingSchedule = confirmingRunScheduleId
+        ? schedules.find(s => String(s.id) === confirmingRunScheduleId)
+        : null;
+
     const statusOptions = query.history ? HISTORY_STATUS_OPTIONS : UPCOMING_STATUS_OPTIONS;
 
     const hasFilters = !!(query.q || query.status.length || query.kind.length || query.sort || query.created_from || query.created_to);
@@ -271,6 +322,16 @@ export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: S
                                     ) : null}
                                     {!query.history && schedule.status !== 'CANCELED' && schedule.status !== 'COMPLETED' ? (
                                         <>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-8 px-2 text-xs"
+                                                onClick={() => setConfirmingRunScheduleId(String(schedule.id))}
+                                                disabled={runningScheduleId === String(schedule.id)}
+                                                data-testid="run-now-button"
+                                            >
+                                                {runningScheduleId === String(schedule.id) ? 'Running…' : 'Run now'}
+                                            </Button>
                                             <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void handlePauseResume(schedule)}>
                                                 {schedule.status === 'PAUSED' ? 'Resume' : 'Pause'}
                                             </Button>
@@ -303,8 +364,28 @@ export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: S
                             </div>
 
                             {schedule.template.description ? (
-                                <div className="mb-3 text-sm text-muted-foreground line-clamp-3">
-                                    {compactText(schedule.template.description, 180)}
+                                <div className="mb-3">
+                                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Task brief</div>
+                                    {expandedBriefs.has(schedule.id) ? (
+                                        <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-foreground whitespace-pre-wrap max-h-72 overflow-y-auto">
+                                            {schedule.template.description}
+                                        </div>
+                                    ) : (
+                                        <div className="text-sm text-muted-foreground">
+                                            {compactText(schedule.template.description, 180)}
+                                        </div>
+                                    )}
+                                    <button
+                                        type="button"
+                                        className="mt-1 text-xs text-primary hover:underline"
+                                        onClick={() => setExpandedBriefs(prev => {
+                                            const next = new Set(prev);
+                                            if (next.has(schedule.id)) next.delete(schedule.id); else next.add(schedule.id);
+                                            return next;
+                                        })}
+                                    >
+                                        {expandedBriefs.has(schedule.id) ? 'Hide full brief' : 'Show full brief'}
+                                    </button>
                                 </div>
                             ) : null}
 
@@ -357,6 +438,39 @@ export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: S
                     onPageSizeChange={(size) => setParam('page_size', String(size))}
                 />
             )}
+
+            <AlertDialog open={!!confirmingSchedule} onOpenChange={(open) => !open && setConfirmingRunScheduleId(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Run this schedule now?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {confirmingSchedule ? (
+                                <>
+                                    This will immediately create a new task from the
+                                    {' '}<span className="font-medium text-foreground">{confirmingSchedule.template.title}</span>
+                                    {' '}template and dispatch it to the board. The original schedule cadence is not affected.
+                                </>
+                            ) : null}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={!!runningScheduleId}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            disabled={!!runningScheduleId}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                if (confirmingSchedule) {
+                                    const target = confirmingSchedule;
+                                    setConfirmingRunScheduleId(null);
+                                    void handleRunNow(target);
+                                }
+                            }}
+                        >
+                            {runningScheduleId ? 'Running…' : 'Run now'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

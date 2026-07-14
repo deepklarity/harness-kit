@@ -1,0 +1,1 @@
+Ignoring 124 permissions.allow entries from .claude/settings.local.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/home/user/harness-kit/.odin/worktrees/sp_fable_w3/159"].hasTrustDialogAccepted: true in /root/.claude.json.

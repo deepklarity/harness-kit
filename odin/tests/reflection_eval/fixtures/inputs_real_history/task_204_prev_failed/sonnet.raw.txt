@@ -1,0 +1,69 @@
+There is no `proof.md` file at all — the required proof artifact is missing entirely. Let me check the rest of the repo state to confirm what was actually delivered.Confirmed: no `proof.md` exists anywhere, the "live run" output files are empty, and only 1 of 27 planned model calls actually completed (a single GLM-5.2 capture on one fixture). No table, no verdict-agreement/parse%/ERROR% numbers, and no recommendation paragraph exist anywhere in the deliverable. Nothing was committed either.```json
+{
+  "verdict": "FAIL",
+  "summary": "No .proof/task-204/proof.md exists, the live run captured only 1 of the planned 27 (candidate × fixture) calls before the agent killed it, and there is no per-candidate table, no parse%/agreement%/ERROR% numbers, and no recommendation paragraph anywhere — the task's entire deliverable is absent.",
+  "quality_assessment": "Acceptance criterion 'N>=5 per candidate, table in proof, a one-paragraph recommendation' — UNMET: .proof/task-204/proof.md does not exist anywhere in the worktree (find confirms). eval_live_run.txt and eval_live_stderr.txt are both 0 bytes. Only artifact under eval_run/captures/ is a single file (zai-coding-plan/glm-5.2/task_185_merged.raw.txt) — i.e. 1 of 27 planned live calls completed, confirming the agent's own status update ('Only 1/27 after 7 minutes... let me kill it'). No table of parse%/verdict-agreement%/ERROR% per candidate exists in any file or comment. No recommendation paragraph exists. Nothing is committed to git (git status shows only unstaged modifications and untracked files, HEAD unchanged) despite the working protocol requiring the proof be committed.",
+  "slop_detection": "None found in the code that was written (eval.py CLI-dispatch extension and build_real_fixtures.py look reasonable and documented), but the task-completion claim ('Completed successfully') is materially false given zero deliverable evidence exists.",
+  "improvements": "- Produce .proof/task-204/proof.md with the actual per-candidate table (parse%, verdict-agreement% vs sonnet baseline, ERROR%) and a one-paragraph recommendation, per the acceptance criteria.\n- Finish or replace the live run: 1/27 calls is not N>=5 per candidate for any candidate; either make the opencode CLI calls fast/reliable enough to complete a full pass, or reduce scope (fewer candidates/fixtures) but actually finish and report real numbers.\n- Commit the proof artifacts and code changes (eval.py extension, build_real_fixtures.py, fixtures) — currently everything sits uncommitted in the working tree.\n- The unrelated opencode.json diff (stripping browser-automation permissions, removing chrome-devtools MCP) looks like environment drift unrelated to this task's scope — verify it's not an unintended side effect before re-submitting.",
+  "agent_optimization": "The agent correctly diagnosed the environment constraint (no Anthropic creds, opencode-only auth) and did solid preparatory engineering (fixture builder from real merged-task history, CLI dispatch abstraction in eval.py), but spent its entire budget on scaffolding and a single slow live-run experiment, then reported 'Completed successfully' with no actual measurement output. Future attempts should timebox the live-run phase much earlier and fall back to a smaller N or faster invocation path (e.g. non-agentic single-shot CLI mode) well before exhausting the budget, and should never mark the task complete without the acceptance-criteria artifacts in hand.",
+  "quota_failure": "None. This was a self-inflicted timeout/tooling-speed problem (agentic file-reading loop making each call slow), not a rate limit or quota exhaustion — the agent explicitly chose to kill the run and never resumed with a faster approach.",
+  "fix_list": ["Write .proof/task-204/proof.md containing the per-candidate table (parse%, verdict-agreement% vs baseline, ERROR%) for N>=5 real inputs per candidate", "Complete enough live-run calls (or a faster equivalent) to actually produce that table instead of the current 1/27 partial", "Add the one-paragraph recommendation the operator can act on", "Commit the proof and code changes (eval.py, build_real_fixtures.py, fixtures/) to the task branch"]
+}
+```
+
+### Quality Assessment
+- N>=5 per candidate with parse%/agreement%/ERROR% table: **UNMET** — no table exists anywhere; only 1 of 27 planned live calls completed.
+- Proof committed under `.proof/task-204/proof.md`: **UNMET** — file does not exist; `eval_live_run.txt`/`eval_live_stderr.txt` are empty; nothing committed to git.
+- One-paragraph recommendation: **UNMET** — not present in any file or comment.
+
+### Slop Detection
+None in the code produced; but the "Completed successfully" status is unsupported by any deliverable evidence.
+
+### Actionable Improvements
+- Produce the actual proof.md with the table and recommendation.
+- Finish (or rescope and finish) the live run — 1/27 is not sufficient evidence.
+- Commit all work.
+- Double check the unrelated opencode.json permission/MCP diff wasn't an unintended side effect.
+
+### Agent Optimization
+Good root-cause diagnosis of the environment constraint and solid scaffolding, but budget was exhausted before producing any of the requested measurements — should timebox live-run experimentation and fall back to a faster/smaller approach sooner rather than reporting completion with an empty deliverable.
+
+### Quota / Resource Failure
+None — self-inflicted slowness, not quota/rate-limit exhaustion.
+
+### Verdict
+**FAIL** — the task's entire deliverable (evidence table + recommendation) is missing; only preparatory scaffolding exists, uncommitted.```json
+{
+  "verdict": "FAIL",
+  "summary": "No .proof/task-204/proof.md exists, the live run captured only 1 of the planned 27 (candidate × fixture) calls before the agent killed it, and there is no per-candidate table, no parse%/agreement%/ERROR% numbers, and no recommendation paragraph anywhere — the task's entire deliverable is absent.",
+  "quality_assessment": "Acceptance criterion 'N>=5 per candidate, table in proof, a one-paragraph recommendation' — UNMET: .proof/task-204/proof.md does not exist anywhere in the worktree (find confirms). eval_live_run.txt and eval_live_stderr.txt are both 0 bytes. Only artifact under eval_run/captures/ is a single file (zai-coding-plan/glm-5.2/task_185_merged.raw.txt) — i.e. 1 of 27 planned live calls completed, confirming the agent's own status update ('Only 1/27 after 7 minutes... let me kill it'). No table of parse%/verdict-agreement%/ERROR% per candidate exists in any file or comment. No recommendation paragraph exists. Nothing is committed to git (git status shows only unstaged modifications and untracked files, HEAD unchanged) despite the working protocol requiring the proof be committed.",
+  "slop_detection": "None found in the code that was written (eval.py CLI-dispatch extension and build_real_fixtures.py look reasonable and documented), but the task-completion claim ('Completed successfully') is materially false given zero deliverable evidence exists.",
+  "improvements": "- Produce .proof/task-204/proof.md with the actual per-candidate table (parse%, verdict-agreement% vs sonnet baseline, ERROR%) and a one-paragraph recommendation, per the acceptance criteria.\n- Finish or replace the live run: 1/27 calls is not N>=5 per candidate for any candidate; either make the opencode CLI calls fast/reliable enough to complete a full pass, or reduce scope (fewer candidates/fixtures) but actually finish and report real numbers.\n- Commit the proof artifacts and code changes (eval.py extension, build_real_fixtures.py, fixtures) — currently everything sits uncommitted in the working tree.\n- The unrelated opencode.json diff (stripping browser-automation permissions, removing chrome-devtools MCP) looks like environment drift unrelated to this task's scope — verify it's not an unintended side effect before re-submitting.",
+  "agent_optimization": "The agent correctly diagnosed the environment constraint (no Anthropic creds, opencode-only auth) and did solid preparatory engineering (fixture builder from real merged-task history, CLI dispatch abstraction in eval.py), but spent its entire budget on scaffolding and a single slow live-run experiment, then reported 'Completed successfully' with no actual measurement output. Future attempts should timebox the live-run phase much earlier and fall back to a smaller N or faster invocation path (e.g. non-agentic single-shot CLI mode) well before exhausting the budget, and should never mark the task complete without the acceptance-criteria artifacts in hand.",
+  "quota_failure": "None. This was a self-inflicted timeout/tooling-speed problem (agentic file-reading loop making each call slow), not a rate limit or quota exhaustion — the agent explicitly chose to kill the run and never resumed with a faster approach.",
+  "fix_list": ["Write .proof/task-204/proof.md containing the per-candidate table (parse%, verdict-agreement% vs baseline, ERROR%) for N>=5 real inputs per candidate", "Complete enough live-run calls (or a faster equivalent) to actually produce that table instead of the current 1/27 partial", "Add the one-paragraph recommendation the operator can act on", "Commit the proof and code changes (eval.py, build_real_fixtures.py, fixtures/) to the task branch"]
+}
+```
+
+### Quality Assessment
+- N>=5 per candidate with parse%/agreement%/ERROR% table: **UNMET** — no table exists anywhere; only 1 of 27 planned live calls completed.
+- Proof committed under `.proof/task-204/proof.md`: **UNMET** — file does not exist; `eval_live_run.txt`/`eval_live_stderr.txt` are empty; nothing committed to git.
+- One-paragraph recommendation: **UNMET** — not present in any file or comment.
+
+### Slop Detection
+None in the code produced; but the "Completed successfully" status is unsupported by any deliverable evidence.
+
+### Actionable Improvements
+- Produce the actual proof.md with the table and recommendation.
+- Finish (or rescope and finish) the live run — 1/27 is not sufficient evidence.
+- Commit all work.
+- Double check the unrelated opencode.json permission/MCP diff wasn't an unintended side effect.
+
+### Agent Optimization
+Good root-cause diagnosis of the environment constraint and solid scaffolding, but budget was exhausted before producing any of the requested measurements — should timebox live-run experimentation and fall back to a faster/smaller approach sooner rather than reporting completion with an empty deliverable.
+
+### Quota / Resource Failure
+None — self-inflicted slowness, not quota/rate-limit exhaustion.
+
+### Verdict
+**FAIL** — the task's entire deliverable (evidence table + recommendation) is missing; only preparatory scaffolding exists, uncommitted.

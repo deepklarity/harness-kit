@@ -1,6 +1,8 @@
 """Configuration loading for Odin."""
 
+import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -9,13 +11,17 @@ from dotenv import load_dotenv
 
 from odin.forced_provider import resolve_forced_provider
 from odin.models import (
+    AdvisorConfig,
     AgentConfig,
     ChromeDevToolsConfig,
     CostTier,
+    MergeAgentConfig,
     ModelRoute,
     OdinConfig,
     TaskItConfig,
 )
+
+logger = logging.getLogger("odin.config")
 
 # Config search order:
 #   1. Explicit --config path
@@ -26,21 +32,46 @@ GLOBAL_CONFIG_PATH = Path.home() / ".odin" / "config.yaml"
 
 # Env vars for API keys
 ENV_VAR_MAP = {
-    "minimax": "MINIMAX_API_KEY",
-    "glm": "ZAI_API_KEY",
+    "minimax": ("MINIMAX_API_KEY",),
+    "glm": ("ZAI_API_KEY",),
 }
+
+
+def _expand_env_value(value):
+    """Expand ${VAR} config values, returning None for unset pure placeholders."""
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if stripped.startswith("${") and stripped.endswith("}") and stripped.count("${") == 1:
+        return os.environ.get(stripped[2:-1])
+    return os.path.expanduser(os.path.expandvars(value))
+
+
+def _discover_local_path(env_name: str, *candidates: str) -> str | None:
+    """Resolve a local tool path from env, PATH, or known repo/home locations."""
+    env_value = os.environ.get(env_name)
+    if env_value:
+        return os.path.expanduser(env_value)
+
+    which_value = shutil.which(env_name.lower().replace("_bin", ""))
+    if which_value:
+        return which_value
+
+    for candidate in candidates:
+        path = Path(candidate).expanduser()
+        if path.exists():
+            return str(path)
+    return None
 
 # Legacy model routing priority (used as fallback when API routing is unavailable).
 # Walk top-to-bottom; first match that is enabled + available wins.
 DEFAULT_MODEL_ROUTING = [
-    ("gemini", "gemini-3-flash-preview"),
-    ("glm", "zai-coding-plan/glm-4.7"),
-    ("minimax", "minimax-coding-plan/MiniMax-M2.7"),
-    ("glm", "zai-coding-plan/glm-5.1"),
-    ("gemini", "gemini-3-pro-preview"),
-    ("claude", "claude-sonnet-4-6"),
-    ("codex", "gpt-5.4"),
-    ("claude", "claude-opus-4-7"),
+    ("glm", "zai-coding-plan/glm-5.2"),
+    ("minimax", "minimax-coding-plan/MiniMax-M3"),
+    ("agy", "Gemini 3.5 Flash (High)"),
+    ("claude", "claude-sonnet-5"),
+    ("codex", "gpt-5.5"),
+    ("claude", "claude-opus-4-8"),
 ]
 
 
@@ -83,6 +114,14 @@ def _parse_models(raw_models) -> dict:
     return {}
 
 
+def _first_env_value(env_names: tuple[str, ...]) -> str | None:
+    for env_name in env_names:
+        value = os.environ.get(env_name)
+        if value:
+            return value
+    return None
+
+
 def _apply_yolo_mode(
     agents: dict,
     explicitly_disabled: Optional[set] = None,
@@ -94,16 +133,42 @@ def _apply_yolo_mode(
     intent takes priority over env-var auto-discovery).
     """
     explicitly_disabled = explicitly_disabled or set()
-    for agent_name, env_var in ENV_VAR_MAP.items():
+    for agent_name, env_vars in ENV_VAR_MAP.items():
         if agent_name not in agents:
             continue
+        cfg = agents[agent_name]
+        key = _first_env_value(env_vars)
+        if key and not cfg.api_key:
+            cfg.api_key = key
         if agent_name in explicitly_disabled:
             continue
-        cfg = agents[agent_name]
-        if not cfg.enabled and os.environ.get(env_var):
+        if not cfg.enabled and key:
             cfg.enabled = True
-            if not cfg.api_key:
-                cfg.api_key = os.environ.get(env_var)
+
+
+def _filter_unknown_harnesses(agents: dict) -> dict:
+    """Remove agents whose harness name is not registered.
+
+    A stale config entry (e.g. a harness removed from the registry) should not
+    take down planning or execution.  Each unknown agent is dropped with a
+    warning so the operator knows to clean up their config, while the
+    remaining valid agents are returned unchanged.
+    """
+    from odin.harnesses.registry import HARNESS_REGISTRY
+
+    known = set(HARNESS_REGISTRY.keys())
+    filtered = {}
+    for name, cfg in agents.items():
+        if name in known:
+            filtered[name] = cfg
+        else:
+            logger.warning(
+                "Skipping unknown harness '%s' — not in registry "
+                "(available: %s). Remove it from your config to silence this warning.",
+                name,
+                sorted(known),
+            )
+    return filtered
 
 
 def _parse_model_routing(raw_list) -> list:
@@ -165,16 +230,26 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
             explicitly_disabled.add(name)
 
         # Resolve API key from env if placeholder
-        api_key = cfg.get("api_key")
-        if api_key and api_key.startswith("${") and api_key.endswith("}"):
-            env_var = api_key[2:-1]
-            api_key = os.environ.get(env_var)
+        api_key = _expand_env_value(cfg.get("api_key"))
 
         cost_tier = cfg.get("cost_tier", "medium")
         known_keys = {
             "enabled", "cli_command", "api_key", "base_url",
             "capabilities", "cost_tier", "execute_args", "models",
-            "default_model", "premium_model",
+            "default_model", "premium_model", "run_in_forkd",
+            "forkd_bin", "forkd_kernel", "forkd_scripts_dir",
+            "forkd_use_sudo", "forkd_mode", "forkd_controller_url",
+            "forkd_snapshot_tag", "forkd_per_child_netns",
+            "forkd_image", "forkd_extra",
+            "forkd_cache_dir", "forkd_rootfs_size_mib", "forkd_mem_size_mib", "forkd_tap",
+            "forkd_init_git", "forkd_workspace_excludes",
+            "sandbox_mode", "microsandbox_bin", "microsandbox_image",
+            "microsandbox_snapshot", "microsandbox_workspace_mount",
+            "microsandbox_mem_size_mib", "microsandbox_cpus",
+            "microsandbox_timeout_secs", "microsandbox_host_ip",
+            "microsandbox_claude_token_file",
+            "microsandbox_net_default", "microsandbox_net_rules",
+            "microsandbox_extra_args",
         }
         extras = {k: v for k, v in cfg.items() if k not in known_keys}
 
@@ -189,8 +264,67 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
             default_model=cfg.get("default_model"),
             premium_model=cfg.get("premium_model"),
             execute_args=cfg.get("execute_args"),
+            run_in_forkd=cfg.get("run_in_forkd", False),
+            forkd_bin=_expand_env_value(cfg.get("forkd_bin")),
+            forkd_kernel=_expand_env_value(cfg.get("forkd_kernel")),
+            forkd_scripts_dir=_expand_env_value(cfg.get("forkd_scripts_dir")),
+            forkd_use_sudo=cfg.get("forkd_use_sudo", False),
+            forkd_mode=cfg.get("forkd_mode", "cli"),
+            forkd_controller_url=cfg.get("forkd_controller_url", "http://127.0.0.1:8889"),
+            forkd_snapshot_tag=cfg.get("forkd_snapshot_tag"),
+            forkd_per_child_netns=cfg.get("forkd_per_child_netns", True),
+            forkd_image=cfg.get("forkd_image", "node:22-slim"),
+            forkd_extra=cfg.get("forkd_extra", ["python3", "ca-certificates", "git", "chromium"]),
+            forkd_cache_dir=_expand_env_value(cfg.get("forkd_cache_dir", "~/.cache/odin/forkd")),
+            forkd_rootfs_size_mib=cfg.get("forkd_rootfs_size_mib", 4096),
+            forkd_mem_size_mib=cfg.get("forkd_mem_size_mib", 4096),
+            forkd_tap=cfg.get("forkd_tap", "forkd-tap0"),
+            forkd_init_git=cfg.get("forkd_init_git", True),
+            forkd_workspace_excludes=cfg.get(
+                "forkd_workspace_excludes",
+                AgentConfig().forkd_workspace_excludes,
+            ),
+            sandbox_mode=cfg.get("sandbox_mode", "none"),
+            microsandbox_bin=_expand_env_value(cfg.get("microsandbox_bin")),
+            microsandbox_image=cfg.get("microsandbox_image", "node:22-slim"),
+            microsandbox_snapshot=cfg.get("microsandbox_snapshot"),
+            microsandbox_workspace_mount=cfg.get("microsandbox_workspace_mount", "/workspace"),
+            microsandbox_mem_size_mib=cfg.get("microsandbox_mem_size_mib", 4096),
+            microsandbox_cpus=cfg.get("microsandbox_cpus"),
+            microsandbox_timeout_secs=cfg.get("microsandbox_timeout_secs", 1800),
+            microsandbox_host_ip=cfg.get("microsandbox_host_ip"),
+            microsandbox_claude_token_file=_expand_env_value(cfg.get("microsandbox_claude_token_file")),
+            microsandbox_net_default=cfg.get("microsandbox_net_default"),
+            microsandbox_net_rules=cfg.get("microsandbox_net_rules", []),
+            microsandbox_extra_args=cfg.get("microsandbox_extra_args", []),
             extras=extras,
         )
+
+        if agents[name].run_in_forkd:
+            agents[name].forkd_bin = agents[name].forkd_bin or _discover_local_path(
+                "FORKD_BIN",
+                "~/forkd-poc/bin/forkd",
+                "~/bin/forkd",
+            )
+            agents[name].forkd_kernel = agents[name].forkd_kernel or _discover_local_path(
+                "FORKD_KERNEL",
+                "~/forkd-poc/vmlinux",
+                "/var/lib/forkd/kernels/vmlinux",
+                "/var/lib/forkd/vmlinux",
+            )
+            agents[name].forkd_scripts_dir = agents[name].forkd_scripts_dir or _discover_local_path(
+                "FORKD_SCRIPTS_DIR",
+                "~/forkd-poc/forkd/scripts",
+                "/usr/local/share/forkd/scripts",
+                "/opt/forkd/scripts",
+            )
+
+        if agents[name].sandbox_mode == "microsandbox":
+            agents[name].microsandbox_bin = agents[name].microsandbox_bin or _discover_local_path(
+                "MICROSANDBOX_BIN",
+                "~/.local/bin/msb",
+                "~/.microsandbox/bin/msb",
+            )
 
     # Merge built-in defaults for fields the YAML didn't set.
     # The YAML config is a sparse overlay (cli_command, api_key, etc.);
@@ -216,6 +350,10 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
     # Yolo mode: auto-enable API agents when keys are present
     # (but respect explicit disables from the config file)
     _apply_yolo_mode(agents, explicitly_disabled)
+
+    # Fail-soft: drop agents whose harness is not registered so a stale
+    # config entry (e.g. a removed harness) doesn't abort planning.
+    agents = _filter_unknown_harnesses(agents)
 
     # Parse model routing (fall back to defaults if not specified)
     raw_routing = raw.get("model_routing")
@@ -245,6 +383,20 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
     worktree_symlinks = raw_worktree.get("symlinks", raw.get("worktree_symlinks", []))
     auto_finalize = raw_worktree.get("auto_finalize", raw.get("auto_finalize", True))
 
+    # Parse merge_agent config section
+    raw_merge_agent = raw.get("merge_agent")
+    if raw_merge_agent and isinstance(raw_merge_agent, dict):
+        merge_agent_cfg = MergeAgentConfig(**raw_merge_agent)
+    else:
+        merge_agent_cfg = MergeAgentConfig()
+
+    # Parse advisor config section
+    raw_advisor = raw.get("advisor")
+    if raw_advisor and isinstance(raw_advisor, dict):
+        advisor_cfg = AdvisorConfig(**raw_advisor)
+    else:
+        advisor_cfg = AdvisorConfig()
+
     cfg = OdinConfig(
         base_agent=raw.get("base_agent", "claude"),
         base_model=raw.get("base_model"),
@@ -260,12 +412,16 @@ def _load_from_yaml(path: Path, source: str) -> OdinConfig:
         chrome_devtools=chrome_devtools_cfg,
         mcps=raw.get("mcps", ["taskit", "mobile", "chrome-devtools"]),
         execution_timeout_seconds=raw.get("execution_timeout_seconds", 1800),
+        max_turns=raw.get("max_turns"),
         worktree_enabled=worktree_enabled,
         base_branch=base_branch,
         worktree_dir=worktree_dir,
         worktree_post_hooks=worktree_post_hooks,
         worktree_symlinks=worktree_symlinks,
         auto_finalize=auto_finalize,
+        merge_agent=merge_agent_cfg,
+        advisor=advisor_cfg,
+        project_notes_path=raw.get("project_notes_path"),
     )
     return _apply_forced_provider_env(cfg)
 
@@ -280,7 +436,7 @@ def _default_config(source: str) -> OdinConfig:
     agents = {
         "claude": AgentConfig(
             cli_command="claude",
-            capabilities=["reasoning", "planning", "coding", "writing"],
+            capabilities=["reasoning", "planning", "coding", "writing", "run_shell_command", "read_file", "write_file"],
             cost_tier=CostTier.HIGH,
             models={
                 "claude-sonnet-4-6": "default — Sonnet 4.6, fast and capable (1M context)",
@@ -294,7 +450,7 @@ def _default_config(source: str) -> OdinConfig:
         ),
         "codex": AgentConfig(
             cli_command="codex",
-            capabilities=["coding", "writing"],
+            capabilities=["coding", "writing", "run_shell_command", "read_file", "write_file"],
             cost_tier=CostTier.MEDIUM,
             models={
                 "gpt-5.4": "default — strong everyday coding",
@@ -308,7 +464,7 @@ def _default_config(source: str) -> OdinConfig:
         ),
         "gemini": AgentConfig(
             cli_command="gemini",
-            capabilities=["coding", "writing", "research"],
+            capabilities=["coding", "writing", "research", "run_shell_command", "read_file", "write_file"],
             cost_tier=CostTier.LOW,
             models={
                 "gemini-3-flash-preview": "default — Gemini 3 Flash, balanced speed/quality",
@@ -323,7 +479,7 @@ def _default_config(source: str) -> OdinConfig:
         ),
         "minimax": AgentConfig(
             cli_command="opencode",
-            capabilities=["coding", "writing"],
+            capabilities=["coding", "writing", "run_shell_command", "read_file", "write_file"],
             cost_tier=CostTier.LOW,
             models={
                 "minimax-coding-plan/MiniMax-M2.7": "default — latest, strongest agentic coding",
@@ -336,7 +492,7 @@ def _default_config(source: str) -> OdinConfig:
         ),
         "glm": AgentConfig(
             cli_command="opencode",
-            capabilities=["coding", "writing"],
+            capabilities=["coding", "writing", "run_shell_command", "read_file", "write_file"],
             cost_tier=CostTier.LOW,
             models={
                 "zai-coding-plan/glm-4.7": "default — GLM-4.7, balanced cost/quality",
@@ -350,6 +506,9 @@ def _default_config(source: str) -> OdinConfig:
     }
     # Yolo mode: auto-enable API agents when keys are present
     _apply_yolo_mode(agents)
+
+    # Fail-soft: drop agents whose harness is not registered.
+    agents = _filter_unknown_harnesses(agents)
 
     cfg = OdinConfig(
         agents=agents,

@@ -14,7 +14,7 @@ from unittest.mock import patch
 from django.utils import timezone
 
 from .base import APITestCase
-from tasks.models import ReflectionReport, ReflectionStatus, TaskComment, TaskStatus
+from tasks.models import ReflectionReport, ReflectionStatus, TaskComment, TaskStatus, User, UserRole
 
 
 class TestReflectionReportModel(APITestCase):
@@ -29,7 +29,7 @@ class TestReflectionReportModel(APITestCase):
         report = ReflectionReport.objects.create(
             task=self.task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
         )
         self.assertEqual(report.status, ReflectionStatus.PENDING)
@@ -48,7 +48,7 @@ class TestReflectionReportModel(APITestCase):
             report = ReflectionReport.objects.create(
                 task=self.task,
                 reviewer_agent="claude",
-                reviewer_model="claude-opus-4-6",
+                reviewer_model="claude-opus-4-8",
                 requested_by="admin@test.com",
                 status=status_val,
             )
@@ -58,7 +58,7 @@ class TestReflectionReportModel(APITestCase):
         report = ReflectionReport.objects.create(
             task=self.task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
         )
         self.assertEqual(report.task_id, self.task.id)
@@ -71,6 +71,21 @@ class TestReflectEndpoint(APITestCase):
     def setUp(self):
         super().setUp()
         self.board = self.make_board()
+        # A claude agent advertises real models so omitted-params reflect
+        # falls back to select_reviewer_by_context_size (claude +
+        # claude-sonnet-5) instead of the removed stale opus-4-6 default.
+        User.objects.get_or_create(
+            email="claude@odin.agent",
+            defaults={
+                "name": "Claude",
+                "role": UserRole.AGENT,
+                "available_models": [
+                    {"name": "claude-haiku-4-5", "is_default": False},
+                    {"name": "claude-sonnet-5", "is_default": True},
+                    {"name": "claude-opus-4-8", "is_default": False},
+                ],
+            },
+        )
 
     def _reflect(self, task_id, data=None):
         data = data or {}
@@ -126,7 +141,18 @@ class TestReflectEndpoint(APITestCase):
         self.assertEqual(resp.data["status"], "PENDING")
         self.assertEqual(resp.data["task"], task.id)
         self.assertEqual(resp.data["reviewer_agent"], "claude")
-        self.assertEqual(resp.data["reviewer_model"], "claude-opus-4-6")
+        # The deterministic strongest-first fallback picks by
+        # output_price_per_1m_tokens (live registry), not the `is_default`
+        # flag the old random-default path used.
+        from tasks.pricing import get_pricing_table
+        pricing = get_pricing_table()
+        candidates = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"]
+        priced = sorted(
+            ((pricing.get(m, {}).get("output_price_per_1m_tokens"), m) for m in candidates),
+            reverse=True,
+        )
+        expected_model = priced[0][1] if priced and priced[0][0] is not None else "claude-sonnet-5"
+        self.assertEqual(resp.data["reviewer_model"], expected_model)
         # Verify DB
         self.assertEqual(ReflectionReport.objects.filter(task=task).count(), 1)
 
@@ -143,14 +169,14 @@ class TestReflectEndpoint(APITestCase):
     def test_reflect_custom_model_and_prompt(self, mock_delay):
         task = self.make_task(self.board, status=TaskStatus.REVIEW)
         resp = self._reflect(task.id, {
-            "reviewer_agent": "gemini",
-            "reviewer_model": "gemini-2.5-pro",
+            "reviewer_agent": "claude",
+            "reviewer_model": "claude-opus-4-8",
             "custom_prompt": "Focus on error handling",
             "context_selections": ["description", "comments"],
         })
         self.assertEqual(resp.status_code, 202)
-        self.assertEqual(resp.data["reviewer_agent"], "gemini")
-        self.assertEqual(resp.data["reviewer_model"], "gemini-2.5-pro")
+        self.assertEqual(resp.data["reviewer_agent"], "claude")
+        self.assertEqual(resp.data["reviewer_model"], "claude-opus-4-8")
         self.assertEqual(resp.data["custom_prompt"], "Focus on error handling")
         self.assertEqual(resp.data["context_selections"], ["description", "comments"])
 
@@ -172,7 +198,7 @@ class TestReflectionsListEndpoint(APITestCase):
         ReflectionReport.objects.create(
             task=self.task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
         )
         ReflectionReport.objects.create(
@@ -196,7 +222,7 @@ class TestReflectionReportUpdate(APITestCase):
         self.report = ReflectionReport.objects.create(
             task=self.task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
             status=ReflectionStatus.RUNNING,
         )
@@ -277,7 +303,12 @@ class TestReflectionReportUpdate(APITestCase):
         self.assertEqual(self.report.assembled_prompt, "You are a reviewer...")
 
     def test_completed_reflection_posts_comment_on_task(self):
-        """PATCH with COMPLETED + verdict_summary creates a reflection comment on the task."""
+        """PATCH with COMPLETED + verdict_summary creates a reflection comment on the task.
+
+        The verdict is authored by the *reviewer*, so author_email must be the
+        reviewer identity ({agent}+{model}@odin.agent), never requested_by
+        (whoever asked for the reflection) — and never unknown@user.
+        """
         resp = self.client.patch(
             f"/reflections/{self.report.id}/",
             {
@@ -292,13 +323,68 @@ class TestReflectionReportUpdate(APITestCase):
         self.assertIsNotNone(comment, "A reflection comment should be created")
         self.assertIn("NEEDS_WORK", comment.content)
         self.assertIn("Missing input validation", comment.content)
-        self.assertEqual(comment.author_email, "admin@test.com")
-        self.assertEqual(comment.author_label, "claude/claude-opus-4-6")
+        # Reviewer identity, NOT requested_by (admin@test.com) or unknown@user.
+        self.assertEqual(comment.author_email, "claude+claude-opus-4-8@odin.agent")
+        self.assertNotEqual(comment.author_email, "unknown@user")
+        self.assertEqual(comment.author_label, "claude/claude-opus-4-8")
         # Attachments should link back to the report
         self.assertEqual(len(comment.attachments), 1)
         self.assertEqual(comment.attachments[0]["type"], "reflection")
         self.assertEqual(comment.attachments[0]["report_id"], self.report.id)
         self.assertEqual(comment.attachments[0]["verdict"], "NEEDS_WORK")
+
+    def test_completed_reflection_verdict_uses_reviewer_identity_on_auto_path(self):
+        """Auto-triggered reflection sets requested_by='system@taskit', but the
+        verdict comment must still be authored by the reviewer identity — the
+        reviewer wrote the verdict, not the system dispatcher."""
+        auto_report = ReflectionReport.objects.create(
+            task=self.task,
+            reviewer_agent="gemini",
+            reviewer_model="gemini-2.5-pro",
+            requested_by="system@taskit",
+            status=ReflectionStatus.RUNNING,
+        )
+        resp = self.client.patch(
+            f"/reflections/{auto_report.id}/",
+            {
+                "status": "COMPLETED",
+                "verdict": "PASS",
+                "verdict_summary": "All checks pass.",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        comment = TaskComment.objects.filter(
+            task=self.task, comment_type="reflection"
+        ).order_by("-id").first()
+        self.assertEqual(comment.author_email, "gemini+gemini-2.5-pro@odin.agent")
+        self.assertNotEqual(comment.author_email, "system@taskit")
+        self.assertNotEqual(comment.author_email, "unknown@user")
+
+    def test_completed_reflection_never_attributes_to_unknown_user(self):
+        """Even if reviewer fields were somehow blank, the verdict comment must
+        never carry the unknown@user attribution."""
+        blank_report = ReflectionReport.objects.create(
+            task=self.task,
+            reviewer_agent="",
+            reviewer_model="",
+            requested_by="unknown@user",
+            status=ReflectionStatus.RUNNING,
+        )
+        self.client.patch(
+            f"/reflections/{blank_report.id}/",
+            {
+                "status": "COMPLETED",
+                "verdict": "NEEDS_WORK",
+                "verdict_summary": "Needs work.",
+            },
+            format="json",
+        )
+        comment = TaskComment.objects.filter(
+            task=self.task, comment_type="reflection"
+        ).order_by("-id").first()
+        self.assertIsNotNone(comment)
+        self.assertNotEqual(comment.author_email, "unknown@user")
 
     def test_completed_reflection_without_summary_skips_comment(self):
         """PATCH with COMPLETED but empty verdict_summary should NOT create a comment."""
@@ -353,7 +439,7 @@ class TestReflectionCancel(APITestCase):
         defaults = dict(
             task=self.task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
         )
         defaults.update(kwargs)
@@ -411,7 +497,7 @@ class TestReflectionListAll(APITestCase):
         defaults = dict(
             task=task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
         )
         defaults.update(kwargs)

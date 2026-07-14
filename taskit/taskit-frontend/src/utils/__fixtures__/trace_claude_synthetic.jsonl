@@ -1,0 +1,12 @@
+// Synthetic claude_code trace excerpt modeled on the documented
+// `--output-format stream-json --verbose` protocol (see
+// docs/breadcrumb_analysis/trace-data-pipeline/DETAILS.md §4 and FLOW.md).
+//
+// Real Anthropic Claude API events: system init, assistant messages with
+// nested content[] arrays (text + tool_use), tool_results, modelUsage.
+{"type":"system","subtype":"init","model":"claude-sonnet-4-5","tools":["Read","Bash","Edit"]}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Fix the empty Timeline panel bug."}]}}
+{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"Investigating now."},{"type":"tool_use","id":"toolu_001","name":"Read","input":{"file_path":"/Users/.../TraceViewer.tsx"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_001","content":[{"type":"text","text":"// TraceViewer contents"}],"is_error":false}]}}
+{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"Found the bug."}]}}
+{"modelUsage":{"claude-sonnet-4-5":{"inputTokens":1500,"outputTokens":420,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}

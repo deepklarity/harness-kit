@@ -164,7 +164,7 @@ class TestCostTracker:
         store = CostStore(str(odin_dirs["costs"]))
         tracker = CostTracker(store)
 
-        result = TaskResult(success=True, output="done", agent="qwen")
+        result = TaskResult(success=True, output="done", agent="gemini")
         record = tracker.record_task("t1", "sp_abc", result)
         assert record.input_tokens is None
         assert record.total_tokens is None

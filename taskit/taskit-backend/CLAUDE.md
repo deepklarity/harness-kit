@@ -74,7 +74,7 @@ ODIN_WORKING_DIR=                        # Default working dir for odin exec
 # Celery + DAG executor (required when ODIN_EXECUTION_STRATEGY=celery_dag)
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/0
-DAG_EXECUTOR_MAX_CONCURRENCY=3           # Max simultaneous task executions
+DAG_EXECUTOR_MAX_CONCURRENCY=10          # Max simultaneous task executions
 DAG_EXECUTOR_POLL_INTERVAL=5             # Seconds between dependency checks
 ```
 

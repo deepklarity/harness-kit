@@ -1,0 +1,16 @@
+// Synthetic kilo trace excerpt modeled on the kilo protocol documented in
+// docs/breadcrumb_analysis/trace-data-pipeline/DETAILS.md §3 and the harness
+// table in FLOW.md. Kilo emits flat events with `type:"text"|"step_finish"`
+// and `content` as a string at the event root (no `sessionID+part` wrapper).
+//
+// Used to pin the kilo format-detection + timeline-builder path. Real
+// task #110/#112 traces were on the TaskIt board and not committed to this
+// worktree; the JSON shapes here match the documented kilo protocol 1:1.
+{"type":"text","content":"Reading the current spec.","role":"user"}
+{"type":"step_start","step":1,"model":"kilo-pro"}
+{"type":"text","content":"I'll plan a fix.","role":"assistant"}
+{"type":"tool_use","tool":"Bash","input":{"command":"ls -la .odin/logs/"},"tool_id":"call_001"}
+{"type":"tool_result","tool_id":"call_001","output":"total 12\ndrwxr-xr-x .odin/logs/\n","status":"ok"}
+{"type":"text","content":"The trace file is here.","role":"assistant"}
+{"type":"step_finish","step":1,"tokens":{"input":1200,"output":340,"cache":{"read":0,"write":0}}}
+{"type":"text","content":"Closing the loop.","role":"assistant"}

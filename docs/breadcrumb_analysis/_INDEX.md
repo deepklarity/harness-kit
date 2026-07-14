@@ -8,15 +8,19 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 |--------|---------------|
 | `planning-flow/` | End-to-end planning: UI spec creation → WebSocket/PTY → `odin plan --direct` → orchestrator (prompt, agent dispatch, plan parse, task creation). Merges former `odin-plan-mode/`, `spec-to-task-planning/`, `ui-planning-terminal/`. Split into 01-spec-creation, 02-pty-session, 03-orchestrator. |
 | `spec-task-lifecycle/` | Post-planning execution and reflection. Split into sub-flows: DAG dispatch (02) and reflection loop (03) |
+| `task-state-machine-celery-automation/` | The full task state machine in one place: all 8 statuses, operator-driven vs celery-automatic edges, stale recovery, model escalation, merge-gated TESTING promotion, spec finalize → DONE, and the operator rules (no raw-ORM transitions, no worktree edits). DEBUG.md is the <60s fast-first-checks runbook + watch_task.sh reference. Cross-references `spec-task-lifecycle/` for per-hop detail |
 | `harness-isolation-testing/` | Agent harness testing: CLI command construction, MCP config generation, token extraction, streaming |
 | `task-proof-submission/` | Agent proof output → screenshots → TaskIt backend → frontend rendering |
 | `intelligent-agent-routing/` | Task routing: tier-based distribution, premium model upgrade, routing reasoning, config visibility in UI |
+| `board-agent-roster/` | Which agents a board's planner may use: BoardMembership as the enabled flag, toggle endpoints, how the roster reaches the planning prompt, disable-unassigns gotcha |
 | `trace-data-pipeline/` | Trace capture (harness JSONL) → backend ingestion → cost/token computation → frontend TraceViewer. Covers all 6 harness formats, snapshot golden data, and regression testing gaps |
 | `board-project-lifecycle/` | Board creation → `odin init` → git repo setup → worktree integration → spec planning. Covers CLI-first and UI-first paths, config loading, dual-instance (odin vs odin-dev), and common init/plan mistakes |
 | `prompt-presets/` | Prompt presets in CreateTaskModal: static JSON data → backend endpoint → PresetPicker component → form auto-population |
 | `notification-system/` | Full notification flow: 6 backend triggers → notify() filtering → DB bulk_create → 30s frontend poll → bell badge + sound + desktop popup. Also covers Web Push path |
 | `task-preset-tdd-enforcement/` | **PROPOSED** — Task presets with context isolation and verification gates. Embeds TDD philosophy into odin plan/exec |
 | `git-worktree-isolation/` | Git worktree per task, spec branch per spec. Merge deferred to reflection pass. File-locked merge serialization. Covers branch model, worktree lifecycle, merge timing, conflict handling, config, CLI commands |
+| `task-execution-worktree-lifecycle/` | End-to-end spine: dispatch → worktree create → microVM (microsandbox) boot → auto-commit → merge → cleanup. Focuses on the glue plus two recurring pitfalls: the **shadow `.odin/config`** trap and the **run-scoped sandbox cleanup**. Cross-refs `git-worktree-isolation/` and `spec-task-lifecycle/02-execute-and-dispatch/` for depth |
+| `quota-failover-reassignment/` | Quota/429 failover as merged in **W3.11**: detection → ground-truth check via `harness_usage_status` (95% threshold) → 429-with-headroom backs off the *same* agent, genuine exhaustion reassigns to a same-cost-tier fallback. Covers the `harness_usage_status` CLI interface |
 
 ## Quick navigation
 
@@ -34,10 +38,33 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 - **Planning agent output lost?** → `planning-flow/03-orchestrator/DEBUG.md` (known trace gap)
 
 ### Execution & reflection
+- **Task failed or looks stuck — first 60 seconds?** → `task-state-machine-celery-automation/DEBUG.md` (fast-first-checks runbook)
+- **Which transitions am I allowed to make vs celery?** → `task-state-machine-celery-automation/FLOW.md` (edge ownership table)
+- **Rules: raw ORM writes, worktree edits, dispatch protocol?** → `task-state-machine-celery-automation/DETAILS.md` §12
+- **watch_task.sh exit signals / when to use it?** → `task-state-machine-celery-automation/DEBUG.md`
+- **Task flipped FAILED ~2 min after dispatch?** → `task-state-machine-celery-automation/DEBUG.md` (stale recovery)
+- **PASS verdict but task still in REVIEW?** → `task-state-machine-celery-automation/DETAILS.md` §10 (merge gate)
+- **Task changed model/agent by itself?** → `task-state-machine-celery-automation/DETAILS.md` §7 (escalation) and §9 (quota reassignment)
 - **Task stuck in IN_PROGRESS?** → `spec-task-lifecycle/02-execute-and-dispatch/DEBUG.md`
 - **Reflection didn't advance status?** → `spec-task-lifecycle/03-reflection-loop/DEBUG.md`
 - **Agent produced no output?** → `spec-task-lifecycle/02-execute-and-dispatch/DEBUG.md` (check dual dep check)
-- **Task retrying same agent after quota failure?** → `spec-task-lifecycle/03-reflection-loop/DEBUG.md`
+- **What reviewer model does auto-reflection use?** → `spec-task-lifecycle/03-reflection-loop/FLOW.md` (dynamic; no fixed haiku/sonnet default)
+- **PASS verdict but task didn't reach TESTING?** → `spec-task-lifecycle/03-reflection-loop/DETAILS.md` §6 (PASS merges first, then advances)
+- **Reviewer seeing garbled/truncated context?** → `spec-task-lifecycle/03-reflection-loop/DETAILS.md` §4–5 (comment assembly + truncation/laundering guards)
+- **FAIL verdict — is it advisory?** → `spec-task-lifecycle/03-reflection-loop/FLOW.md` (FAIL shares the NEEDS_WORK retry/fail path)
+
+### Task execution + worktree lifecycle
+- **Worktree created inside another worktree / shadow `.odin/config`?** → `task-execution-worktree-lifecycle/DEBUG.md` (root manager at `board.working_dir`)
+- **microVM left running / orphan sandboxes?** → `task-execution-worktree-lifecycle/DEBUG.md` (run-scoped cleanup vs `odin gc --prune`)
+- **Full dispatch → merge → cleanup path?** → `task-execution-worktree-lifecycle/FLOW.md`
+- **Downstream task started while upstream was in REVIEW?** → `task-execution-worktree-lifecycle/DEBUG.md` (REVIEW is now a completed dependency)
+- **Worktree failed — did the task run in project root?** → `task-execution-worktree-lifecycle/FLOW.md` (now FAILED unless `allow_project_root_execution`)
+
+### Quota failover + provider reassignment
+- **Task retrying same agent after a 429?** → `quota-failover-reassignment/DEBUG.md` (often correct — headroom backoff, not a miss)
+- **Provider switched when it shouldn't have (or vice-versa)?** → `quota-failover-reassignment/FLOW.md` (ground-truth 95% threshold)
+- **Reassign comment says "unverified"?** → `quota-failover-reassignment/DEBUG.md` (`harness_usage_status` not importable)
+- **How is the ground-truth usage % obtained?** → `quota-failover-reassignment/DETAILS.md` §7 (`harness_usage_status` CLI/library)
 
 ### Routing & traces
 - **All tasks assigned to one agent?** → `intelligent-agent-routing/DEBUG.md`
@@ -56,6 +83,7 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 - **Fresh install — where to start?** → `board-project-lifecycle/FLOW.md` (Flow 1: CLI-first)
 - **Spec branch shows `—` in UI?** → `board-project-lifecycle/DEBUG.md` (no git repo at plan time)
 - **Used wrong odin binary (stable vs dev)?** → `board-project-lifecycle/DEBUG.md` (Common mistakes table)
+- **After merging odin changes, backend tests error with `TypeError ... unexpected keyword argument`?** → `taskit-backend/tests/test_odin_import_skew.py` (odin version skew: tests imported the main-checkout odin, not the worktree's — `scripts/verify.sh` pins `odin/src` to PYTHONPATH; the guard fails loudly naming the fix)
 - **odin init didn't create git repo?** → `board-project-lifecycle/DEBUG.md` (check `.git/` exists)
 - **Config missing agents after YAML load?** → `board-project-lifecycle/DETAILS.md` §6 (config loading)
 

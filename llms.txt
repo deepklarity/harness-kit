@@ -1,0 +1,24 @@
+# Harness Kit
+
+> Open-source harness-engineering toolkit for building software with AI coding
+> agents: multi-agent orchestration CLI (odin), task board with proof-of-work
+> (taskit), and Pattern Engineering — reusable engineering patterns (TDD-first
+> execution, structured RCA, knowledge compounding, cost-aware delegation)
+> that adopt into any repo.
+
+## Start here
+
+- [README](README.md): what the kit is, quickstarts, FAQ
+- [Pattern Engineering Quickstart](docs/Quickstart.md): agent-first adoption
+  flow — audit a repo, score it, adopt approved practices
+- [Run the kit](QUICKSTART.md): fresh clone to a merged sample task
+- [AGENTS.md](AGENTS.md): entrypoint for coding agents working in this repo
+
+## Core docs
+
+- [Philosophy — 20 tenets](odin/docs/philosophy.md)
+- [Adoption checklist — 11 scored areas](docs/adoption/CHECKLIST.md)
+- [Testing process](docs/testing_process/testcase_process_and_philosophy.md)
+- [Doc index](docs/_INDEX.md)
+- [odin CLI](odin/README.md)
+- [taskit board](taskit/README.md)

@@ -1,0 +1,299 @@
+You are auditing a task executed by an AI agent.
+
+
+## CTX — proof artifact (`.proof/task-187/proof.md`)
+
+The worker writes the canonical, complete proof file to `.proof/task-187/proof.md`
+in the worktree (read-only worktree mount; `cat`, `grep`, `head` freely).
+Raw suite outputs sit beside it as `.proof/task-187/<name>.txt` — full output, no
+cap. Read **`.proof/task-187/proof.md` first** — it is the primary, authoritative
+source for what the worker claims and where it lives.
+
+For each acceptance criterion, choose complete vs minimal context: read
+the full proof file once, then grep the section you need. Do NOT re-run
+the verify suites to fill gaps — the worker already attached raw outputs
+under `.proof/task-187/`. The proof path carries no truncation or size cap; read
+the full file when a criterion needs the full chain of evidence.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Work efficiently: batch independent file reads/greps into a single step, and do NOT re-read a file or re-run a search you have already done — each extra tool call is a full model round-trip.
+- **REPORT FORMAT: ONE fenced JSON block, then optionally a markdown rendering.** Your first non-blank line MUST be a single ```json ... ``` fence containing a JSON object with at minimum a `verdict` key. After the fence you MAY also emit the legacy `### Quality Assessment / ### Verdict` sections as a human-readable rendering of the same JSON — the JSON block is the source of truth, the rendering is for the board UI.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.** This task may have been attempted by multiple agents or models previously. Comments are separated by "--- CURRENT ATTEMPT ---" when prior attempts exist. Use earlier history for understanding context only — do NOT penalize the current agent for failures, quota issues, or code quality problems from previous agents/models. Your verdict must reflect solely the current agent's work.
+
+## TASK UNDER REVIEW
+Title: Wave-planning automation: draft dispatchable briefs from BACKLOG (W4.3)
+Status: DONE
+Agent: claude ((historical))
+Duration: N/Ams | Tokens: N/A
+
+## [CTX:description] Task Description
+Fable roadmap task Wave-planning automation: draft dispatchable briefs from BACKLOG (W4.3). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+
+## [CTX:execution_result] Execution Output
+Merge task 187: Wave-planning automation: draft dispatchable briefs from BACKLOG (W4.3)
+
+Task-Id: 187
+Spec-Id: sp_fable_w4
+
+
+ .proof/task-187/draft_w5_generated.py              | 283 ++++++++++++
+ .proof/task-187/proof.md                           | 218 +++++++++
+ .proof/task-187/self_audit_diff.txt                |   2 +
+ .proof/task-187/verify_sh_odin_backend.txt         |  12 +
+ .proof/task-187/wave_draft_tests.txt               |  38 ++
+ docs/fable_roadmap/bootstrap/wave_draft.py         | 496 +++++++++++++++++++++
+ tests/fable_roadmap/fixtures/BACKLOG_snapshot.md   | 310 +++++++++++++
+ .../fixtures/agent_models_snapshot.json            |   9 +
+ tests/fable_roadmap/test_wave_draft.py             | 302 +++++++++++++
+ 9 files changed, 1670 insertions(+)
+
+
+## [CTX:comments] Comments & Proof
+--- CURRENT ATTEMPT ---
+Proof of work (committed at .proof/task-187/proof.md):
+
+# Task 187 — Wave-planning automation: draft dispatchable briefs from BACKLOG
+
+## What was built
+
+A standalone script, `docs/fable_roadmap/bootstrap/wave_draft.py`, that
+deterministically parses `docs/fable_roadmap/BACKLOG.md`'s `## NOW` / `## READY`
+`### N. Title — meta` entries and renders a `create_waveN.py`-style loader
+draft: `spec` + `TASKS` dicts with title, full brief (Context/Scope/Acceptance/
+Verify + the standard working-protocol footer), suggested agent + latest
+model (resolved from `taskit/taskit-backend/data/agent_models.json`, never
+hardcoded/guessed), and `depends` edges when one entry names another via
+`(item N)`.
+
+It is a **standalone script**, not an `odin` subcommand — every existing wave
+loader (`create_wave1.py` … `create_wave4.py`) already lives in
+`docs/fable_roadmap/bootstrap/` as a standalone script, so this keeps the same
+shape rather than inventing a new CLI-registration path for something run
+once per wave (Default First / Simplicity is a feature).
+
+The generated file is written to disk only — it never touches the board. The
+operator reviews/edits it, then runs it exactly like any other
+`create_waveN.py` loader.
+
+## Files changed
+
+- `docs/fable_roadmap/bootstrap/wave_draft.py` (new) — parser + selector +
+  dependency-finder + renderer + CLI (`cli_main`).
+- `tests/fable_roadmap/test_wave_draft.py` (new) — 27 tests, TDD (written and
+  confirmed red before `wave_draft.py` existed).
+- `tests/fable_roadmap/fixtures/BACKLOG_snapshot.md` (new) — frozen copy of
+  the current `BACKLOG.md`, used by the parser tests so future edits to the
+  live backlog don't retroactively break this suite.
+- `tests/fable_roadmap/fixtures/agent_models_snapshot.json` (new) — frozen
+  subset of `agent_models.json`'s `default_model` shape, for deterministic
+  model-resolution tests independent of the live seed file.
+
+## Design decisions worth naming
+
+- **Deterministic parsing only** (per scope item 2) — no LLM call inside the
+  parser/selector/renderer. `argparse` reads BACKLOG.md text with regexes for
+  the `### N. Title — WS-X · Size Y · suggested: agent [— STATUS]` header
+  shape and `**Label.**`/`**Label:**` body sections. Nothing is inferred from
+  a model; everything is copied verbatim from the source entry.
+- **Fail loudly, never invent**: an entry missing `Scope`/`Acceptance`/`Verify`
+  is rejected with a named reason (e.g. `missing required section(s): scope,
+  acceptance, verify`) and skipped — never backfilled with placeholder text.
+  Entries marked `DISPATCHED(...)` or `BLOCKED(reason)` in BACKLOG.md are
+  likewise skipped with the status echoed in the reason. All skip reasons are
+  printed to stderr AND recorded in the generated draft's header comment, so
+  the operator sees what was left out and why without re-deriving it.
+- **Suggested agent is a default, not a requirement** — a well-formed entry
+  lacking a `suggested:` field (seen live: `0e`, `0f` in the real BACKLOG)
+  still gets drafted, defaulted to `claude` with an inline
+  `# agent defaulted — review before dispatch` comment on that line. This
+  matches the repo's Default First tenet (suggestive, always overridable) —
+  it is a routing choice, not invented acceptance criteria.
+- **Model resolution reads `agent_models.json` directly** rather than
+  hardcoding a `MODEL_MAP` inside the generator — single source of truth,
+  no second place for the model lineup to drift out of sync. An agent with no
+  resolvable `default_model` raises `KeyError` (fail loudly) rather than
+  guessing.
+- **Description rendering is injection-safe.** The straightforward approach
+  (nest the assembled brief inside an f-string, like the hand-written
+  `create_wave4.py` does for its `COMMON_FOOTER` interpolation) breaks the
+  moment any BACKLOG prose contains a literal `{`/`}` — the generated file
+  would fail to compile or silently mis-render. `wave_draft.py` instead emits
+  a **plain** (non-f) triple-quoted string literal by default (braces are
+  inert there — readable multi-line output, matching the hand-authored
+  loaders' shape) and falls back to `repr()` only when the text itself
+  contains a `"""` or trailing-quote/backslash that would break a
+  triple-quoted block. Covered by
+  `test_description_survives_braces_in_source_text`.
+- **Dependency edges only wire within the drafted batch.** `find_dependencies`
+  scans Context/Scope/Acceptance/Verify text for `item N` references and adds
+  an edge only when `N` is also selected in this run — a reference to an
+  item outside the batch is silently omitted rather than creating a
+  `depends_on` pointer to a task that will never exist.
+- **`next_wave_id` auto-increments** past the highest existing
+  `create_waveN.py` in `bootstrap/`, so the default invocation needs no
+  `--wave-id` argument, while still being fully overridable.
+
+## Build / compile check
+
+```
+$ python3 -m py_compile docs/fable_roadmap/bootstrap/wave_draft.py
+COMPILE OK
+```
+
+## Test-first (TDD) evidence
+
+1. Wrote `tests/fable_roadmap/test_wave_draft.py` (27 tests) against a
+   *not-yet-existing* `wave_draft.py`.
+2. Confirmed red: `python3 -m pytest tests/fable_roadmap/test_wave_draft.py -q`
+   → 26 collection errors (`FileNotFoundError` — module not found).
+3. Implemented `wave_draft.py`.
+4. Green: full run below (also saved verbatim to `.proof/task-187/wave_draft_tests.txt`).
+
+```
+27 passed in 0.08s
+```
+
+### Scenario matrix covered by the 27 tests
+
+- Parser: well-formed entry (title/WS/size/suggested-agent/context/scope/
+  acceptance/verify all extracted correctly).
+- Parser: `suggested: minimax, review by claude` → primary agent `minimax`.
+- Parser: `DISPATCHED (wave 4, W4.1)` and `BLOCKED(design)` status + detail
+  extraction.
+- Parser: entry with no `suggested:` field parses to `suggested_agent=None`
+  (selection-time defaulting is a separate concern from parsing).
+- Parser: `**Status.**`/`**Original context.**` fallback populates
+  `context_text` when `**Context.**` is absent (real case: BACKLOG entry
+  `0g`).
+- Parser: NOW vs READY section tagging; Parked/DECISION sections (plain
+  bullet lists, not `### N.` headers) never produce entries.
+- Selection: dispatched/blocked entries skipped with a reason naming the
+  status; skip reason substring-asserted (`"dispatch"`/`"block"` present).
+- Selection: entry missing Scope/Acceptance/Verify (real case: BACKLOG `0d`)
+  rejected with a reason naming `"acceptance"` — proves "fail loudly, don't
+  invent."
+- Selection: agent-default marking (`0e` → `claude`, `agent_defaulted=True`;
+  `1` keeps its explicit `minimax`, `agent_defaulted=False`).
+- Selection: `top_n` cap, `top_n` larger than available valid entries (no
+  crash, no duplicates), and document-order preservation.
+- Dependencies: `item 1` reference inside entry `2`'s Scope wires a real
+  `depends` edge when both are selected; omitted when the target isn't in
+  the batch.
+- Rendering: output compiles (`compile()`), contains `SPEC_ODIN_ID`/`TASKS =`/
+  every selected title, resolves models from `agent_models.json`, raises
+  `KeyError` for an unresolvable agent, renders `depends` lists correctly
+  (verified via `ast`-based extraction of the `TASKS` list — the generated
+  file's own `manage.py`/Django guard makes `exec()`-ing the whole module a
+  test anti-pattern), every description carries the common working-protocol
+  footer, and braces inside source prose survive intact (regression test for
+  the f-string-injection bug caught and fixed during this task).
+- `next_wave_id`: increments past `create_wave1..4.py` → `sp_fable_w5`;
+  empty dir → `sp_fable_w1`.
+- **Live smoke test** (not the frozen fixture): parses the actual current
+  `docs/fable_roadmap/BACKLOG.md`, selects top-5, resolves against the real
+  `agent_models.json`, and compiles the result — proves the acceptance
+  criterion end to end, not just against a frozen snapshot.
+
+## Acceptance criteria — evidence
+
+> Running it against the current BACKLOG.md produces a loader draft for the
+> top entries that the operator could dispatch after <5
+
+## [CTX:dependencies] Dependent Tasks
+No blocking dependencies.
+
+## [CTX:metadata] Task Metadata
+spec=sp_fable_w4/w5 task_id=187 status=DONE
+
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers. The JSON block
+is the source of truth for the parser; the markdown is a convenience
+rendering the parser will ignore if both are present.
+
+### Required JSON contract
+
+Your first non-blank line MUST be a fenced JSON block:
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification, the same one you'd put after ### Verdict.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason. Then defects (file:line).",
+  "slop_detection": "Specific AI slop found, or 'None.'",
+  "improvements": "Bullet list of up to 5 actionable items (what, where, why). 'None.' if clean.",
+  "agent_optimization": "Description clarity / model tier / token efficiency / prompt improvement.",
+  "quota_failure": "QUOTA_FAILURE: <agent_name> if the current attempt hit a quota/rate limit; otherwise 'None.'.",
+  "fix_list": ["targeted", "fix", "items", "for", "rework"]
+}
+```
+
+Rules:
+- `verdict` MUST be exactly `PASS`, `NEEDS_WORK`, or `FAIL` (uppercase). A
+  bare word with no review content (just "PASS" alone, or a verdict
+  keyword buried in CLI noise) is treated as a reviewer failure — the
+  system will NOT honor it. The JSON object must be the FIRST thing you
+  emit, complete and parseable, or your review will not be processed.
+  Do NOT skip the structured JSON just because the verdict is obvious;
+  emit the JSON with full sections, even if the verdict is PASS with
+  nothing else to flag.
+- `summary` is the one-sentence justification. It appears on the board
+  as the verdict summary. The "Evidence rules" below apply to it.
+- `fix_list` is REQUIRED for `NEEDS_WORK`: name the exact artifact or
+  change needed so the rework is scoped, not a blind redo. Empty list
+  `[]` is fine for `PASS` and `FAIL`.
+- `quality_assessment`, `slop_detection`, `improvements`,
+  `agent_optimization`, `quota_failure` are strings; default to
+  `"None."` when there's nothing to report.
+- Do NOT emit anything before the opening ```json fence. No
+  preamble, no narration, no permission requests, no conversational
+  text. The parser uses the JSON block as the first content and
+  anything before it is treated as noise.
+
+### Verdict rubric (applies to `verdict` in the JSON)
+
+Choose from what the evidence PROVES. Each rework round costs a full VM
+boot, environment rebuild, and tokens — so FAIL and NEEDS_WORK must be
+earned by substance, never spent on process trivia or invented rules.
+
+- PASS — every acceptance criterion is verifiably met and the work is
+  correct, safe, and builds/runs. Minor style or proof-formatting nits
+  do NOT block a PASS; put them in `improvements`.
+- NEEDS_WORK — the work is substantially correct but has a fixable
+  gap: a missing or truncated proof artifact, an unmet non-critical
+  criterion, or a process slip that does not make the code wrong. Pair
+  EVERY NEEDS_WORK with a TARGETED fix list (the `fix_list` field in
+  the JSON, or a list of items under "### Actionable Improvements" in
+  the rendering — name the exact artifact or change needed) so the
+  rework is scoped, not a blind redo.
+- FAIL — reserved for work that is WRONG, UNSAFE, or UNVERIFIABLE: it breaks the build or a downstream integration, corrupts state, crashes the orchestrator, contradicts a stated acceptance criterion, or supplies no evidence that the core behavior works. Also use FAIL for quota/resource exhaustion (justification must mention "quota" or "rate limit") so the system can reassign to a different agent.
+
+Evidence rules — apply these BEFORE choosing a verdict:
+- CITE OR DROP. Any claimed rule/policy/convention violation MUST quote the exact rule text and name the file it lives in (e.g. CLAUDE.md: "Never run ANY git stash command"). If you cannot quote and locate the rule, it does not exist for this review — you may NOT lower the verdict for it; raise it in `improvements` at most. A cited rule only counts if its stated scope actually covers this situation (a rule scoped to "shared repos / concurrent sessions" is not violated by an action inside the task's own isolated worktree). If a rule violation affects the verdict, include that exact citation in the report text.
+- A truncated, malformed, or missing proof artifact is a REQUEST, not a verdict. Name the specific artifact you need and ask for it (NEEDS_WORK at most). It only drives FAIL when it leaves the CORE behavior genuinely unverifiable AND no other evidence (code you can read, build output, comments) establishes correctness.
+- Judge the SUBSTANCE of the best available evidence. Tasks may span
+  several attempts; earlier attempts' partial numbers or
+  contradictions with history are NOT defects of the current work.
+- Formatting/completeness of proof comments is NOT a verdict criterion
+  when the underlying acceptance criteria are verifiably met; mention
+  formatting issues in `improvements` instead.
+- Comments authored by a human operator (non-agent email) are
+  authoritative context — do not contradict them.
+- Do not demand artifacts the environment cannot produce (e.g. an
+  ODIN-STATUS block when the run was concluded by an operator).
+
+### Optional markdown rendering (after the JSON block)
+
+After the JSON fence you MAY emit the legacy sections as a human-readable rendering of the same content. The parser uses the JSON as the source of truth and ignores the rendering, so emitting it is purely for the board UI. The rendering is OPTIONAL — the JSON block is sufficient on its own. The legacy section names, in order, are:
+
+- `### Quality Assessment`
+- `### Slop Detection`
+- `### Actionable Improvements`
+- `### Agent Optimization`
+- `### Quota / Resource Failure`
+- `### Verdict`

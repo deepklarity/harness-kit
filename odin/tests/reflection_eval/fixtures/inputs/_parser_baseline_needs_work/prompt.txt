@@ -1,0 +1,23 @@
+You are auditing a task executed by an AI agent.
+
+## CONSTRAINTS
+- READ-ONLY mode.
+
+## TASK UNDER REVIEW
+Title: Refactor auth middleware to use the new token store
+Status: REVIEW
+Agent: codex (gpt-5)
+Duration: 90000ms | Tokens: 11,000
+
+## [CTX:description]
+Replace direct DB lookups in tasks/middleware.py with calls to the new TokenStore singleton. Keep backward compatibility for the cookie-based path.
+
+## [CTX:execution_result]
+The agent updated tasks/middleware.py and tasks/authentication.py. Tests pass for the new path; the legacy cookie path now throws ImportError because TokenStore was not initialized.
+
+## [CTX:comments] Comments & Proof
+- [status_update] Refactor done.
+
+## YOUR REPORT
+
+Output either a fenced JSON block or the legacy ### sections.

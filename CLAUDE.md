@@ -8,7 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Git Safety: No Stash
 
-**Never run ANY `git stash` command** — not `git stash`, `git stash list`, `git stash pop`, `git stash show`, or any other stash subcommand. This is a hard ban on the entire `git stash` family, including read-only variants. Multiple agents may work in parallel on the same repo; stash operations create invisible shared state that causes silent data loss across concurrent sessions. Use branches, temporary commits, or disk-anchored files instead. If you need to check for uncommitted changes, use `git status` or `git diff`.
+**Never run ANY `git stash` command in the main repo checkout or any shared context.** Multiple agents work in parallel on this repo; stash operations there create invisible shared state that causes silent data loss across concurrent sessions. Use branches, temporary commits, or disk-anchored files instead; check for uncommitted changes with `git status` or `git diff`.
+
+**Exception — isolated task worktrees:** an agent running inside its own task worktree (`.odin/worktrees/...`) may use stash on its own work; the stash is scoped to that worktree and cannot affect other sessions. Prefer temporary commits anyway (a crashed run loses stashed work), but stash use inside an isolated worktree is NOT a rule violation and must not, on its own, fail a review.
 
 ## Design Principles
 
@@ -23,9 +25,38 @@ This applies everywhere:
 
 **Solve the actual problem.** Don't write a framework when a function will do. Don't generalize from one instance. Don't add config for a decision you can just make. If the code feels awkward, question the data model before adding helpers to work around it. The right fix is usually upstream of where the symptom appeared.
 
+## Operator Communication Contract (user directive)
+
+While working autonomously, keep the user on the same page with **clear, well-formatted
+checkpoint updates** — not a silent wall of tool calls, and not raw logs:
+
+1. **Checkpoint at every meaningful transition** — dispatch, gate pass/fail, failure
+   triage, phase change, commit. One short block: *what just happened → what it means
+   → what happens next*.
+2. **At every phase boundary (or ~10–15 min of autonomous work), post a structured
+   status** — a compact table or bullet list of: where we are, what's in flight,
+   what's blocked, what's next. Write for a teammate catching up, not a log file.
+3. **Surface course changes explicitly.** If evidence changes the plan, say so in one
+   sentence *before* acting on the new direction — this is the anti-"off the trail"
+   guard.
+4. **Encode repetitive instructions immediately.** When the user gives an instruction
+   that will apply again ("always X", "from now on Y"), write it into the right durable
+   file (this file, `docs/fable_roadmap/RESUME.md` for operator rules, or
+   `docs/patterns/` via `/hk-compound`) in the same turn, and tell the user where it
+   was encoded. A standing instruction that lives only in chat history dies with the
+   session.
+5. **Documentation stays minimal (user directive).** Roadmap operation uses
+   exactly three living files — state (`RESUME.md`), queue (`BACKLOG.md`), runbook
+   (`ORCHESTRATION.md`) — plus a short per-audit report. Never re-type the same
+   state into multiple files; never add trackers, session logs, or status
+   documents. No dates in prose (filenames and git carry time), no incident-number
+   citations, no personal info, no task-id trivia in docs. When docs and reality
+   diverge, fix the one doc — don't grow another. Time goes to shipping work
+   through the board, not documenting it.
+
 ## Philosophy Grounding
 
-**Read `odin/docs/philosophy.md` at the start of every session.** It defines the 19 core tenets that govern how this repo is built. Don't just read it — internalize it. Every design decision, code review, and architectural choice should be traceable to one or more of those tenets.
+**Read `odin/docs/philosophy.md` at the start of every session.** It defines the 20 core tenets that govern how this repo is built. Don't just read it — internalize it. Every design decision, code review, and architectural choice should be traceable to one or more of those tenets.
 
 ### Applying philosophy in practice
 
@@ -345,6 +376,23 @@ See `docs/testing_process/testcase_process_and_philosophy.md` § "When Something
 | Model/serializer | `taskit-backend/tests/` + snapshot tests | API response check |
 | Frontend component | `taskit-frontend/ npm run test:run` | Visual check in browser |
 | Model field added | Snapshot tests + serializer test | API response includes field + UI renders it |
+
+### One-shot verify gate
+
+The single source of truth for "is the repo green?" is `scripts/verify.sh`. POSIX sh,
+runnable from repo root. No args runs every suite; pass suite names to scope it.
+
+```bash
+scripts/verify.sh                    # all four suites, summary table, wall clock
+scripts/verify.sh odin snapshots     # subset only
+```
+
+Internally it shells out to the per-suite commands in the rows above (with the
+right working directory and env vars), captures each tool's native summary
+line, prints a SUITE / RESULT / TESTS / SECONDS table, and exits non-zero if
+**any** suite is red — including the 5 known-red snapshot cost tests (a
+separate task fixes them; the gate reports them honestly rather than masking
+or xfailing). Per-suite output is preserved under `.verify-logs/`.
 
 ### Snapshot tests
 

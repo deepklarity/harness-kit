@@ -146,6 +146,16 @@ async def wait_for_exit(
     grace period starts — if the session doesn't exit naturally within that
     window, it is killed and exit code 0 is returned (the agent finished
     successfully; only child processes like MCP servers were lingering).
+
+    The timeout budget is measured in *active* polls (``elapsed`` accumulates
+    the poll interval, not wall-clock), so a host sleep does NOT consume it:
+    while the host is suspended the event loop pauses too, ``asyncio.sleep``
+    returns late but ``elapsed`` only advances by ``interval``, and on wake
+    polling resumes against an unchanged budget. This is the desired behavior
+    for sleep-resilience — do not "fix" this to ``time.monotonic()``/``time.
+    time()`` without also adding sleep-gap detection (see
+    ``SleepAwareDeadline`` in taskit's dag_executor), or an overnight host
+    sleep would time out a healthy run.
     """
     marker = Path(output_file + ".exit")
     output_path = Path(output_file)

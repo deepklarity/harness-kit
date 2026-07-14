@@ -1,0 +1,60 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "taskit_add_attachment": "allow",
+    "taskit_add_comment": "allow",
+    "click": "allow",
+    "close_page": "allow",
+    "drag": "allow",
+    "emulate": "allow",
+    "evaluate_script": "allow",
+    "fill": "allow",
+    "fill_form": "allow",
+    "get_console_message": "allow",
+    "get_network_request": "allow",
+    "handle_dialog": "allow",
+    "hover": "allow",
+    "list_console_messages": "allow",
+    "list_network_requests": "allow",
+    "list_pages": "allow",
+    "navigate_page": "allow",
+    "new_page": "allow",
+    "performance_analyze_insight": "allow",
+    "performance_start_trace": "allow",
+    "performance_stop_trace": "allow",
+    "press_key": "allow",
+    "resize_page": "allow",
+    "select_page": "allow",
+    "take_memory_snapshot": "allow",
+    "take_screenshot": "allow",
+    "take_snapshot": "allow",
+    "type_text": "allow",
+    "upload_file": "allow",
+    "wait_for": "allow",
+    "external_directory": "allow"
+  },
+  "mcp": {
+    "taskit": {
+      "type": "local",
+      "command": [
+        "taskit-mcp"
+      ],
+      "environment": {
+        "TASKIT_URL": "http://localhost:9100",
+        "TASKIT_AUTH_TOKEN": "",
+        "TASKIT_TASK_ID": "",
+        "TASKIT_AUTHOR_EMAIL": "",
+        "TASKIT_AUTHOR_LABEL": ""
+      }
+    },
+    "chrome-devtools": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--headless"
+      ]
+    }
+  }
+}

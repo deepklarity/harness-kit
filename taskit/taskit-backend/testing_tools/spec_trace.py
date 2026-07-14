@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Spec execution trace diagnostic.
 
-Full trace of a spec's execution: tasks, dependencies, timeline, problems.
+Full trace of a spec's execution: tasks, dependencies, timeline, runs, problems.
 
 Usage:
     cd taskit/taskit-backend
@@ -10,9 +10,12 @@ Usage:
     python testing_tools/spec_trace.py <spec_id> --json
     python testing_tools/spec_trace.py <spec_id> --sections tasks,problems
 """
+import os
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _utils import (
     setup_django, parse_args, want_section,
@@ -22,9 +25,11 @@ from _utils import (
 
 setup_django()
 
-from tasks.models import Spec, Task, TaskComment, TaskHistory, TaskStatus  # noqa: E402
+from tasks.models import Spec, Task, TaskComment, TaskHistory, TaskRun, TaskStatus, MergeAttempt, MistakeEntry  # noqa: E402
+from tasks.pricing import compute_spec_merge_summary  # noqa: E402
+from tasks.spec_story import build_spec_story, topological_sort  # noqa: E402
 
-ALL_SECTIONS = {"header", "tasks", "deps", "timeline", "comments", "problems"}
+ALL_SECTIONS = {"header", "tasks", "deps", "timeline", "comments", "problems", "runs", "merges", "story", "mistakes"}
 
 STATUS_SYMBOLS = {
     TaskStatus.DONE: "+",
@@ -35,38 +40,19 @@ STATUS_SYMBOLS = {
     TaskStatus.FAILED: "x",
     TaskStatus.TODO: ".",
     TaskStatus.BACKLOG: ".",
+    # CANCELED is terminal-neutral (fable task 192): the work item was
+    # parked by an operator, not by the agent. Surface it with its own
+    # glyph so the trace stays legible — distinct from FAILED's 'x'
+    # and DONE/REVIEW/TESTING's '+'.
+    TaskStatus.CANCELED: "-",
 }
 
 TERMINAL_STATUSES = {TaskStatus.DONE, TaskStatus.REVIEW, TaskStatus.TESTING}
 ACTIVE_STATUSES = {TaskStatus.IN_PROGRESS, TaskStatus.EXECUTING}
+# CANCELED is terminal-neutral — not in TERMINAL_STATUSES (so a downstream
+# dep stays WAITING, not BLOCKED) and not in ACTIVE_STATUSES (so the
+# stuck-detection never complains about a parked task).
 STUCK_THRESHOLD_SECONDS = 600
-
-
-def topological_sort(tasks):
-    """Sort tasks by dependency order (Kahn's algorithm). Falls back to ID order on cycles."""
-    task_map = {str(t.id): t for t in tasks}
-    in_degree = defaultdict(int)
-    dependents = defaultdict(list)
-
-    for t in tasks:
-        tid = str(t.id)
-        for dep in t.depends_on or []:
-            if dep in task_map:
-                in_degree[tid] += 1
-                dependents[dep].append(tid)
-
-    queue = [str(t.id) for t in tasks if in_degree[str(t.id)] == 0]
-    result = []
-    while queue:
-        node = queue.pop(0)
-        result.append(node)
-        for dep_id in dependents[node]:
-            in_degree[dep_id] -= 1
-            if in_degree[dep_id] == 0:
-                queue.append(dep_id)
-
-    remaining = [str(t.id) for t in tasks if str(t.id) not in result]
-    return [task_map[tid] for tid in result + remaining]
 
 
 def detect_problems(tasks, all_histories):
@@ -147,13 +133,15 @@ def trace_spec(spec_id, mode="standard", sections=None):
     # Pre-fetch all histories and comments once (used by multiple sections)
     all_histories = list(TaskHistory.objects.filter(task_id__in=task_ids).order_by("changed_at"))
     all_comments = list(TaskComment.objects.filter(task_id__in=task_ids).order_by("created_at"))
+    all_runs = list(TaskRun.objects.filter(task_id__in=task_ids).order_by("-started_at"))
+    all_mistakes = list(MistakeEntry.objects.filter(spec=spec).order_by("-created_at", "-id"))
     problems = detect_problems(tasks, all_histories)
 
     # Aggregate token/duration stats
     agg_tokens = 0
     agg_duration = 0
     for t in tasks:
-        total, _, _ = extract_token_parts(t.metadata)
+        total, _, _ = extract_token_parts(t)
         agg_tokens += total
         agg_duration += (t.metadata or {}).get("last_duration_ms", 0) or 0
 
@@ -174,11 +162,12 @@ def trace_spec(spec_id, mode="standard", sections=None):
             "total_duration_ms": agg_duration,
             "problem_count": len(problems),
             "problems": problems,
+            "mistake_count": len(all_mistakes),
         }
         if want_section("tasks", sections):
             data["tasks"] = []
             for t in topological_sort(tasks):
-                total, inp, out = extract_token_parts(t.metadata)
+                total, inp, out = extract_token_parts(t)
                 data["tasks"].append({
                     "id": t.id,
                     "title": t.title,
@@ -186,10 +175,29 @@ def trace_spec(spec_id, mode="standard", sections=None):
                     "agent": t.assignee.name if t.assignee else None,
                     "tokens": {"total": total, "input": inp, "output": out},
                     "duration_ms": (t.metadata or {}).get("last_duration_ms"),
+                    "failure_class": (t.metadata or {}).get("failure_class"),
                     "depends_on": t.depends_on or [],
                 })
         if want_section("comments", sections):
             data["comment_count"] = len(all_comments)
+        if want_section("runs", sections):
+            data["runs"] = [
+                {
+                    "task_id": r.task_id,
+                    "run_token": r.run_token,
+                    "state": r.state,
+                    "pid": r.pid,
+                    "sandbox_name": r.sandbox_name,
+                    "started_at": r.started_at.isoformat(),
+                    "last_heartbeat": r.last_heartbeat.isoformat(),
+                    "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                }
+                for r in all_runs
+            ]
+        if want_section("merges", sections):
+            data["merges"] = compute_spec_merge_summary(tasks)
+        if want_section("story", sections):
+            data["story"] = build_spec_story(spec)["tasks"]
         print_json(data)
         return
 
@@ -199,7 +207,8 @@ def trace_spec(spec_id, mode="standard", sections=None):
         tok = f"{agg_tokens:,}" if agg_tokens else "-"
         dur = format_duration(agg_duration)
         prob = f"{len(problems)} problems" if problems else "ok"
-        print(f"Spec #{spec.id}: {len(tasks)} tasks ({status_str}) | {tok} tokens | {dur} | {prob}")
+        mistakes = f", {len(all_mistakes)} mistakes" if all_mistakes else ""
+        print(f"Spec #{spec.id}: {len(tasks)} tasks ({status_str}) | {tok} tokens | {dur} | {prob}{mistakes}")
         if problems:
             for p in problems:
                 print(f"  x {p}")
@@ -243,7 +252,9 @@ def trace_spec(spec_id, mode="standard", sections=None):
                     if dep_task:
                         dep_symbols.append(f"{STATUS_SYMBOLS.get(dep_task.status, '?')}{dep_id}")
                 deps_str = f" [{', '.join(dep_symbols)}]"
-            print(f"  {symbol} {t.id:<4} {title:<28} {t.status:<14} {agent:<12} {duration:<9} {tokens:<8}{deps_str}")
+            fc = (t.metadata or {}).get("failure_class")
+            fc_str = f" {{{fc}}}" if fc and t.status == TaskStatus.FAILED else ""
+            print(f"  {symbol} {t.id:<4} {title:<28} {t.status:<14} {agent:<12} {duration:<9} {tokens:<8}{deps_str}{fc_str}")
         print()
 
     if want_section("deps", sections):
@@ -318,6 +329,70 @@ def trace_spec(spec_id, mode="standard", sections=None):
                             print(f"      {line}")
             print()
 
+    if want_section("runs", sections):
+        if all_runs:
+            print(f"  {'TASK RUNS':^66}")
+            print(f"  {'-' * 66}")
+            print(f"  {'Task':<6} {'Token':<10} {'State':<10} {'PID':<8} {'Started':<10} {'Heartbeat':<10}")
+            print(f"  {'-' * 66}")
+            for r in all_runs:
+                started = r.started_at.strftime("%H:%M:%S")
+                heartbeat = r.last_heartbeat.strftime("%H:%M:%S")
+                print(
+                    f"  {r.task_id:<6} {r.run_token[:8]:<10} {r.state:<10} "
+                    f"{r.pid or '-':<8} {started:<10} {heartbeat:<10}"
+                )
+            print()
+
+    if want_section("merges", sections):
+        all_merges = list(MergeAttempt.objects.filter(task_id__in=task_ids).order_by("-started_at"))
+        merge_summary = compute_spec_merge_summary(tasks)
+        print(f"  {'MERGE ATTEMPTS':^66}")
+        print(f"  {'-' * 66}")
+        if all_merges:
+            print(f"  {'Task':<6} {'Mode':<10} {'Outcome':<9} {'Trigger':<15} {'Lag':<8} {'Dur':<8}")
+            print(f"  {'-' * 66}")
+            for m in all_merges:
+                lag = f"{(m.started_at - m.dispatched_at).total_seconds():.1f}s" if m.dispatched_at else "-"
+                dur = (
+                    f"{(m.finished_at - m.started_at).total_seconds():.1f}s"
+                    if m.finished_at else "-"
+                )
+                print(f"  {m.task_id:<6} {m.mode:<10} {m.outcome:<9} {m.trigger:<15} {lag:<8} {dur:<8}")
+            mean_lag = merge_summary["mean_dispatch_lag_seconds"]
+            mean_lag_str = f"{mean_lag}s" if mean_lag is not None else "-"
+            print(
+                f"  attempts={merge_summary['attempt_count']} "
+                f"static={merge_summary['static_count']} "
+                f"agent={merge_summary['agent_count']} "
+                f"human={merge_summary['human_assisted_count']} "
+                f"cost=${merge_summary['merge_cost_usd']:.4f} "
+                f"mean_lag={mean_lag_str}"
+            )
+        else:
+            print("  none")
+    if want_section("story", sections):
+        story = build_spec_story(spec)
+        print(f"  WAVE STORY")
+        print(f"  {'-' * 66}")
+        for t in story["tasks"]:
+            dispatched = t["dispatched_at"].strftime("%H:%M:%S") if t["dispatched_at"] else "-"
+            dur = format_duration(t["duration_ms"])
+            tok = f"{t['tokens']['total']:,}" if t["tokens"]["total"] else "-"
+            cost = f"${t['cost_usd']:.4f}" if t["cost_usd"] is not None else "-"
+            merge = t["merge"]["mode"] if t["merge"] else "-"
+            redo = t["redo_rounds"]["count"]
+            print(
+                f"  #{t['task_id']:<4} {t['title'][:24]:<24} {t['status']:<12} "
+                f"{(t['agent'] or '-'):<10} dispatched={dispatched} dur={dur:<6} "
+                f"tok={tok:<8} cost={cost:<8} redo={redo} merge={merge}"
+            )
+            comment = t["latest_comment"]
+            print(f"      latest: {comment['headline'] if comment else '-'}")
+            for g in t["gaps"]:
+                print(f"      ! gap: {g}")
+        print()
+
     if want_section("problems", sections):
         if not problems:
             print(f"  PROBLEMS: None detected +")
@@ -327,6 +402,19 @@ def trace_spec(spec_id, mode="standard", sections=None):
             for p in problems:
                 print(f"  ! {p}")
         print()
+
+    if want_section("mistakes", sections):
+        if all_mistakes:
+            print(f"  {'MISTAKES LEDGER':^66}")
+            print(f"  {'-' * 66}")
+            for e in all_mistakes:
+                cls = f" {{{e.failure_class}}}" if e.failure_class else ""
+                verdict = f" [{e.verdict}]" if e.verdict else ""
+                print(f"  #{e.task_id:<4} ({e.source}){verdict}{cls} {e.one_liner[:50]}")
+            print()
+        elif mode == "full":
+            print(f"  MISTAKES LEDGER: none")
+            print()
 
 
 def main():

@@ -143,6 +143,71 @@ export interface Task {
         terminal_task_status?: string | null;
         result_summary?: string;
     }>;
+    needsHuman?: boolean;
+    needsHumanReason?: string;
+    // Memory: closest finished twins + quote (exposed on the detail API).
+    twins?: TaskTwin[];
+    estimate?: TaskEstimate | null;
+    actual?: TaskActual | null;
+}
+
+export interface TaskTwin {
+    task_id: number;
+    title: string;
+    outcome: string;
+    tokens: number | null;
+    duration_ms: number | null;
+    redo_rounds: number;
+    agent: string | null;
+    model: string | null;
+    score: number;
+    text_score: number;
+    structural_score: number;
+    proof_path: string;
+    warning?: { failure_class?: string | null; one_liner: string } | null;
+}
+
+export interface TaskAssignmentReasonCheaperAlternative {
+    agent: string;
+    model: string | null;
+    tier?: string | null;
+    success_rate: number | null;
+    median_tokens?: number | null;
+    reason: string;
+}
+
+export interface TaskAssignmentReasonTwinConsensus {
+    agent: string;
+    landed: number;
+    total: number;
+}
+
+// Surfacing the WHY behind agent assignment (W6.14).
+// Stamped at dispatch by odin and stamped-with-override=true by the
+// taskit-backend when a human reassigns the task after dispatch.
+export interface TaskAssignmentReason {
+    agent: string;
+    model: string | null;
+    rule: 'suggested-agent' | 'suggested-model' | 'history' | 'static-fallback' | 'escalated';
+    reason: string;
+    override: boolean;
+    override_by?: string | null;
+    cheaper_alternatives: TaskAssignmentReasonCheaperAlternative[];
+    twin_consensus: TaskAssignmentReasonTwinConsensus | null;
+}
+
+export interface TaskEstimate {
+    confidence: string;
+    twin_count: number;
+    tokens_median?: number | null;
+    duration_ms_median?: number | null;
+    source_twin_ids?: number[];
+}
+
+export interface TaskActual {
+    tokens: number | null;
+    duration_ms: number | null;
+    transition: string;
 }
 
 export interface Board {
@@ -152,13 +217,26 @@ export interface Board {
     workingDir?: string | null;
     timezone?: string;
     odinInitialized?: boolean;
+    claudeTokenConfigured?: boolean;  // whether a .claude-token exists in working_dir (write-only)
     skipReflection?: boolean;
     skipProof?: boolean;
     autoStartPlannedTasks?: boolean;
     reflectionModel?: string | null;
+    // Size-bucketed reviewer selection: { small?, medium?, large? } → model name.
+    // Empty/absent preserves the single-reviewer default (reflectionModel).
+    reflectionReviewStrategy?: Record<string, string> | null;
     modelEscalationPriority?: EscalationPriorityEntry[];
+    reviewerOrder?: EscalationPriorityEntry[];
     escalationEnabled?: boolean;
     failureMaxRetries?: number;
+    // task #328: board-level overrides for routing (peer preference order,
+    // capability-escalation threshold, per-failure-class action tuning).
+    // {} means "use built-in defaults" — see routing-config for the merged,
+    // effective view used for display.
+    routingPolicy?: Record<string, unknown>;
+    // Opt-in: if false (default), tasks with no spec cannot be dispatched
+    // (moved to IN_PROGRESS) — there is no worktree to execute in.
+    allowProjectRootExecution?: boolean;
     memberIds: string[];
     agents?: AgentConfig[];
     tasks: Task[];
@@ -180,6 +258,16 @@ export interface SpecCostSummary {
     tokens_by_model: Record<string, number>;
     total_duration_ms: number;
     tasks_with_unknown_cost: number;
+}
+
+export interface SpecMergeSummary {
+    attempt_count: number;
+    static_count: number;
+    agent_count: number;
+    human_assisted_count: number;
+    merge_cost_usd: number;
+    mean_dispatch_lag_seconds: number | null;
+    conflicts_by_file: Record<string, number>;
 }
 
 export interface SpecComment {
@@ -214,6 +302,7 @@ export interface Spec {
     comments?: SpecComment[];
     cwd?: string;
     costSummary?: SpecCostSummary;
+    mergeSummary?: SpecMergeSummary;
     status?: 'planning' | 'planning_complete' | 'planning_failed' | 'active';
     plannerConfig?: PlannerConfig;
     fileName?: string;
@@ -226,6 +315,58 @@ export interface SpecCommit {
     message: string;
     author: string;
     date: string;
+}
+
+// Passthrough shape from GET /specs/:id/story/ — field names kept snake_case
+// verbatim, matching SpecCostSummary's convention for backend-computed data.
+export interface SpecStoryRedoRound {
+    id: number;
+    verdict: string | null;
+    reviewer_agent: string;
+    reviewer_model: string;
+    created_at: string;
+}
+
+export interface SpecStoryMerge {
+    status: string;
+    mode: string;
+    auto_resolved: boolean;
+    conflicting_files: string[];
+    error: string;
+    diff_stat: string;
+}
+
+export interface SpecStoryComment {
+    id: number;
+    comment_type: string;
+    author: string;
+    created_at: string;
+    headline: string;
+}
+
+export interface SpecStoryTask {
+    task_id: number;
+    title: string;
+    status: string;
+    agent: string | null;
+    model: string | null;
+    dispatched_at: string | null;
+    duration_ms: number | null;
+    tokens: { total: number; input: number; output: number };
+    cost_usd: number | null;
+    redo_rounds: { count: number; verdicts: SpecStoryRedoRound[] };
+    merge: SpecStoryMerge | null;
+    latest_comment: SpecStoryComment | null;
+    depends_on: string[];
+    gaps: string[];
+}
+
+export interface SpecStory {
+    spec_id: number;
+    odin_id: string;
+    title: string;
+    task_count: number;
+    tasks: SpecStoryTask[];
 }
 
 export interface DashboardData {
@@ -429,6 +570,31 @@ export interface TaskIdeOptions {
     has_configured_ide: boolean;
 }
 
+// ─── Executor / Sandbox Capacity Types ─────────────────────
+
+export interface ExecutorCapacity {
+    running: number;
+    max: number;
+    suggested_max: number;
+}
+
+export interface ExecutorMaxConcurrency {
+    value: number;
+    suggested_max: number;
+}
+
+// ─── Kanban Types ───────────────────────────────────────────
+
+export interface KanbanColumnsResponse {
+    columns: Record<string, { tasks: Task[]; totalCount: number }>;
+}
+
+export interface KanbanLoadMoreResponse {
+    tasks: Task[];
+    totalCount: number;
+    hasMore: boolean;
+}
+
 // ─── Reflection Types ──────────────────────────────────────
 
 export interface ReflectionReport {
@@ -477,6 +643,30 @@ export interface EscalationPriorityEntry {
     model_name: string;
 }
 
+// task #328: the EFFECTIVE routing policy (built-in defaults + board
+// overrides already merged), returned by GET /api/boards/{id}/routing-config/
+// for read/display in the Settings "Routing" section.
+export interface RoutingFailureAction {
+    action: 'auto_requeue' | 'reassign' | 'human';
+    max_retries: number;
+    backoff_seconds: number;
+    peer_fallback: boolean;
+    description: string;
+}
+
+export interface RoutingConfig {
+    preference_order: string[];
+    default_preference_order: string[];
+    capability_escalate_after: number;
+    // task #328: the capability tier-jump is governed by the ONE policy
+    // engine, resolved from routing_policy (Default First → legacy fields).
+    capability_escalation_enabled: boolean;
+    capability_max_escalations: number;
+    escalation_enabled: boolean;
+    escalation_tiers: EscalationPriorityEntry[];
+    failure_actions: Record<string, RoutingFailureAction>;
+}
+
 export interface AgentModelInfo {
     name: string;
     enabled: boolean;
@@ -514,6 +704,7 @@ export interface TaskPreset {
     suggested_priority: string;
     source: string;
     sort_order: number;
+    disabled?: boolean;
 }
 
 export interface PresetsResponse {
@@ -522,7 +713,129 @@ export interface PresetsResponse {
     presets: TaskPreset[];
 }
 
-export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications' | 'analytics' | 'scheduling'| 'providers';
+export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications' | 'analytics' | 'scheduling'| 'providers' | 'factory' | 'league';
+
+// ─── Factory Types ────────────────────────────────────────────
+
+export interface FactoryRunningTask {
+    task_id: string;
+    task_title: string;
+    run_token: string;
+    state: string;
+    started_at: string;
+    last_heartbeat: string;
+    seconds_since_heartbeat: number;
+}
+
+export interface FactoryQueues {
+    waiting: number;
+    executing: number;
+    review: number;
+    shelf: number;
+}
+
+export interface FactoryMergeAttempt {
+    id: number;
+    task_id: string;
+    task_title: string;
+    mode: string;
+    outcome: string;
+    trigger: string;
+    started_at: string;
+    finished_at: string;
+    lag_seconds: number | null;
+}
+
+export interface FactoryOpenError {
+    source: string;
+    signature: string;
+    latest_symptom: string;
+    latest_disposition: string;
+    count: number;
+    event_ids: number[];
+    latest_at: string;
+}
+
+export interface FactoryStory {
+    headline: string | null;
+    tldr: {
+        landed: number;
+        hands_free: number;
+        incidents: number;
+        waiting_on_human: number;
+    };
+    event_count: number;
+}
+
+export interface FactorySnapshot {
+    board_id: string;
+    board_name: string;
+    running: FactoryRunningTask[];
+    queues: FactoryQueues;
+    recent_merges: FactoryMergeAttempt[];
+    open_errors: FactoryOpenError[];
+    story: FactoryStory;
+}
+
+// ─── Inbox Types (everything waiting on a human) ──────────────
+
+export interface InboxParkedMerge {
+    task_id: string;
+    task_title: string;
+    why: string;
+    question_comment_id: string | null;
+    conflicting_files: string[];
+}
+
+export interface InboxReversibilityPark {
+    task_id: string;
+    task_title: string;
+    why: string;
+    question_comment_id: string | null;
+    action_key: string;
+    branch: string;
+}
+
+export interface InboxShelfTask {
+    task_id: string;
+    task_title: string;
+}
+
+export interface InboxOpenError {
+    source: string;
+    signature: string;
+    latest_symptom: string;
+    count: number;
+    event_ids: number[];
+    latest_at: string;
+    task_id: string | null;
+}
+
+export interface InboxFailedTask {
+    task_id: string;
+    task_title: string;
+    last_failure_reason: string;
+    failure_class: string;
+    failed_at: string;
+    blocked_count: number;
+}
+
+export interface InboxSnapshot {
+    board_id: string;
+    board_name: string;
+    parked_merges: InboxParkedMerge[];
+    reversibility_parks: InboxReversibilityPark[];
+    testing_shelf: InboxShelfTask[];
+    open_errors: InboxOpenError[];
+    failed_tasks: InboxFailedTask[];
+    counts: {
+        parked_merges: number;
+        reversibility_parks: number;
+        testing_shelf: number;
+        open_errors: number;
+        failed_tasks: number;
+    };
+}
 
 // ─── Analytics Types ─────────────────────────────────────────
 
@@ -541,6 +854,9 @@ export interface AnalyticsTimeSeries {
     date: string;
     total: number;
     by_model: Record<string, number>;
+    // Landed (DONE) task count for this bucket — a separate bucketing
+    // dimension from `total` (see backend _aggregate_time_series).
+    task_count: number;
 }
 
 export interface AnalyticsCostByModel {
@@ -599,6 +915,68 @@ export interface AnalyticsTopExpensiveTask {
     total_tokens: number;
 }
 
+export interface AnalyticsAutonomy {
+    total_done: number;
+    agent_authored: number;
+    autonomy_rate: number;
+    operator_touches_total: number;
+    tasks_with_capture_gaps: number;
+    exec_duration_seconds: { min: number; max: number; p50: number; p90: number };
+    dispatch_to_done_seconds: { min: number; max: number; p50: number; p90: number };
+}
+
+export interface AnalyticsFailureBucket {
+    class: string;
+    count: number;
+}
+
+export interface AnalyticsFailureClassBreakdown {
+    buckets: AnalyticsFailureBucket[];
+    total_failed: number;
+}
+
+export interface AnalyticsReworkBucket {
+    rounds: string;
+    tasks: number;
+}
+
+export interface AnalyticsPerAgentRollup {
+    agent: string;
+    cost: number;
+    tokens: number;
+    tasks: number;
+    rework_rounds: number;
+    rework_tasks: number;
+    agent_authored: number;
+}
+
+export interface AnalyticsMergeModeBucket {
+    mode: string;
+    count: number;
+}
+
+export interface AnalyticsMergeOutcomeBucket {
+    outcome: string;
+    count: number;
+}
+
+export interface AnalyticsMergeHealth {
+    total_attempts: number;
+    by_mode: AnalyticsMergeModeBucket[];
+    by_outcome: AnalyticsMergeOutcomeBucket[];
+    lag_seconds: { min: number; max: number; p50: number; p90: number };
+}
+
+export interface AnalyticsVerdictBucket {
+    verdict: string;
+    count: number;
+}
+
+export interface AnalyticsReviewHealth {
+    total_reviews: number;
+    by_verdict: AnalyticsVerdictBucket[];
+}
+
 export interface AnalyticsCostSummary {
     summary_kpis: AnalyticsSummaryKPIs;
     time_series: AnalyticsTimeSeries[];
@@ -608,6 +986,12 @@ export interface AnalyticsCostSummary {
     efficiency_metrics: AnalyticsEfficiencyMetrics;
     model_comparison: AnalyticsModelComparison[];
     top_expensive_tasks: AnalyticsTopExpensiveTask[];
+    autonomy: AnalyticsAutonomy;
+    failure_class_breakdown: AnalyticsFailureClassBreakdown;
+    rework_breakdown: AnalyticsReworkBucket[];
+    per_agent_rollup: AnalyticsPerAgentRollup[];
+    merge_health: AnalyticsMergeHealth;
+    review_health: AnalyticsReviewHealth;
     meta: { task_count: number; granularity: string };
 }
 
@@ -626,7 +1010,7 @@ export interface ProviderQuota {
 
 // ─── Notification Types ───────────────────────────────────────
 
-export type NotificationType = 'task_assigned' | 'comment_added' | 'status_changed' | 'planning_complete' | 'question_asked' | 'spec_finished';
+export type NotificationType = 'task_assigned' | 'comment_added' | 'status_changed' | 'planning_complete' | 'question_asked' | 'spec_finished' | 'task_failed' | 'task_failed_reminder';
 
 export interface Notification {
     id: number;
@@ -676,4 +1060,36 @@ export interface ProviderUsageResponse {
     providers: ProviderUsage[];
     error?: string;
     fetched_at: string;
+}
+
+export interface LeagueRow {
+    agent: string;
+    model: string;
+    tasks_landed: number;
+    hands_free_count: number;
+    hands_free_pct: number;
+    redo_rounds_avg: number;
+    tokens_median: number;
+    duration_ms_median: number;
+    merge_conflicts_caused: number;
+    cost_usd_total: number;
+}
+
+export interface LeagueResponse {
+    rows: LeagueRow[];
+    meta: {
+        board_id: number;
+        task_count: number;
+        since_spec: string | null;
+    };
+}
+
+export interface KanbanColumnsResponse {
+    columns: Record<string, { tasks: Task[]; totalCount: number }>;
+}
+
+export interface KanbanLoadMoreResponse {
+    tasks: Task[];
+    totalCount: number;
+    hasMore: boolean;
 }

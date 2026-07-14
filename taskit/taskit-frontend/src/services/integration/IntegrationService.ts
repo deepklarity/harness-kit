@@ -8,8 +8,11 @@ import type {
     MemberListQuery,
     PaginatedResponse,
     PresetsResponse,
+    FactorySnapshot,
+    InboxSnapshot,
     Spec,
     SpecCommit,
+    SpecStory,
     SpecListQuery,
     Task,
     TaskListQuery,
@@ -21,11 +24,15 @@ import type {
     ForcedProviderStatus,
     ProviderUsageResponse,
     AnalyticsCostSummary,
+    LeagueResponse,
     ProviderQuota,
     TaskSchedule,
     IdeOptions,
     IdeSettings,
     TaskIdeOptions,
+    ExecutorCapacity,
+    ExecutorMaxConcurrency,
+    RoutingConfig,
 } from '../../types';
 
 export interface AuthState {
@@ -64,6 +71,12 @@ export interface TaskSearchResult {
     specTitle?: string;
 }
 
+export interface TaskScheduleRunResult {
+    task_id: number;
+    run_id: number;
+    task?: unknown;
+}
+
 export interface IntegrationService {
     readonly name: string;
 
@@ -89,6 +102,7 @@ export interface IntegrationService {
     pauseSchedule(scheduleId: string): Promise<TaskSchedule>;
     resumeSchedule(scheduleId: string): Promise<TaskSchedule>;
     cancelSchedule(scheduleId: string): Promise<TaskSchedule>;
+    runScheduleNow(scheduleId: string): Promise<TaskScheduleRunResult>;
     deleteSchedule(scheduleId: string): Promise<void>;
     suggestDirectories(query: string, limit?: number): Promise<DirectoryEntry[]>;
     listDirectoryChildren(path: string, limit?: number): Promise<DirectoryEntry[]>;
@@ -135,6 +149,11 @@ export interface IntegrationService {
     fetchIdeOptions(): Promise<IdeOptions>;
     fetchIdeSettings(): Promise<IdeSettings>;
     saveIdeSettings(preferredIdeId: string | null): Promise<IdeSettings>;
+
+    // Sandbox capacity
+    fetchExecutorCapacity(): Promise<ExecutorCapacity>;
+    fetchExecutorMaxConcurrency(): Promise<ExecutorMaxConcurrency>;
+    setExecutorMaxConcurrency(value: number): Promise<ExecutorMaxConcurrency>;
     fetchTaskIdeOptions(taskId: string): Promise<TaskIdeOptions>;
     openTaskProject(taskId: string): Promise<void>;
 
@@ -143,6 +162,7 @@ export interface IntegrationService {
     fetchSpecs?(): Promise<Spec[]>;
     fetchSpecDetail?(id: string): Promise<Spec>;
     fetchSpecCommits?(specId: string): Promise<SpecCommit[]>;
+    getSpecStory?(specId: string): Promise<SpecStory>;
     finalizeSpec?(specId: string): Promise<{ pr_url?: string; finalized_at?: string; error?: string }>;
 
 
@@ -170,10 +190,25 @@ export interface IntegrationService {
     toggleBoardAgent(boardId: string, agentName: string, enabled: boolean): Promise<{ name: string; enabled: boolean; board?: Record<string, unknown> }>;
     toggleBoardModel(boardId: string, agentName: string, modelName: string, enabled: boolean): Promise<void>;
 
+    // Routing (task #328): effective policy (defaults + board overrides
+    // merged) for the Settings "Routing" read-side display.
+    fetchRoutingConfig(boardId: string): Promise<RoutingConfig>;
+
     // Analytics
     fetchAnalytics(params?: { board?: string; date_from?: string; date_to?: string; granularity?: string }): Promise<AnalyticsCostSummary>;
+    fetchLeague(boardId: string, params?: { since_spec?: string }): Promise<LeagueResponse>;
     fetchQuotaStatus(): Promise<ProviderQuota[]>;
 
     // Presets
     fetchPresets(): Promise<PresetsResponse>;
+
+    // Factory floor (live board operations dashboard)
+    fetchFactorySnapshot(boardId: string): Promise<FactorySnapshot>;
+
+    // Inbox (everything waiting on a human, in one call)
+    fetchInbox(boardId: string): Promise<InboxSnapshot>;
+    setErrorDisposition(eventId: number, disposition: 'fixed' | 'non-issue', note?: string): Promise<void>;
+
+    // Rework: compose a follow-up task from a parent task + one-sentence instruction (no model call)
+    reworkTask(taskId: string, instruction: string, authorEmail?: string): Promise<unknown>;
 }

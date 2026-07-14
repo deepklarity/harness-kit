@@ -107,9 +107,18 @@ def format_tokens(metadata):
     return "-"
 
 
-def extract_token_parts(metadata):
-    """Extract (total, input, output) token counts from metadata. Returns ints or 0."""
-    usage = metadata.get("last_usage", {}) if metadata else {}
+def extract_token_parts(task):
+    """Extract (total, input, output) token counts for a task. Returns ints or 0.
+
+    Computed on-the-fly from the task's trace comment via
+    compute_usage_from_trace() — the same authoritative source the API's
+    `usage` field uses (see tasks.serializers.TaskSerializer.get_usage).
+    metadata.last_usage was deprecated in favor of this on-the-fly
+    computation; reading it directly here would always show zero.
+    """
+    from tasks.execution_processing import compute_usage_from_trace
+
+    usage = compute_usage_from_trace(task) or {}
     if not isinstance(usage, dict):
         return 0, 0, 0
     inp = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
@@ -118,9 +127,9 @@ def extract_token_parts(metadata):
     return total, inp, out
 
 
-def format_token_parts(metadata):
+def format_token_parts(task):
     """Format token counts as 'TOTAL total / IN in / OUT out' string."""
-    total, inp, out = extract_token_parts(metadata)
+    total, inp, out = extract_token_parts(task)
     if not total:
         return "(not captured)"
     parts = [f"{total:,} total"]

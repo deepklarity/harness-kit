@@ -39,6 +39,10 @@ Label management:
 
 All-in-one shortcut:
     odin run <spec_file>          plan + dispatch (Celery runs tasks)
+
+First-timer path:
+    odin new-project <path-or-url> Bootstrap Odin onto a new or existing repo
+    odin export-skills <path>     Install the kit's curated presets as .claude/skills/
 """
 
 import asyncio
@@ -60,14 +64,204 @@ from rich.table import Table
 from odin.config import load_config
 from odin.cost_tracking import CostStore
 from odin.logging import setup_logger
-from odin.models import OdinConfig
+from odin.models import OdinConfig, TaskItConfig
 from odin.orchestrator import Orchestrator
-from odin.specs import SpecStore, derive_spec_status, spec_short_tag
+from odin.specs import SpecArchive, SpecStore, derive_spec_status, generate_spec_id, spec_short_tag
 from odin.taskit import TaskManager
+from odin.taskit.manager import BackendUnreachable
 from odin.taskit.models import TaskStatus
 from odin import tmux
 
 console = Console()
+
+
+def _fetch_taskit_boards(base_url: str) -> list[dict]:
+    """Fetch all TaskIt boards from a paginated API response."""
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/api/boards/"
+    boards: list[dict] = []
+    while url:
+        resp = httpx.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            boards.extend(data)
+            break
+        boards.extend(data.get("results") or [])
+        url = data.get("next")
+    return boards
+
+
+def _resolve_taskit_board_id(
+    *,
+    base_url: str | None,
+    board_id: int | str | None,
+    board_name: str | None,
+    latest_board: bool,
+    cwd: Path | None = None,
+) -> int | None:
+    """Resolve init's board selection from explicit ID, cwd, name, or latest board."""
+    if board_id not in (None, ""):
+        return int(board_id)
+    if not base_url:
+        if board_name or latest_board:
+            raise ValueError("--base-url is required when using --board-name or --latest-board")
+        return None
+
+    boards = _fetch_taskit_boards(base_url)
+    if not boards:
+        raise ValueError(f"no boards found at {base_url}")
+
+    # Default behavior: if the backend knows a board for this project dir, use it.
+    # This avoids accidentally linking to the newest unrelated board.
+    if cwd is not None and not board_name and not latest_board:
+        current = cwd.resolve()
+        matches = []
+        for board in boards:
+            raw = board.get("working_dir")
+            if not raw:
+                continue
+            try:
+                if Path(str(raw)).expanduser().resolve() == current:
+                    matches.append(board)
+            except OSError:
+                continue
+        if len(matches) == 1:
+            return int(matches[0]["id"])
+        if len(matches) > 1:
+            return int(max(matches, key=lambda b: int(b.get("id", 0)))["id"])
+        return None
+
+    if board_name:
+        needle = board_name.strip().lower()
+        exact = [b for b in boards if str(b.get("name", "")).strip().lower() == needle]
+        matches = exact or [b for b in boards if needle in str(b.get("name", "")).lower()]
+        if not matches:
+            raise ValueError(f"no TaskIt board matched {board_name!r}")
+        boards = matches
+
+    return int(max(boards, key=lambda b: int(b.get("id", 0)))["id"])
+
+
+def _first_existing_path(env_name: str, *candidates: str) -> str | None:
+    env_value = os.environ.get(env_name)
+    if env_value:
+        return env_value
+    for candidate in candidates:
+        path = Path(candidate).expanduser()
+        if path.exists():
+            return str(path)
+    return None
+
+
+def _apply_init_config_overlays(
+    config_data: dict,
+    *,
+    board_id: int | None,
+    base_url: str | None,
+    forkd: bool,
+    forkd_agent: str,
+) -> dict:
+    """Apply init-time board and forkd settings to config.yaml data."""
+    if board_id is not None:
+        config_data["board_id"] = board_id
+        config_data.setdefault("taskit", {})["board_id"] = board_id
+    if base_url is not None:
+        config_data["base_url"] = base_url
+        config_data.setdefault("taskit", {})["base_url"] = base_url
+    if forkd:
+        agent = config_data.setdefault("agents", {}).setdefault(forkd_agent, {})
+        forkd_settings = {
+            "enabled": True,
+            "cli_command": forkd_agent if forkd_agent != "glm" and forkd_agent != "minimax" else "opencode",
+            "run_in_forkd": True,
+            "forkd_mode": "controller",
+            "forkd_controller_url": "http://127.0.0.1:8889",
+            "forkd_snapshot_tag": "odin-node22-4g-cli-browser",
+            "forkd_mem_size_mib": 4096,
+            "forkd_per_child_netns": True,
+        }
+        forkd_bin = os.environ.get("FORKD_BIN") or shutil.which("forkd") or _first_existing_path(
+            "FORKD_BIN", "~/forkd-poc/bin/forkd"
+        )
+        forkd_kernel = _first_existing_path(
+            "FORKD_KERNEL", "/var/lib/forkd/kernels/vmlinux", "/var/lib/forkd/vmlinux", "~/forkd-poc/vmlinux"
+        )
+        forkd_scripts_dir = _first_existing_path(
+            "FORKD_SCRIPTS_DIR", "/usr/local/share/forkd/scripts", "/opt/forkd/scripts", "~/forkd-poc/forkd/scripts"
+        )
+        if forkd_bin:
+            forkd_settings["forkd_bin"] = forkd_bin
+        if forkd_kernel:
+            forkd_settings["forkd_kernel"] = forkd_kernel
+        if forkd_scripts_dir:
+            forkd_settings["forkd_scripts_dir"] = forkd_scripts_dir
+        agent.update(forkd_settings)
+        if forkd_agent == "codex":
+            agent.setdefault("capabilities", ["reasoning", "planning", "coding", "writing"])
+        config_data["base_agent"] = forkd_agent
+        config_data.setdefault("board_backend", "taskit")
+    return config_data
+
+
+def _gate_interaction(clarification, console):
+    """Display the clarification gate and collect a human nod.
+
+    Surfaces the summary, the preview file path, and any questions.  Always
+    asks for a final confirmation — even when there are no questions — so the
+    human can review the preview and say "go" before task breakdown begins.
+
+    Returns None to abort planning, or an answers string to proceed.
+    """
+    questions = clarification.get("questions", [])
+    summary = clarification.get("summary", "")
+    preview_path = clarification.get("preview_path", "")
+
+    console.print()
+    if summary:
+        console.print("[bold cyan]Clarification Summary:[/bold cyan]")
+        console.print(f"  {summary}\n")
+
+    if preview_path:
+        exists = clarification.get("preview_exists", False)
+        if exists:
+            console.print(f"[bold]Preview page:[/bold] {preview_path} [green](ready)[/green]")
+        else:
+            console.print(f"[bold]Preview page:[/bold] {preview_path} [red](not written)[/red]")
+        console.print("[dim]Open it in a browser to review the visual mockup.[/dim]\n")
+
+    answers = []
+    if questions:
+        console.print("[bold yellow]Questions before I plan:[/bold yellow]")
+        for i, q in enumerate(questions, 1):
+            console.print(f"  [yellow]{i}.[/yellow] {q}")
+        console.print(
+            "\n[dim]Answer each question (or 'skip' for none, 'abort' to cancel):[/dim]"
+        )
+        for i, q in enumerate(questions, 1):
+            try:
+                ans = input(f"  Q{i}: ").strip()
+            except EOFError:
+                ans = ""
+            if ans.lower() == "abort":
+                console.print("[red]Planning aborted.[/red]")
+                return None
+            if ans.lower() == "skip":
+                continue
+            if ans:
+                answers.append(f"Q{i}: {q}\nA: {ans}")
+
+    try:
+        confirm = input("Proceed with task breakdown? [y/N]: ").strip().lower()
+    except EOFError:
+        confirm = ""
+    if confirm not in ("y", "yes"):
+        console.print("[red]Planning aborted at gate.[/red]")
+        return None
+
+    console.print()
+    return "\n\n".join(answers) if answers else ""
 
 
 class OdinCLI:
@@ -95,6 +289,9 @@ class OdinCLI:
         odin spec show <id>               Show spec content + its tasks
         odin spec abandon <id>            Mark a spec as abandoned
 
+    Setup sanity:
+        odin doctor [--fast] [--json]     Check services, agent CLIs, sandbox, host
+
     Label management:
         odin label list                   List all labels
         odin label create <name> <color>  Create a label
@@ -102,11 +299,15 @@ class OdinCLI:
     All-in-one:
         odin run <spec_file>              plan + dispatch (Celery runs tasks)
 
+    First-timer path:
+        odin new-project <path-or-url>    Bootstrap Odin onto a new or existing repo
+
     Other:
         odin guide                        Show sample workflow walkthrough
         odin test [suite]                 Run tests (quick, plan, e2e, or all)
         odin mcp_config [task_id]         Generate per-CLI MCP configs for manual testing
         odin logs [task_id]               View structured logs
+        odin doctor [--fast] [--json]     Check services, agent CLIs, sandbox, host
         odin config                       Show configuration
 
     Global flags:
@@ -150,14 +351,43 @@ class OdinCLI:
         return TaskManager(cfg.task_storage, backend=backend)
 
     def _resolve_id(self, task_id: str) -> str:
-        """Resolve a task ID prefix to a full ID."""
+        """Resolve a task ID prefix to a full ID.
+
+        Retries on transient backend unreachability (a brief restart must
+        not crash the task). A genuinely wrong or ambiguous prefix is not
+        retried — it returns the existing helpful message.
+        """
         mgr = self._get_task_manager()
-        full = mgr.resolve_task_id(task_id)
-        if not full:
+        max_attempts = 3
+        backoff_seconds = 1.0
+        last_exc: Optional[BackendUnreachable] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                full = mgr.resolve_task_id(task_id)
+            except BackendUnreachable as exc:
+                last_exc = exc
+                if attempt < max_attempts:
+                    console.print(
+                        f"[yellow]Backend unreachable (attempt {attempt}/{max_attempts}) "
+                        f"— retrying in {backoff_seconds:.0f}s...[/yellow]"
+                    )
+                    time.sleep(backoff_seconds)
+                    backoff_seconds += 1.0
+                    continue
+                break
+            if full:
+                return full
             console.print(f"[red]Could not resolve task ID: {task_id}[/red]")
             console.print("[dim]No match or ambiguous prefix. Use 'odin status' to see IDs.[/dim]")
             raise SystemExit(1)
-        return full
+        console.print(
+            f"[red]Could not reach task backend after {max_attempts} attempts.[/red]"
+        )
+        console.print(f"[dim]Backend unreachable: {last_exc}[/dim]")
+        console.print(
+            "[dim]This is a transient infrastructure error — the task will be retried.[/dim]"
+        )
+        raise SystemExit(1)
 
     def _get_spec_store(self) -> SpecStore:
         cfg = self._get_config()
@@ -177,7 +407,16 @@ class OdinCLI:
     # init
     # ------------------------------------------------------------------
 
-    def init(self, force: bool = False, board_id: Optional[int] = None, base_url: Optional[str] = None):
+    def init(
+        self,
+        force: bool = False,
+        board_id: Optional[int] = None,
+        base_url: Optional[str] = None,
+        board_name: Optional[str] = None,
+        latest_board: bool = False,
+        forkd: bool = False,
+        forkd_agent: str = "codex",
+    ):
         """Initialize .odin/ directory with sample config.
 
         Creates .odin/ with config.yaml, tasks/, logs/, and specs/ subdirs.
@@ -187,12 +426,35 @@ class OdinCLI:
             force: Overwrite existing config.yaml and all generated files.
             board_id: TaskIt board ID to write into config.yaml.
             base_url: TaskIt backend URL to write into config.yaml.
+            board_name: Resolve board_id by matching a TaskIt board name.
+            latest_board: Resolve board_id to the newest TaskIt board at base_url.
+            If board_id/name/latest are omitted and base_url is set, init first
+            tries to match a board whose working_dir equals the current cwd.
+            forkd: Enable forkd sandbox config for forkd_agent.
+            forkd_agent: Agent key to enable for forkd, default codex.
 
         Example:
             odin init
             odin init --force
             odin init --board-id 42 --base-url http://localhost:9100
+            odin init --latest-board --base-url http://localhost:9101 --forkd
+            odin init --board-name "forkd codex smoke" --base-url http://localhost:9101 --forkd
         """
+        try:
+            requested_board_id = board_id
+            board_id = _resolve_taskit_board_id(
+                base_url=base_url,
+                board_id=board_id,
+                board_name=board_name,
+                latest_board=latest_board,
+                cwd=Path.cwd(),
+            )
+            if board_id is not None and requested_board_id in (None, ""):
+                console.print(f"[green]Resolved[/green] board_id={board_id}")
+        except Exception as exc:
+            console.print(f"[bold red]Error:[/bold red] Could not resolve board: {exc}")
+            raise SystemExit(1)
+
         odin_dir = Path.cwd() / ".odin"
         config_dest = odin_dir / "config.yaml"
 
@@ -225,26 +487,25 @@ class OdinCLI:
                 config_dest.write_text("# Odin config — see odin docs for options\n")
                 console.print(f"[green]Created[/green] {config_dest}")
 
-        # Overlay board_id / base_url into config.yaml if provided
-        if board_id is not None or base_url is not None:
+        # Overlay board / forkd settings into config.yaml if requested.
+        if board_id is not None or base_url is not None or forkd:
             import yaml
             try:
                 config_data = yaml.safe_load(config_dest.read_text()) or {}
-                if board_id is not None:
-                    config_data["board_id"] = board_id
-                    # Also update the nested taskit section so the API uses the same ID
-                    if "taskit" not in config_data:
-                        config_data["taskit"] = {}
-                    config_data["taskit"]["board_id"] = board_id
-                if base_url is not None:
-                    config_data["base_url"] = base_url
-                    if "taskit" not in config_data:
-                        config_data["taskit"] = {}
-                    config_data["taskit"]["base_url"] = base_url
-                config_dest.write_text(yaml.dump(config_data, default_flow_style=False))
-                console.print(f"[green]Configured[/green] board_id={board_id}, base_url={base_url}")
+                config_data = _apply_init_config_overlays(
+                    config_data,
+                    board_id=board_id,
+                    base_url=base_url,
+                    forkd=forkd,
+                    forkd_agent=forkd_agent,
+                )
+                config_dest.write_text(yaml.dump(config_data, default_flow_style=False, sort_keys=False))
+                console.print(
+                    f"[green]Configured[/green] board_id={board_id}, base_url={base_url}, "
+                    f"forkd={forkd} ({forkd_agent})"
+                )
             except Exception as exc:
-                console.print(f"[red]Failed to write board config:[/red] {exc}")
+                console.print(f"[red]Failed to write init config:[/red] {exc}")
 
         # Register in global board registry so `odin logs -b <id>` works
         if board_id is not None:
@@ -287,7 +548,7 @@ class OdinCLI:
                 console.print(f"[bold red]Error:[/bold red] Could not initialize git repo: {exc}")
                 console.print("[dim]Worktree isolation will not work without a git repository.[/dim]")
 
-        # Create MCP config files for all 6 agent CLIs
+        # Create MCP config files for all 5 agent CLIs (qwen retired in #102)
         cfg = self._get_config()
         taskit_env = {"TASKIT_URL": cfg.taskit.base_url} if cfg.taskit else {}
         created = _generate_all_mcp_configs(Path.cwd(), taskit_env, mcps=cfg.mcps)
@@ -342,7 +603,7 @@ class OdinCLI:
             "  Per-CLI config files were created so each agent CLI auto-discovers"
         )
         console.print(
-            "  TaskIt MCP tools (.mcp.json, .gemini/, .qwen/, .codex/, .kilocode/, opencode.json)."
+            "  TaskIt MCP tools (.mcp.json, .gemini/, .codex/, .kilocode/, opencode.json)."
         )
         console.print(
             "  Auth uses the same [cyan].env[/cyan] vars as odin (ODIN_ADMIN_USER, etc.)."
@@ -363,6 +624,189 @@ class OdinCLI:
         console.print("\n[dim]Tip: Start with [bold]odin plan[/bold] to create tasks from a spec.[/dim]")
 
     # ------------------------------------------------------------------
+    # new-project
+    # ------------------------------------------------------------------
+
+    def new_project(
+        self,
+        target: str,
+        dest: Optional[str] = None,
+        name: Optional[str] = None,
+        base_url: Optional[str] = None,
+        force: bool = False,
+        fast: bool = False,
+    ):
+        """Bootstrap Odin end-to-end onto a new or existing repo.
+
+        Clones ``target`` if it looks like a git URL, or uses it as an
+        existing local path. Never touches the target's default branch —
+        everything Odin does happens on spec/task branches (worktree
+        isolation) per convention; a brand-new (non-git) directory gets
+        exactly one initial commit so worktree isolation has something to
+        branch from.
+
+        Creates a TaskIt board pointed at the resolved directory, a tiny
+        repo-agnostic sample spec + a dispatchable task, writes
+        ``.odin/config.yaml`` for the project, runs doctor, and prints
+        exactly what to run next.
+
+        Re-running against an already-initialized project is a polite
+        no-op unless --force is passed.
+
+        Args:
+            target: Path to an existing repo, or a git URL to clone.
+            dest: Destination directory for a clone (default:
+                ``<cwd>/<repo-name>``). Ignored for local targets.
+            name: Board name (default: the project directory's name).
+            base_url: TaskIt backend URL (default: this machine's
+                configured ``taskit.base_url``).
+            force: Reconfigure even if the target is already
+                Odin-initialized — creates a new board and sample task.
+            fast: Skip doctor's slow VM-boot probe.
+
+        Example:
+            odin new-project https://github.com/me/myrepo.git
+            odin new-project ../existing-repo --name "my project"
+        """
+        from odin import new_project as np
+
+        try:
+            project_path = np.resolve_project_path(target, dest, Path.cwd())
+        except np.NewProjectError as exc:
+            console.print(f"[bold red]Error:[/bold red] {exc}")
+            raise SystemExit(1)
+
+        if np.already_initialized(project_path) and not force:
+            console.print(
+                f"[yellow]{project_path} is already Odin-initialized.[/yellow]\n"
+                "[dim]Use --force to create a new board and sample task anyway.[/dim]"
+            )
+            return
+
+        created_repo = np.ensure_git_repo(project_path)
+        if created_repo:
+            console.print(f"[green]Initialized[/green] git repository in {project_path}")
+
+        cfg = self._get_config()
+        taskit_cfg = cfg.taskit or TaskItConfig()
+        resolved_base_url = base_url or taskit_cfg.base_url
+        board_name = name or project_path.name
+
+        from odin.backends.registry import get_backend
+
+        backend_kwargs = taskit_cfg.model_dump()
+        backend_kwargs["base_url"] = resolved_base_url
+        backend_kwargs["board_id"] = 0  # placeholder — create_board() sets the real id
+        backend = get_backend("taskit", **backend_kwargs)
+
+        try:
+            board_id = backend.create_board(name=board_name, working_dir=str(project_path))
+        except Exception as exc:
+            console.print(
+                f"[bold red]Error:[/bold red] Could not create a TaskIt board at "
+                f"{resolved_base_url}: {exc}"
+            )
+            raise SystemExit(1)
+        console.print(f"[green]Created[/green] board {board_id} ({board_name}) on {resolved_base_url}")
+
+        spec = SpecArchive(
+            id=generate_spec_id(np.SAMPLE_TASK_TITLE),
+            title=np.SAMPLE_TASK_TITLE,
+            source="inline",
+            content=np.SAMPLE_SPEC_MARKDOWN,
+        )
+        backend.save_spec(spec)
+
+        task_mgr = TaskManager(str(project_path / ".odin" / "tasks"), backend=backend)
+        task = task_mgr.create_task(
+            title=np.SAMPLE_TASK_TITLE,
+            description=np.SAMPLE_SPEC_MARKDOWN,
+            spec_id=spec.id,
+        )
+        task_mgr.assign_task(task.id, cfg.base_agent)
+        console.print(f"[green]Created[/green] sample task {task.id} — {np.SAMPLE_TASK_TITLE!r}")
+
+        original_cwd = Path.cwd()
+        try:
+            import os as _os
+
+            _os.chdir(project_path)
+            project_cli = OdinCLI()
+            project_cli.init(board_id=board_id, base_url=resolved_base_url, force=True)
+            console.print("\n[bold]Running doctor...[/bold]")
+            try:
+                project_cli.doctor(fast=fast)
+            except SystemExit:
+                # Doctor's exit code reflects this machine's setup, not
+                # whether new-project succeeded — the board/task already
+                # exist regardless, so surface the report and keep going.
+                pass
+        finally:
+            _os.chdir(original_cwd)
+
+        console.print(f"\n[bold green]Project ready:[/bold green] {project_path}")
+        console.print("\n[bold]Next steps:[/bold]")
+        console.print(f"  cd {project_path}")
+        console.print(f"  odin exec {task.id}       # run the sample task now")
+        console.print("  odin status              # see all tasks on the board")
+
+    # ------------------------------------------------------------------
+    # export-skills
+    # ------------------------------------------------------------------
+
+    def export_skills(
+        self,
+        target: str = ".",
+        presets: Optional[str] = None,
+    ):
+        """Render the curated task presets as hk-prefixed Claude Code skills.
+
+        Reads ``taskit/taskit-backend/data/task_presets.json`` (the one
+        canonical source of preset content) and writes one
+        ``hk-<preset-id>/SKILL.md`` per preset into ``<target>/.claude/skills/``.
+        Every generated file carries a ``generated: true`` marker in its
+        frontmatter — never hand-edit a generated skill; edit the preset in
+        ``task_presets.json`` and re-run this command. Safe to re-run:
+        regeneration is idempotent, and it refuses to overwrite a file that
+        exists but isn't marked as generated (a naming collision with a
+        hand-authored skill).
+
+        Args:
+            target: Directory to install skills into (default: cwd). Its
+                ``.claude/skills/`` subdirectory is created if missing.
+            presets: Path to a ``task_presets.json``-shaped file (default:
+                this repo's own curated preset file — use this to export a
+                different preset set, e.g. in tests).
+
+        Example:
+            odin export-skills ../my-other-project
+            odin new-project ../my-other-project && odin export-skills ../my-other-project
+        """
+        from odin.export_skills import ExportError, export_presets_to_skills
+
+        presets_path = Path(presets) if presets else (
+            Path(__file__).resolve().parents[3]
+            / "taskit"
+            / "taskit-backend"
+            / "data"
+            / "task_presets.json"
+        )
+        if not presets_path.exists():
+            console.print(f"[bold red]Error:[/bold red] presets file not found: {presets_path}")
+            raise SystemExit(1)
+
+        skills_dir = Path(target).resolve() / ".claude" / "skills"
+        try:
+            written = export_presets_to_skills(presets_path, skills_dir)
+        except ExportError as exc:
+            console.print(f"[bold red]Error:[/bold red] {exc}")
+            raise SystemExit(1)
+
+        console.print(f"[green]Exported[/green] {len(written)} skills to {skills_dir}")
+        for path in written:
+            console.print(f"  {path.parent.name}")
+
+    # ------------------------------------------------------------------
     # plan
     # ------------------------------------------------------------------
 
@@ -377,6 +821,7 @@ class OdinCLI:
         base_model: Optional[str] = None,
         skip_reflection: bool = False,
         direct: bool = False,
+        no_gate: bool = False,
     ):
         """Decompose a spec into sub-tasks and suggest agent assignments.
 
@@ -400,6 +845,7 @@ class OdinCLI:
             odin plan spec.md --auto --base-agent codex
             odin plan spec.md --auto --base-agent claude --base-model claude-sonnet-4-6
             odin plan spec.md --auto --skip-reflection
+            odin plan spec.md --no-gate               Skip clarification gate
 
         Args:
             spec_file: Path to a markdown spec file.
@@ -413,6 +859,8 @@ class OdinCLI:
             base_model: Override which concrete model the planning agent uses.
             skip_reflection: Mark all tasks in this plan to skip the
                 auto-reflection step when they reach REVIEW.
+            no_gate: Skip the clarification gate (questions + preview before
+                task breakdown).
         """
         if not spec_file and not prompt:
             console.print("[red]Provide either a spec file or --prompt.[/red]")
@@ -457,13 +905,17 @@ class OdinCLI:
         if skip_reflection:
             console.print("[dim]All tasks in this plan will skip auto-reflection.[/dim]")
 
+        gate = not no_gate
+
+        gate_callback = lambda c: _gate_interaction(c, console)
+
         try:
             if quiet:
                 # Quiet mode implies auto — spinner, no streaming
                 console.print("[bold]Decomposing and planning...[/bold]")
                 with console.status("[bold green]Planning..."):
                     spec_id, tasks = asyncio.run(
-                        orch.plan(spec, spec_file=spec_file, mode="quiet", quick=quick, skip_reflection=skip_reflection)
+                        orch.plan(spec, spec_file=spec_file, mode="quiet", quick=quick, skip_reflection=skip_reflection, gate=gate, gate_callback=gate_callback)
                     )
             elif auto:
                 from odin.harnesses.base import extract_text_from_line
@@ -477,15 +929,17 @@ class OdinCLI:
                 planning_agent = cfg.forced_base_provider or cfg.base_agent
                 console.print(f"[bold]Planning with {planning_agent}...[/bold]\n")
                 spec_id, tasks = asyncio.run(
-                    orch.plan(spec, spec_file=spec_file, mode="auto", stream_callback=_stream_chunk, quick=quick, skip_reflection=skip_reflection)
+                    orch.plan(spec, spec_file=spec_file, mode="auto", stream_callback=_stream_chunk, quick=quick, skip_reflection=skip_reflection, gate=gate, gate_callback=gate_callback)
                 )
                 # Ensure a newline after streamed output
                 sys.stdout.write("\n")
             else:
                 # Interactive mode (default): tmux session with agent
                 # --direct skips tmux (for web UI / PTY contexts)
+                if gate:
+                    console.print("[bold]Analyzing spec before planning...[/bold]")
                 spec_id, tasks = asyncio.run(
-                    orch.plan(spec, spec_file=spec_file, mode="interactive", quick=quick, skip_reflection=skip_reflection, direct=direct)
+                    orch.plan(spec, spec_file=spec_file, mode="interactive", quick=quick, skip_reflection=skip_reflection, direct=direct, gate=gate, gate_callback=gate_callback)
                 )
         except (RuntimeError, Exception) as exc:
             console.print(f"\n[bold red]Planning failed:[/bold red] {exc}")
@@ -578,7 +1032,7 @@ class OdinCLI:
 
         Args:
             task_id: Task ID or unique prefix.
-            agent: Agent name to assign (e.g. gemini, codex, qwen, claude).
+            agent: Agent name to assign (e.g. gemini, codex, claude).
         """
         full_id = self._resolve_id(task_id)
         cfg = self._get_config()
@@ -753,6 +1207,7 @@ class OdinCLI:
         report_id: Optional[str] = None,
         model: str = "claude-opus-4-7",
         agent: str = "claude",
+        selection_reason: str = "",
     ):
         """Run a reflection audit on a completed task.
 
@@ -769,19 +1224,38 @@ class OdinCLI:
             report_id: ReflectionReport ID in TaskIt (required for result submission).
             model: Reviewer model to use.
             agent: Reviewer agent harness name.
+            selection_reason: W3.18 — why this reviewer was picked
+                ("size_small" / "size_medium" / "size_large" / "default" /
+                "board_model_override" / "forced_provider" / etc.). Surfaces
+                in the prompt's [CTX:reviewer-selection] section so the
+                reviewer can confirm the choice matches the task's context
+                size and surface it in the agent_optimization notes.
         """
         if not report_id:
             console.print("[red]--report-id is required.[/red]")
             raise SystemExit(1)
 
         cfg = self._get_config()
-        if cfg.forced_base_provider:
+        # Bug #325 — if the TaskIt API already pinned a reviewer via the
+        # manual /reflect/ endpoint (selection_reason == "caller_override"),
+        # honor that pin; the FORCED_BASE_PROVIDER env knob is a global default
+        # for *unspecified* runs and must not silently overwrite an operator's
+        # explicit choice (which costs real money at the cheaper reviewer).
+        # When no pin was passed, fall back to forced_base_provider as before
+        # so existing forced-mode behavior on auto-reflections is preserved.
+        if cfg.forced_base_provider and selection_reason != "caller_override":
             agent = cfg.forced_base_provider
             if cfg.forced_base_model:
                 model = cfg.forced_base_model
+        elif cfg.forced_base_provider and selection_reason == "caller_override":
+            console.print(
+                f"[dim]Honoring explicit reviewer {agent}/{model} "
+                f"(FORCED_BASE_PROVIDER={cfg.forced_base_provider} ignored — "
+                f"selection_reason=caller_override).[/dim]"
+            )
         self._cli_log.info(
-            "reflect: task_id=%s, report_id=%s, model=%s, agent=%s",
-            task_id, report_id, model, agent,
+            "reflect: task_id=%s, report_id=%s, model=%s, agent=%s, selection=%s",
+            task_id, report_id, model, agent, selection_reason,
         )
 
         taskit_url = ""
@@ -804,6 +1278,7 @@ class OdinCLI:
             agent=agent,
             taskit_url=taskit_url,
             log_dir=cfg.log_dir,
+            selection_reason=selection_reason,
         )
 
         console.print(f"[green]Reflection complete for task {task_id}.[/green]")
@@ -1393,7 +1868,7 @@ class OdinCLI:
                 filter_status = TaskStatus(status)
             except ValueError:
                 console.print(f"[red]Unknown status: {status}[/red]")
-                console.print(f"[dim]Valid: backlog, todo, in_progress, executing, review, testing, done, failed[/dim]")
+                console.print(f"[dim]Valid: backlog, todo, in_progress, executing, review, testing, done, failed, canceled[/dim]")
                 return
 
         tasks = mgr.list_tasks(
@@ -2029,107 +2504,54 @@ class OdinCLI:
     # doctor
     # ------------------------------------------------------------------
 
-    def doctor(self):
-        """Run sanity checks on odin setup.
+    def doctor(self, fast: bool = False, json: bool = False):
+        """Check that everything a first-timer needs is installed and reachable.
 
-        Checks config loading, .odin/ directory, agent CLI availability,
-        and taskit backend connectivity (if configured).
+        Each check prints a named PASS/WARN/FAIL line with the exact fix
+        command when red, covering: services (backend/celery/frontend),
+        agent CLIs (claude/codex/glm/minimax/agy — installed AND
+        authenticated), the microsandbox runtime, and host headroom (memory,
+        disk). A capability matrix then says which kit features (planning,
+        execution, reflection, merge-resolve, summarize) work with the CLIs
+        actually found — derived from where each agent is used in code.
 
-        Example:
-            odin doctor
+        Exit code is non-zero only when a check FAILs in a way that blocks a
+        basic run (i.e. zero agent CLIs installed+authenticated). Everything
+        else degrades to a WARN so the tool stays useful mid-setup.
+
+        Examples:
+            odin doctor                full check (boots a throwaway VM)
+            odin doctor --fast         skip the slow VM boot probe
+            odin doctor --json         machine-readable output for scripts
+
+        Args:
+            fast: skip the throwaway-VM boot probe (the only slow check).
+            json: emit JSON instead of the human table.
         """
-        console.print("[bold]Odin Doctor[/bold]\n")
-        all_ok = True
+        from odin import doctor as doctor_mod
 
-        # 1. Config
         try:
             cfg = self._get_config()
-            console.print(f"  [green]\u2713[/green] Config loaded from: {cfg.config_source}")
-        except Exception as e:
-            console.print(f"  [red]\u2717[/red] Config failed: {e}")
-            all_ok = False
-            return
+        except Exception as exc:
+            console.print(f"[red]Config load failed — cannot run doctor:[/red] {exc}")
+            raise SystemExit(1)
 
-        # 2. .odin directory
-        odin_dir = Path(cfg.task_storage).parent
-        if odin_dir.exists():
-            console.print(f"  [green]\u2713[/green] .odin/ directory exists at {odin_dir}")
+        merge_queue = None
+        try:
+            import os as _os
+            merge_queue = _os.environ.get("MERGE_QUEUE_NAME") or None
+        except Exception:
+            merge_queue = None
+
+        report = doctor_mod.run_doctor(cfg, fast=fast, merge_queue_name=merge_queue)
+
+        if json:
+            sys.stdout.write(doctor_mod.format_json(report) + "\n")
         else:
-            console.print(f"  [red]\u2717[/red] .odin/ directory not found at {odin_dir}")
-            console.print("    [dim]Run 'odin init' to create it.[/dim]")
-            all_ok = False
+            sys.stdout.write(doctor_mod.format_text(report))
 
-        # 3. Base agent
-        console.print(f"  [dim]  Base agent: {cfg.base_agent}[/dim]")
-
-        # 4. Agent availability
-        console.print("\n[bold]Agents:[/bold]")
-        from odin.harnesses import get_harness
-        for name, agent_cfg in cfg.agents.items():
-            if not agent_cfg.enabled:
-                console.print(f"  [dim]-[/dim] {name}: [dim]disabled[/dim]")
-                continue
-            try:
-                h = get_harness(name, agent_cfg)
-                available = asyncio.run(h.is_available())
-                if available:
-                    label = agent_cfg.cli_command or "API"
-                    console.print(f"  [green]\u2713[/green] {name}: available ({label})")
-                else:
-                    if agent_cfg.cli_command:
-                        console.print(f"  [yellow]\u2717[/yellow] {name}: not available (CLI '{agent_cfg.cli_command}' not found)")
-                    else:
-                        console.print(f"  [yellow]\u2717[/yellow] {name}: not available (no API key configured)")
-            except Exception as e:
-                console.print(f"  [red]\u2717[/red] {name}: error — {e}")
-
-        # 5. Board backend
-        console.print(f"\n[bold]Board Backend:[/bold] {cfg.board_backend}")
-        if cfg.board_backend == "taskit":
-            if not cfg.taskit:
-                console.print(f"  [red]\u2717[/red] board_backend is 'taskit' but no [taskit] config section found")
-                all_ok = False
-            else:
-                console.print(f"  [dim]  URL: {cfg.taskit.base_url}[/dim]")
-                console.print(f"  [dim]  Board ID: {cfg.taskit.board_id}[/dim]")
-                try:
-                    from odin.backends.taskit import TaskItBackend
-                    backend = TaskItBackend(
-                        base_url=cfg.taskit.base_url,
-                        board_id=cfg.taskit.board_id,
-                        created_by=cfg.taskit.created_by,
-                    )
-                    info = backend.ping()
-                    if info["ok"]:
-                        console.print(f"  [green]\u2713[/green] TaskIt connected")
-                        console.print(f"    Board exists: {info.get('board_exists', '?')}")
-                        console.print(f"    Tasks on board: {info.get('task_count', '?')}")
-                        console.print(f"    Specs on board: {info.get('spec_count', '?')}")
-                    else:
-                        err = info.get("error", "board not found")
-                        console.print(f"  [red]\u2717[/red] TaskIt check failed: {err}")
-                        if not info.get("board_exists", True):
-                            console.print(
-                                f"    [yellow]Board {cfg.taskit.board_id} does not exist. "
-                                f"Create it at {cfg.taskit.base_url} first.[/yellow]"
-                            )
-                        all_ok = False
-                except Exception as e:
-                    console.print(f"  [red]\u2717[/red] TaskIt connection error: {e}")
-                    all_ok = False
-        elif cfg.board_backend == "local":
-            tasks_dir = Path(cfg.task_storage)
-            if tasks_dir.exists():
-                task_count = len(list(tasks_dir.glob("task_*.json")))
-                console.print(f"  [green]\u2713[/green] Local storage at {tasks_dir} ({task_count} tasks)")
-            else:
-                console.print(f"  [yellow]-[/yellow] Local storage dir does not exist yet (will be created on first plan)")
-
-        # Summary
-        if all_ok:
-            console.print("\n[bold green]All checks passed.[/bold green]")
-        else:
-            console.print("\n[bold yellow]Some checks failed. See above for details.[/bold yellow]")
+        if report.exit_code != 0:
+            raise SystemExit(report.exit_code)
 
     # ------------------------------------------------------------------
     # guide
@@ -2178,10 +2600,13 @@ class OdinCLI:
         Config files generated:
             .mcp.json              Claude Code
             .gemini/settings.json  Gemini CLI
-            .qwen/settings.json    Qwen CLI
             .codex/config.toml     Codex CLI (TOML format)
             .kilocode/mcp.json     Kilo Code
             opencode.json          OpenCode
+
+        Qwen was retired in task #102 and is no longer a config writer.
+        Any pre-existing ``.qwen/`` artifacts on disk are still excluded
+        from commits by the worktree ``.gitignore`` (defensive only).
 
         Examples:
             odin mcp_config                 Generate all configs (no task scope)
@@ -2190,7 +2615,6 @@ class OdinCLI:
         After generating, run any MCP-compatible CLI from this directory:
             gemini                          # auto-discovers .gemini/settings.json
             claude                          # auto-discovers .mcp.json
-            qwen                            # auto-discovers .qwen/settings.json
 
         Args:
             task_id: Optional task ID to scope tools to. If set, TASKIT_TASK_ID
@@ -2219,15 +2643,10 @@ class OdinCLI:
         console.print(f"\nRun any MCP-compatible CLI from this directory:")
         console.print(f"  [bold]claude[/bold]     # auto-discovers .mcp.json")
         console.print(f"  [bold]gemini[/bold]     # auto-discovers .gemini/settings.json")
-        console.print(f"  [bold]qwen[/bold]       # auto-discovers .qwen/settings.json")
         console.print(f"  [bold]codex[/bold]      # auto-discovers .codex/config.toml")
         console.print(f"\n[dim]Auth uses ODIN_ADMIN_USER/PASSWORD from .env (same as odin).[/dim]")
         if not resolved_task_id:
             console.print(f"[dim]No task_id set — pass task_id to each tool call.[/dim]")
-
-    # ------------------------------------------------------------------
-    # test
-    # ------------------------------------------------------------------
 
     def test(self, suite: Optional[str] = None):
         """Run the odin test suite.
@@ -2288,6 +2707,64 @@ class OdinCLI:
         console.print(f"[dim]{' '.join(cmd)}[/dim]\n")
         result = subprocess.run(cmd)
         raise SystemExit(result.returncode)
+
+    # ------------------------------------------------------------------
+    # gc (disk usage + orphan pruning)
+    # ------------------------------------------------------------------
+
+    def gc(self, prune: bool = False, project_root: Optional[str] = None):
+        """Report run-cost / orphan disk usage; optionally prune.
+
+        Three buckets: microsandbox sandboxes (named vs ephemeral),
+        microsandbox snapshots, and odin-managed git worktrees (with a
+        breakdown of ``node_modules`` cost per worktree).
+
+        Dry-run by default — pass ``--prune`` to actually remove orphans.
+        Only ephemeral ``odin-msb-*`` sandboxes and clean odin worktrees
+        are eligible. Snapshots and named sandboxes (``odinbuild``) are
+        reported but NEVER removed.
+
+        Examples:
+            odin gc                 Show usage report
+            odin gc --prune         Remove orphans (dry-run=False)
+
+        Args:
+            prune: Actually remove orphans; default dry-run.
+            project_root: Override the project root used to locate worktrees
+                (default: ``Path.cwd()``).
+        """
+        from odin import gc as gc_mod
+
+        report = gc_mod.collect_report(project_root=project_root)
+        gc_mod.render_report(report, stream=sys.stdout)
+        plan = gc_mod.collect_prune_plan(project_root=project_root)
+        if not plan:
+            console.print("[green]No orphans to reclaim.[/green]")
+            return
+        total = sum(a.get("estimated_reclaim_bytes", 0) for a in plan)
+        nm_total = sum(a.get("node_modules_bytes", 0) for a in plan)
+        msg = (
+            f"[bold]{len(plan)} orphan(s)[/bold] reclaimable: "
+            f"{gc_mod._fmt_bytes(total)}"
+        )
+        if nm_total:
+            msg += f" ({gc_mod._fmt_bytes(nm_total)} in node_modules)"
+        console.print(msg)
+        if not prune:
+            console.print("[dim]Dry-run — pass --prune to actually remove.[/dim]")
+            return
+        completed = gc_mod.execute_prune(project_root=project_root)
+        reclaimed = sum(a.get("estimated_reclaim_bytes", 0) for a in completed)
+        nm_reclaimed = sum(a.get("node_modules_bytes", 0) for a in completed if a["kind"] == "worktree")
+        console.print(
+            f"[green]Reclaimed[/green] {gc_mod._fmt_bytes(reclaimed)} "
+            f"({len(completed)} of {len(plan)} orphans removed)"
+        )
+        if nm_reclaimed:
+            console.print(
+                f"[dim]{gc_mod._fmt_bytes(nm_reclaimed)} was node_modules — "
+                f"see [[BACKLOG]] for the shared npm cache fix.[/dim]"
+            )
 
 
 def _generate_all_mcp_configs(
@@ -2404,7 +2881,7 @@ def _merge_mcp_config(
             permission.update(cd_opencode_permissions())
         return json.dumps({"permission": permission, "mcp": mcp_servers}, indent=2)
 
-    # mcpServers-based agents (claude, gemini, qwen) — merge server dicts
+    # mcpServers-based agents (claude, gemini, kilocode) — merge server dicts
     servers = {**taskit_server_entry(agent_name, env)}
     if has_mobile:
         from odin.mcps.mobile_mcp.config import server_fragment as mobile_fragment

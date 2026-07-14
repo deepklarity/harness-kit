@@ -2,18 +2,21 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Board, ViewMode } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { useService } from '../contexts/ServiceContext';
 
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-    BarChart3, LayoutDashboard, FileText, TrendingUp,
+    BarChart3, LayoutDashboard, FileText,
     Plus, LogOut, Settings,
     Activity, Search, ChevronDown, Clock3, Sparkles, ListTodo, Gauge, ScrollText,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from './NotificationBell';
+import { CapacityBadge } from './CapacityBadge';
 import type { LucideIcon } from 'lucide-react';
 
 const ALL_BOARDS_ID = '__ALL__';
@@ -21,15 +24,19 @@ const CREATE_BOARD_ID = '__CREATE__';
 
 const VIEW_ROUTES: { id: ViewMode; path: string; label: string; icon: LucideIcon }[] = [
     { id: 'board', path: '/board', label: 'Board', icon: LayoutDashboard },
-    { id: 'scheduling', path: '/scheduling', label: 'Scheduling', icon: Clock3 },
     { id: 'specs', path: '/specs', label: 'Specs', icon: FileText },
+    { id: 'scheduling', path: '/scheduling', label: 'Scheduling', icon: Clock3 },
     { id: 'overview', path: '/stats', label: 'Stats', icon: BarChart3 },
-    { id: 'providers', path: '/providers', label: 'Providers', icon: Gauge },
-    { id: 'analytics', path: '/analytics', label: 'Analytics', icon: TrendingUp },
     { id: 'reflections', path: '/reflections', label: 'Reflections', icon: ScrollText },
+    { id: 'providers', path: '/providers', label: 'Providers', icon: Gauge },
 ];
 
-export { ALL_BOARDS_ID, VIEW_ROUTES };
+// The board-scoped work surfaces — the primary segmented tab group.
+const PRIMARY_VIEWS: ViewMode[] = ['board', 'specs', 'scheduling'];
+// Retrospective / analytics surfaces — grouped under the "Insights" dropdown.
+const INSIGHTS_VIEWS: ViewMode[] = ['overview', 'reflections'];
+
+export { ALL_BOARDS_ID, VIEW_ROUTES, PRIMARY_VIEWS, INSIGHTS_VIEWS };
 
 interface AppHeaderProps {
     boards: Board[];
@@ -54,10 +61,15 @@ export function AppHeader({
     onOpenProcessMonitor, onOpenCommandPalette,
 }: AppHeaderProps) {
     const { user: authUser, authEnabled, logout } = useAuth();
-    const [statsOpen, setStatsOpen] = useState(false);
-    const activeStatsView = VIEW_ROUTES.find(item => item.id === viewMode && ['overview', 'analytics', 'providers', 'reflections'].includes(item.id))
+    const service = useService();
+    const [insightsOpen, setInsightsOpen] = useState(false);
+    const boardQuery = selectedBoard && selectedBoard !== ALL_BOARDS_ID ? `?board=${selectedBoard}` : '';
+    const insightsActive = INSIGHTS_VIEWS.includes(viewMode);
+    const activeInsight = VIEW_ROUTES.find(item => item.id === viewMode && INSIGHTS_VIEWS.includes(item.id))
         ?? VIEW_ROUTES.find(item => item.id === 'overview');
-    const ActiveStatsIcon = activeStatsView?.icon ?? BarChart3;
+    const ActiveInsightIcon = activeInsight?.icon ?? BarChart3;
+    const providersActive = viewMode === 'providers';
+    const settingsActive = viewMode === 'settings';
 
     return (
         <header className="sticky top-0 z-50 bg-background border-b border-border px-4 sm:px-6 lg:px-8">
@@ -109,15 +121,16 @@ export function AppHeader({
                     </Select>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <nav aria-label="Primary" className="flex items-center gap-1">
                     <div className="inline-flex items-center justify-center rounded-lg bg-muted p-[3px] h-9 shrink-0">
-                        {VIEW_ROUTES.filter(item => ['board', 'specs'].includes(item.id)).map(item => {
+                        {PRIMARY_VIEWS.map(id => VIEW_ROUTES.find(r => r.id === id)!).map(item => {
                             const Icon = item.icon;
                             const isActive = viewMode === item.id;
                             return (
                                 <Link
                                     key={item.id}
-                                    to={selectedBoard && selectedBoard !== ALL_BOARDS_ID ? `${item.path}?board=${selectedBoard}` : item.path}
+                                    to={`${item.path}${boardQuery}`}
+                                    aria-current={isActive ? 'page' : undefined}
                                     className={cn(
                                         "inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium whitespace-nowrap transition-all cursor-pointer",
                                         isActive
@@ -132,85 +145,52 @@ export function AppHeader({
                         })}
                     </div>
 
-                    <Popover open={statsOpen} onOpenChange={setStatsOpen}>
+                    <Popover open={insightsOpen} onOpenChange={setInsightsOpen}>
                         <PopoverTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className={cn(
-                                    "h-8 px-2.5 gap-1.5 text-xs font-medium transition-colors",
-                                    ['overview', 'analytics', 'providers', 'reflections'].includes(viewMode)
-                                        ? "bg-muted text-foreground"
-                                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                )}
-                            >
-                                <ActiveStatsIcon className="size-3.5" />
-                                <span className="hidden sm:inline">{activeStatsView?.label ?? 'Stats'}</span>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    aria-current={insightsActive ? 'page' : undefined}
+                                    className={cn(
+                                        "h-8 px-2.5 gap-1.5 text-xs font-medium transition-colors",
+                                        insightsActive
+                                            ? "bg-muted text-foreground"
+                                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                    )}
+                                >
+                                <ActiveInsightIcon className="size-3.5" />
+                                <span className="hidden sm:inline">{insightsActive ? activeInsight?.label : 'Insights'}</span>
                                 <ChevronDown className="size-3 opacity-50" />
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent align="center" className="w-40 p-1">
+                        <PopoverContent align="center" className="w-44 p-1">
                             <div className="flex flex-col gap-0.5">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setStatsOpen(false);
-                                        onNavChange('overview');
-                                    }}
-                                    className={cn(
-                                        "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
-                                        viewMode === 'overview' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
-                                    )}
-                                >
-                                    <BarChart3 className="size-3.5" />
-                                    <span>Stats</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setStatsOpen(false);
-                                        onNavChange('analytics');
-                                    }}
-                                    className={cn(
-                                        "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
-                                        viewMode === 'analytics' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
-                                    )}
-                                >
-                                    <TrendingUp className="size-3.5" />
-                                    <span>Analytics</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setStatsOpen(false);
-                                        onNavChange('providers');
-                                    }}
-                                    className={cn(
-                                        "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
-                                        viewMode === 'providers' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
-                                    )}
-                                >
-                                    <Gauge className="size-3.5" />
-                                    <span>Providers</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setStatsOpen(false);
-                                        onNavChange('reflections');
-                                    }}
-                                    className={cn(
-                                        "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
-                                        viewMode === 'reflections' ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
-                                    )}
-                                >
-                                    <ScrollText className="size-3.5" />
-                                    <span>Reflections</span>
-                                </button>
+                                {INSIGHTS_VIEWS.map(id => VIEW_ROUTES.find(r => r.id === id)!).map(item => {
+                                    const Icon = item.icon;
+                                    const isActive = viewMode === item.id;
+                                    return (
+                                        <button
+                                            key={item.id}
+                                            type="button"
+                                            onClick={() => {
+                                                setInsightsOpen(false);
+                                                onNavChange(item.id);
+                                            }}
+                                            aria-current={isActive ? 'page' : undefined}
+                                            className={cn(
+                                                "flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-sm transition-colors w-full text-left",
+                                                isActive ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                                            )}
+                                        >
+                                            <Icon className="size-3.5" />
+                                            <span>{item.label}</span>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </PopoverContent>
                     </Popover>
-                </div>
+                </nav>
 
                 <div className="flex items-center gap-1 sm:gap-2 shrink-0">
                     <button
@@ -224,6 +204,7 @@ export function AppHeader({
                             ⌘K
                         </kbd>
                     </button>
+                    <CapacityBadge service={service} className="hidden sm:inline-flex" />
                     <Button variant="outline" size="sm" className="gap-1.5 h-8 px-2 sm:px-3" onClick={onOpenProcessMonitor}>
                         <Activity className="size-3.5" />
                         <span className="hidden md:inline">Process</span>
@@ -257,11 +238,40 @@ export function AppHeader({
                             </div>
                         </PopoverContent>
                     </Popover>
-                    <Button variant="ghost" size="sm" className="size-8 p-0" asChild>
-                        <Link to={selectedBoard && selectedBoard !== ALL_BOARDS_ID ? `/settings?board=${selectedBoard}` : '/settings'}>
-                            <Settings className="size-4" />
-                        </Link>
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label="Providers"
+                                aria-current={providersActive ? 'page' : undefined}
+                                className={cn("size-8 p-0", providersActive && "bg-muted text-foreground")}
+                                asChild
+                            >
+                                <Link to={`/providers${boardQuery}`}>
+                                    <Gauge className="size-4" />
+                                </Link>
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Providers — AI quota &amp; health</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label="Settings"
+                                aria-current={settingsActive ? 'page' : undefined}
+                                className={cn("size-8 p-0", settingsActive && "bg-muted text-foreground")}
+                                asChild
+                            >
+                                <Link to={`/settings${boardQuery}`}>
+                                    <Settings className="size-4" />
+                                </Link>
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Settings</TooltipContent>
+                    </Tooltip>
                     <NotificationBell />
                     {authEnabled && authUser && (
                         <div className="flex items-center gap-1 sm:gap-2 ml-1 sm:ml-2 pl-1 sm:pl-2 border-l border-border">

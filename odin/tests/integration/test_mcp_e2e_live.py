@@ -1,6 +1,6 @@
 """True end-to-end test for MCP integration with a live agent CLI.
 
-Launches a real agent CLI (gemini, claude, or qwen) with MCP tools
+Launches a real agent CLI (gemini, claude) with MCP tools
 configured, asks it to post a comment to a TaskIt task, and verifies
 the comment appears via the TaskIt API.
 
@@ -14,7 +14,7 @@ works end-to-end. It tests:
 Requires:
   - TaskIt backend running at TASKIT_URL (default: http://localhost:8000)
   - taskit-mcp on PATH (pip install -e ".[mcp]")
-  - At least one agent CLI on PATH (gemini, claude, qwen, etc.)
+  - At least one agent CLI on PATH (gemini, claude, etc.)
   - If auth enabled: ODIN_ADMIN_USER, ODIN_ADMIN_PASSWORD env vars
 
 Run from odin/:
@@ -58,7 +58,7 @@ def _mcp_on_path() -> bool:
 
 def _any_cli_available() -> str | None:
     """Return the first available agent CLI, or None."""
-    for cli in ["gemini", "claude", "qwen"]:
+    for cli in ["gemini", "claude"]:
         if shutil.which(cli):
             return cli
     return None
@@ -148,7 +148,6 @@ def available_cli():
 CLI_CONFIG_MAP = {
     "claude":  ("claude",  ".mcp.json"),
     "gemini":  ("gemini",  ".gemini/settings.json"),
-    "qwen":    ("qwen",    ".qwen/settings.json"),
     "codex":   ("codex",   ".codex/config.toml"),
     "kilo":    ("minimax", ".kilocode/mcp.json"),
     "opencode": ("glm",    "opencode.json"),
@@ -221,13 +220,6 @@ class TestPerCliConfigFormat:
         assert "mcpServers" in data
         assert data["mcpServers"]["taskit"]["command"] == "taskit-mcp"
 
-    def test_qwen_settings_json(self, work_dir, task, auth):
-        token = _get_token(auth)
-        path = _write_mcp_config(work_dir, "qwen", task["id"], token)
-        assert path == Path(work_dir) / ".qwen" / "settings.json"
-        data = json.loads(path.read_text())
-        assert "mcpServers" in data
-
     def test_codex_config_toml(self, work_dir, task, auth):
         token = _get_token(auth)
         path = _write_mcp_config(work_dir, "codex", task["id"], token)
@@ -279,8 +271,6 @@ class TestLiveAgentMcpComment:
             cmd = ["gemini", "-p", prompt, "--yolo"]
         elif available_cli == "claude":
             cmd = ["claude", "-p", prompt, "--allowedTools", "mcp__taskit__taskit_add_comment"]
-        elif available_cli == "qwen":
-            cmd = ["qwen", "-p", prompt, "--yolo"]
         else:
             pytest.skip(f"No command template for CLI: {available_cli}")
 

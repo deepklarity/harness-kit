@@ -5,13 +5,14 @@ import subprocess
 import uuid
 from datetime import datetime, time
 from pathlib import Path
-from collections import deque
+from collections import deque, namedtuple
 
 import yaml
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Case, Count, F, IntegerField, Q, Value, When
+from django.db.models import Case, Count, F, IntegerField, Prefetch, Q, Value, When
+from django.db import OperationalError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -21,21 +22,37 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from .kanban_ordering import KANBAN_COLUMNS, get_statuses_for_column, move_task
+from .kanban_ordering import KANBAN_COLUMNS, get_statuses_for_column, move_task, order_column_queryset
+from .failure_tagger import tag_failure_class
+from .mistakes import record_execution_mistake, record_reflection_mistake
+from .agent_stats import is_human_author
+from .models import ErrorEvent  # noqa: E402 — error ledger (task #222)
+from .board_story import build_board_story
+from .factory_snapshot import build_factory_snapshot
+from .inbox import build_inbox
+from .rework import ReworkValidationError, compose_rework_task
+from .spec_story import build_spec_story
 from .models import (
     Board, BoardMembership, CommentAttachment, CommentType, Label,
     ReflectionReport, ReflectionStatus, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
-    TaskComment, TaskHistory, TaskSchedule, TaskScheduleRun, TaskStatus, User, UserRole, UserSetting,
+    TaskComment, TaskHistory, TaskRunState, TaskSchedule, TaskScheduleRun, TaskStatus, User, UserRole, UserSetting,
+    SystemSetting,
 )
+from . import task_runs
+from .db import is_locked_error
+from .audit_presets import load_presets
 from .scheduling import (
+    ACTIVE_OVERLAP_STATUSES,
     compute_schedule_next_run,
     create_schedule,
     maybe_finalize_schedule_run,
     parse_local_datetime,
     local_to_utc,
+    release_schedule_occurrence,
     rebind_local_datetime,
     ScheduleValidationError,
 )
+from .state_transitions import is_cancel_transition_allowed
 from .ide import detect_supported_ides, get_supported_ide
 from .utils.logger import logger
 from .permissions import IsAdmin
@@ -59,6 +76,7 @@ from .serializers import (
     ModelToggleSerializer,
     PlanningResultSerializer,
     RoutingAgentSerializer,
+    ReworkTaskSerializer,
     SpecCommentSerializer,
     CreateTaskSerializer,
     ExecutionResultSerializer,
@@ -70,6 +88,7 @@ from .serializers import (
     OpenProjectSerializer,
     RuntimeStopSerializer,
     ScheduleStatusMutationSerializer,
+    SetClaudeTokenSerializer,
     SpecDiagnosticSerializer,
     SpecListSerializer,
     SpecSerializer,
@@ -79,6 +98,7 @@ from .serializers import (
     TaskDetailSerializer,
     TaskHistorySerializer,
     TaskScheduleSerializer,
+    TaskKanbanCardSerializer,
     TaskListSerializer,
     TaskSearchResultSerializer,
     TaskSerializer,
@@ -104,48 +124,346 @@ WEEKDAY_KEYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 
 
-REFLECTION_PREFERRED_AGENTS = ["claude", "gemini", "codex"]
+REFLECTION_PREFERRED_AGENTS = ["gemini", "codex", "claude"]
 
 
-def _find_first_available_reviewer(board=None):
-    """Return (agent_name, model_name) for the first allowed reviewer with models.
+def _reflection_agent_hint_for_model(model_name):
+    model = (model_name or "").lower()
+    if model.startswith("gemini"):
+        return "gemini"
+    if model.startswith("claude"):
+        return "claude"
+    if model.startswith("gpt") or model.startswith("o") or "codex" in model:
+        return "codex"
+    if model.startswith("zai-coding-plan/"):
+        return "glm"
+    if model.startswith("minimax-coding-plan/"):
+        return "minimax"
+    return None
 
-    Looks at User rows with role=AGENT (email ends with @odin.agent) and picks
-    the first one in REFLECTION_PREFERRED_AGENTS order that has at least one
-    available_model. If the chosen agent is "claude" and the board has a
-    reflection_model override, that override is preferred over the user's
-    own default model (preserves previous board.reflection_model behavior).
-    Returns (None, None) if no allowed reviewer is available.
+
+def _model_name(entry):
+    """Normalize an ``available_models`` list entry to a model-name string.
+
+    Entries may be either ``{"name": "x", ...}`` dicts (the canonical shape
+    produced by ``data/agent_models.json`` + ``seedmodels``) or bare strings
+    (the legacy shape some operational data still carries). Iterating with
+    ``entry.get("name")`` crashes on a bare string — the surrounding ``any()``
+    silently swallows the AttributeError and the resolver returns
+    ``(None, None)`` even when the model is right there (task #246).
     """
-    agent_users = User.objects.filter(role=UserRole.AGENT, email__iendswith="@odin.agent")
+    if isinstance(entry, dict):
+        return entry.get("name")
+    return entry
+
+
+def _agent_available_model_names(agent_name):
+    """Return sorted list of model names that ``agent_name`` advertises.
+
+    Returns ``None`` (not ``[]``) when no agent user matches — callers
+    distinguish "unknown agent" from "known agent with no models" so the
+    400 response can surface the right error. Empty list means the agent
+    exists but carries no models; ``None`` means the agent isn't a known
+    reflection reviewer at all (the latter is already rejected by
+    ``ReflectionRequestSerializer.validate_reviewer_agent`` upstream; this
+    helper still tolerates the call so it stays safe in any context).
+    """
+    if not agent_name:
+        return None
+    lookup = (agent_name or "").strip().lower()
+    matches = User.objects.filter(
+        role=UserRole.AGENT,
+        email__iendswith="@odin.agent",
+        is_active=True,
+    )
+    for u in matches:
+        local = (u.email or "").split("@")[0]
+        name = local.split("+")[0].lower()
+        if name == lookup:
+            names = {
+                _model_name(m)
+                for m in (u.available_models or [])
+                if _model_name(m)
+            }
+            return sorted(names)
+    return None
+
+
+# ── W3.18: size-bucketed reviewer selection ────────────────────────────────
+# Default thresholds for the size buckets (in chars of estimated review
+# context). The numbers are heuristics — small tasks (≤8KB) get a cheap
+# reviewer, large tasks (≥24KB) get the default tier. The strategy on the
+# board can override these per-board.
+REFLECTION_SIZE_THRESHOLD_DEFAULT_SMALL_MAX = 8000
+REFLECTION_SIZE_THRESHOLD_DEFAULT_LARGE_MIN = 24000
+
+
+def _estimate_task_context_size(task):
+    """Estimate the assembled reflection-prompt size for a task.
+
+    The estimate is computed from the same fields Odin would include in
+    the reviewer's prompt:
+    - description
+    - all comments (regardless of type — the reflection prompt truncates
+      noisy types but never drops them)
+    - full_output (agent's execution transcript stored in metadata)
+    - dependencies (small constant ~80 chars per dep)
+    - metadata_summary (~constant)
+
+    The estimate doesn't need to be byte-exact with the assembled prompt;
+    it just needs to bucket the task into the right range. Under-estimating
+    is safer than over-estimating because it biases toward the stronger
+    reviewer (no risk of undersized review on a borderline task).
+    """
+    if task is None:
+        return 0
+    description_len = len(task.description or "")
+    full_output_len = 0
+    metadata = task.metadata or {}
+    full_output = metadata.get("full_output") or ""
+    if isinstance(full_output, str):
+        full_output_len = len(full_output)
+    comments_len = 0
+    try:
+        # All comments counted — both status_update and proof/reply contribute.
+        for c in task.comments.all():
+            comments_len += len(c.content or "")
+    except Exception:
+        # Defensive: if the relation is unavailable, just skip the comments.
+        comments_len = 0
+    deps_len = 0
+    try:
+        deps = list(task.depends_on or [])
+        deps_len = len(deps) * 80
+    except Exception:
+        deps_len = 0
+    return description_len + comments_len + full_output_len + deps_len
+
+
+def _bucket_for_context_size(context_size, thresholds=None):
+    """Return the bucket name ("small" | "medium" | "large") for a size.
+
+    Bucket boundaries are inclusive at the upper edge:
+    - small: size < small_max
+    - medium: small_max <= size < large_min
+    - large: size >= large_min
+
+    `thresholds` is a dict with optional "small_max" / "large_min"
+    integers. Defaults apply per-key when missing.
+    """
+    th = thresholds or {}
+    small_max = int(th.get("small_max", REFLECTION_SIZE_THRESHOLD_DEFAULT_SMALL_MAX))
+    large_min = int(th.get("large_min", REFLECTION_SIZE_THRESHOLD_DEFAULT_LARGE_MIN))
+    if context_size < small_max:
+        return "small"
+    if context_size < large_min:
+        return "medium"
+    return "large"
+
+
+def _resolve_reviewer_for_model(model_name, board=None):
+    """Find an agent that has `model_name` in its available_models.
+
+    Mirrors the model-resolution behavior of the reviewer-order walk but
+    keyed on a specific model name (used for reflection_model /
+    reflection_review_strategy resolution).
+    Returns (agent, model) or (None, None) when no agent carries it.
+    """
+    if not model_name:
+        return None, None
+    hinted = _reflection_agent_hint_for_model(model_name)
+    agent_users = User.objects.filter(
+        role=UserRole.AGENT,
+        email__iendswith="@odin.agent",
+        is_active=True,
+    )
     by_agent = {}
     for u in agent_users:
-        local = u.email.split("@")[0]
+        local = (u.email or "").split("@")[0]
         name = local.split("+")[0].lower()
-        if name not in by_agent and u.available_models:
+        if u.available_models:
             by_agent[name] = u
 
-    for agent in REFLECTION_PREFERRED_AGENTS:
+    # Scope to board members if a board is provided and has agents.
+    board_member_agents = None
+    if board is not None:
+        board_member_ids = set(
+            BoardMembership.objects.filter(
+                board=board, user__role=UserRole.AGENT,
+            ).values_list("user_id", flat=True)
+        )
+        if board_member_ids:
+            board_member_agents = {
+                name for name, u in by_agent.items()
+                if u.id in board_member_ids
+            }
+
+    candidates = board_member_agents or set(by_agent.keys())
+    search_order = [hinted] if hinted else REFLECTION_PREFERRED_AGENTS
+    for agent in search_order:
+        if not agent or agent not in candidates:
+            continue
         u = by_agent.get(agent)
         if not u:
             continue
         models = u.available_models or []
-        if agent == "claude" and board and getattr(board, "reflection_model", None):
-            return agent, board.reflection_model
-        default = next((m.get("name") for m in models if m.get("is_default")), None)
-        if not default and models:
-            default = models[0].get("name")
-        if default:
-            return agent, default
-
+        if any(_model_name(m) == model_name for m in models):
+            return agent, model_name
     return None, None
 
 
-def _reflection_reviewer_defaults(board=None):
-    selection = get_forced_provider_selection()
-    if selection.enabled:
-        return selection.provider, selection.model
-    return _find_first_available_reviewer(board=board)
+def _agent_settings_hint(board_id, agent_name=None):
+    """Return the API URL the operator opens to flip the switch (W10.4).
+
+    Mirrors the actual UI link the SettingsView renders so the dispatch
+    error message and the action button point at the same place — the
+    one-liner the operator sees in the traceback is the same one the
+    dashboard shows.
+
+    ``board_id`` is required; an ``agent_name`` is appended only when
+    known so callers can land directly on the toggle row.
+    """
+    base = f"/api/boards/{board_id}/agents/"
+    return base if not agent_name else f"{base}{agent_name}/"
+
+
+def _board_enabled_agents(board):
+    """Return {agent_name: User} for active AGENT users enrolled on `board`.
+
+    Mirrors the scoping logic used by
+    `_resolve_reviewer_for_model`: an
+    "enabled" reviewer is a BoardMembership (role AGENT) whose User row is
+    still active (retired agents keep their row for FK integrity but must
+    not surface — task #135) and carries at least one available model.
+    """
+    member_ids = None
+    if board is not None:
+        member_ids = set(
+            BoardMembership.objects.filter(
+                board=board, user__role=UserRole.AGENT,
+            ).values_list("user_id", flat=True)
+        )
+
+    agent_users = User.objects.filter(role=UserRole.AGENT, is_active=True)
+    if member_ids:
+        agent_users = agent_users.filter(id__in=member_ids)
+    # No board, or a board with no enrolled agents yet: fall back to any
+    # active AGENT user (legacy `_find_first_available_reviewer` behavior)
+    # rather than returning nothing.
+
+    by_agent = {}
+    for u in agent_users:
+        local = (u.email or "").split("@")[0]
+        name = local.split("+")[0].lower()
+        if name not in by_agent and u.available_models:
+            by_agent[name] = u
+    return by_agent
+
+
+def _strongest_first_reviewer_order(by_agent):
+    """Deterministic strongest-first (agent, model) list for a board.
+
+    Mirrors the sort used for auto-populating `model_escalation_priority`:
+    every (agent, model) pair the enabled agents carry, sorted by
+    `output_price_per_1m_tokens` descending (most expensive/strongest
+    first). Missing prices sort last. Ties break on (agent, model) name so
+    the ordering — and therefore the fallback pick — never depends on
+    dict/set iteration order.
+    """
+    from .pricing import get_pricing_table
+    pricing = get_pricing_table()
+    candidates = []
+    for agent_name, user in by_agent.items():
+        for entry in (user.available_models or []):
+            model_name = _model_name(entry)
+            if not model_name:
+                continue
+            price = pricing.get(model_name, {}).get("output_price_per_1m_tokens")
+            candidates.append((agent_name, model_name, price))
+
+    def _sort_key(item):
+        _agent_name, _model_name_, price = item
+        # Descending price → negate; None sorts after any real price.
+        has_price = price is not None
+        return (0 if has_price else 1, -price if has_price else 0, _agent_name, _model_name_)
+
+    candidates.sort(key=_sort_key)
+    return [{"agent_name": a, "model_name": m} for a, m, _p in candidates]
+
+
+def _walk_reviewer_order(order, by_agent, quota_cache, exclude=frozenset()):
+    """Walk an ordered [{agent_name, model_name}] list, first viable wins.
+
+    A candidate is viable when: the agent is present in `by_agent` (enabled
+    board member with available models), the model is one of that agent's
+    available_models, and the agent's real-time quota isn't `exhausted`
+    (`headroom` and `unavailable` are both usable — an unmapped or down
+    quota checker must never brick reviewer selection).
+
+    Returns (agent, model, rank) or (None, None, None). `quota_cache` is a
+    dict the caller reuses across calls in the same selection so the walk
+    never re-queries the same agent's usage twice.
+    """
+    for rank, entry in enumerate(order or []):
+        if not isinstance(entry, dict):
+            continue
+        agent_name = (entry.get("agent_name") or "").strip().lower()
+        model_name = entry.get("model_name")
+        if not agent_name or not model_name:
+            continue
+        if (agent_name, model_name) in exclude:
+            # Retry diversity: this reviewer's last verdict on the task
+            # was unusable (ERROR/empty) — re-picking it deterministically
+            # deadlocks retries (task 297: three identical ERRORs).
+            continue
+        user = by_agent.get(agent_name)
+        if not user:
+            continue
+        models = user.available_models or []
+        if not any(_model_name(m) == model_name for m in models):
+            continue
+        if agent_name not in quota_cache:
+            quota_cache[agent_name] = _check_provider_usage(agent_name)
+        if quota_cache[agent_name].state == _QUOTA_EXHAUSTED:
+            continue
+        return agent_name, model_name, rank
+    return None, None, None
+
+
+def select_reviewer_by_context_size(task, board=None, exclude_reviewers=frozenset()):
+    """Select (agent, model, selection_reason) for a reflection run.
+
+    ONE mechanism, operator directive: the board's ordered reviewer list.
+    1. board.reviewer_order — ordered, board-configured walk. Skips agents
+       that aren't enabled board members, models the agent doesn't carry,
+       and agents whose real-time quota is exhausted.
+       Returns "reviewer_order[<rank>]".
+    2. Deterministic strongest-first fallback (by
+       output_price_per_1m_tokens, descending) over the board's enabled
+       agents, same quota filter. Returns "default_strongest".
+
+    The legacy single-model override (board.reflection_model) and the
+    size-bucket strategy (board.reflection_review_strategy) are retired:
+    both were redundant once the ordered walk existed ("topmost available
+    model with available quota is used"). Fields remain on the model for
+    old rows but are never consulted. Forced-provider (env) likewise
+    plays no role in reviewer selection.
+    """
+    by_agent = _board_enabled_agents(board)
+    quota_cache = {}
+    exclude = frozenset(exclude_reviewers or ())
+
+    reviewer_order = getattr(board, "reviewer_order", None) if board else None
+    agent, model, rank = _walk_reviewer_order(reviewer_order, by_agent, quota_cache, exclude)
+    if agent and model:
+        return agent, model, f"reviewer_order[{rank}]"
+
+    fallback_order = _strongest_first_reviewer_order(by_agent)
+    agent, model, _rank = _walk_reviewer_order(fallback_order, by_agent, quota_cache, exclude)
+    if agent and model:
+        return agent, model, "default_strongest"
+
+    return None, None, "default_strongest"
 
 
 def _normalize_directory_name(directory_name):
@@ -191,6 +509,37 @@ def _validate_forced_task_target(assignee=None, model_name=None):
     return
 
 
+def _validate_dispatch_readiness(board, spec_id, is_dispatch_transition):
+    """Refuse a transition into IN_PROGRESS for a task with no spec on a
+    board that hasn't opted into project-root execution.
+
+    Without a spec there is no worktree for the executor to run in — see
+    tasks/dag_executor.py poll_and_execute, which FAILS such a task with
+    "dispatch halted — no worktree path resolvable..." once it's already
+    on the board consuming a slot. That downstream guard stays in place as
+    a last resort (schedules and other non-API paths can still reach
+    IN_PROGRESS), but a normal PATCH/POST should be refused up front with
+    an actionable message instead of round-tripping through a FAILED task.
+
+    `is_dispatch_transition` must be True only when the request is actually
+    moving the task into IN_PROGRESS — edits to a task that's already
+    IN_PROGRESS (or any other field/status) must never be blocked here.
+    """
+    if not is_dispatch_transition:
+        return
+    if spec_id:
+        return
+    if board.allow_project_root_execution:
+        return
+    raise ValidationError({
+        "status": (
+            "This task has no spec, so there is no worktree to execute in. "
+            "Plan it into a spec, or enable project-root execution in "
+            "board settings."
+        ),
+    })
+
+
 def _clear_stop_guards(metadata):
     metadata.pop("ignore_execution_results", None)
     metadata.pop("stopped_run_token", None)
@@ -223,7 +572,7 @@ def _trigger_auto_reflection(task):
         )
         return
 
-    reviewer_agent, reviewer_model = _reflection_reviewer_defaults(board=task.board)
+    reviewer_agent, reviewer_model, selection_reason = select_reviewer_by_context_size(task, board=task.board)
     if not reviewer_agent or not reviewer_model:
         logger.info(
             "[task:%s] Skipping auto-reflection: no reviewer agent (%s) is available — dispatching merge+advance directly",
@@ -242,12 +591,16 @@ def _trigger_auto_reflection(task):
             "dependencies", "metadata",
         ],
         status=ReflectionStatus.PENDING,
+        selection_reason=selection_reason,
     )
 
-    from .dag_executor import execute_reflection
-    execute_reflection.delay(report.id)
+    from .dag_executor import _dispatch_reflection_task
+    _dispatch_reflection_task(report.id)
 
-    logger.info("[task:%s] Auto-reflection triggered: report_id=%s", task.id, report.id)
+    logger.info(
+        "[task:%s] Auto-reflection triggered: report_id=%s, reviewer=%s/%s, selection=%s",
+        task.id, report.id, reviewer_agent, reviewer_model, selection_reason,
+    )
 
 
 def _merge_task_on_reflection_pass(task):
@@ -256,24 +609,128 @@ def _merge_task_on_reflection_pass(task):
     Called when REVIEW → TESTING (pass) or REVIEW → FAILED (3 strikes).
     The actual merge runs in the Celery worker where odin is importable
     (the Django web process cannot import odin.worktree).
+
+    When no branch exists (no worktree isolation), advances directly to
+    TESTING since there is nothing to merge.
+
+    W3.22 (task #171): every skip path now emits a log line AND posts a
+    STATUS_UPDATE comment, and the dispatched path stamps
+    ``merge_dispatched_at`` + ``merge_dispatch_attempts`` so the watchdog
+    (see ``dag_executor.scan_pending_merge_dispatches``) can detect a
+    stalled dispatch. The Celery ``.delay()`` call is wrapped in
+    try/except so a broker outage cannot 500 the reflection PATCH or
+    silently lose the merge — instead it surfaces as a STATUS_UPDATE
+    comment + ``merge_status = "needs_human"``.
     """
     branch = (task.metadata or {}).get("branch")
     if not branch:
+        # No branch — nothing to merge, advance directly.
+        # Loud skip: the operator should see why TESTING happened without a merge.
+        logger.info(
+            "[task:%s] _merge_task_on_reflection_pass: no branch — "
+            "advancing REVIEW → TESTING without merge",
+            task.id,
+        )
+        from .dag_executor import _advance_task_to_testing
+        _advance_task_to_testing(task)
         return
 
-    # Skip if already merged (e.g. manual merge or duplicate call)
+    # Skip if already merged (e.g. manual merge or duplicate call).
+    # Loud skip: was a bare ``return`` in the original — that was the silent
+    # path behind 9 wave-3 stalled tasks.
     if (task.metadata or {}).get("merge_status") == "merged":
+        logger.warning(
+            "[task:%s] _merge_task_on_reflection_pass: merge_status already "
+            "'merged' — skipping duplicate dispatch",
+            task.id,
+        )
+        _record_merge_skip(task, "already_merged",
+                           "Merge dispatch skipped: branch already merged. "
+                           "This is a duplicate dispatch — the merge is "
+                           "already done.")
         return
 
-    from .dag_executor import merge_task_on_reflection
-    merge_task_on_reflection.delay(task.id)
+    from .dag_executor import _dispatch_merge_task
+    metadata = dict(task.metadata or {})
+    metadata["merge_dispatch_attempts"] = int(metadata.get("merge_dispatch_attempts") or 0) + 1
+    metadata["merge_dispatched_at"] = timezone.now().isoformat()
+    metadata["merge_dispatch_source"] = "auto"
+    Task.objects.filter(id=task.id).update(metadata=metadata)
+    task.metadata = metadata
+    logger.info(
+        "[task:%s] _merge_task_on_reflection_pass: dispatching "
+        "merge_task_on_reflection (attempt=%s)",
+        task.id, metadata["merge_dispatch_attempts"],
+    )
+    try:
+        _dispatch_merge_task(task.id)
+    except Exception as exc:
+        # Broker outage or queue full — surface it loudly so the watchdog
+        # can pick it up on its next pass instead of leaving the task stalled.
+        logger.exception(
+            "[task:%s] _merge_task_on_reflection_pass: Celery dispatch failed",
+            task.id,
+        )
+        meta = dict(task.metadata or {})
+        meta["merge_status"] = "needs_human"
+        meta["merge_dispatch_error"] = str(exc)
+        Task.objects.filter(id=task.id).update(metadata=meta)
+        task.metadata = meta
+        # Error ledger (task #222): capture the celery broker failure
+        # so the operator sees broker outages in the triage queue, not
+        # only as buried dispatch-skip comments.
+        try:
+            from .errors import record_celery_exception
+            record_celery_exception(
+                task_name="tasks.dag_executor.merge_task_on_reflection",
+                symptom=(
+                    f"Merge dispatch failed for task {task.id}: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+                exc_class=type(exc).__name__,
+                exc_message=str(exc),
+                task=task,
+                task_id=task.id,
+            )
+        except Exception:
+            logger.exception(
+                "[task:%s] error ledger: failed to record celery_exception",
+                task.id,
+            )
+        _record_merge_skip(
+            task, "celery_dispatch_failed",
+            f"Merge dispatch failed: Celery broker call raised {type(exc).__name__}: {exc}. "
+            f"Watchdog will retry; if it stalls, run `odin merge {task.spec.odin_id if task.spec else '<spec>'}` manually.",
+        )
+
+
+def _record_merge_skip(task, reason, comment_text):
+    """Loud-skip helper: log + post a STATUS_UPDATE comment for skipped merges.
+
+    Every skip path in the post-PASS dispatch chain routes through this
+    helper so the operator sees the stall on the task timeline instead of
+    silently waiting on a watchdog.
+    """
+    metadata = dict(task.metadata or {})
+    metadata["merge_dispatch_skip_reason"] = reason
+    metadata["merge_dispatch_skip_at"] = timezone.now().isoformat()
+    Task.objects.filter(id=task.id).update(metadata=metadata)
+    task.metadata = metadata
+    logger.warning("[task:%s] merge dispatch skipped: %s", task.id, reason)
+    TaskComment.objects.create(
+        task=task,
+        schedule_run=task.current_schedule_run,
+        author_email="system@taskit",
+        author_label="system",
+        content=comment_text,
+        comment_type=CommentType.STATUS_UPDATE,
+    )
 
 
 # -- Quota keywords matched against failure_reason, verdict_summary, and quota_failure --
-_QUOTA_KEYWORDS = [
-    "quota", "rate limit", "rate_limit", "429", "too many requests",
-    "usage limit", "out of quota", "quota exceeded", "quota_failure",
-]
+# Single source of truth lives in failure_tagger — both the tagger and
+# _is_quota_failure must stay in lockstep.
+from .failure_tagger import QUOTA_KEYWORDS as _QUOTA_KEYWORDS  # noqa: E402
 
 
 def _is_quota_failure(task, report):
@@ -284,9 +741,13 @@ def _is_quota_failure(task, report):
     2. Task metadata last_failure_type == "llm_call_failure" + quota keywords in reason
     3. Verdict summary containing quota-related keywords
     """
-    # 1. Reflection explicitly flagged quota failure
-    quota_field = getattr(report, "quota_failure", "") or ""
-    if quota_field.strip() and quota_field.strip().lower() != "none.":
+    # 1. Reflection explicitly flagged quota failure. The field is free text from
+    # the reviewer, so require an AFFIRMATIVE quota signal — never infer "yes"
+    # from arbitrary phrasing. (Reflection #90 wrote "None detected in current
+    # execution output."; the old exact-match-on-"none." negation coerced that
+    # into a quota failure and reassigned the task to a dead provider — F45.)
+    quota_field = (getattr(report, "quota_failure", "") or "").strip().lower()
+    if quota_field and any(kw in quota_field for kw in _QUOTA_KEYWORDS):
         return True
 
     # 2. Task metadata from orchestrator's failure classification
@@ -306,17 +767,147 @@ def _is_quota_failure(task, report):
     return False
 
 
+# -- Ground-truth quota verification (task #159) --------------------------------
+# A keyword match can't distinguish a transient per-minute 429 (provider has
+# headroom) from real quota exhaustion. Before reassigning away from a healthy
+# provider, consult harness_usage_status for its actual usage. Only when the
+# provider is genuinely exhausted (or the checker is unavailable and we fall
+# back to the old keyword behavior) do we switch providers.
+
+# Above this % of the active quota window a provider counts as exhausted and is
+# safe to reassign away from. Task #154 was moved minimax->glm at 64% used; the
+# ~95% bar keeps the switch for real exhaustion only.
+_QUOTA_EXHAUSTED_PCT = 95.0
+
+# Agent identity (from _agent_key) -> harness_usage_status provider name. Only
+# claude differs; mirrors odin's QUOTA_PROVIDER_MAP (orchestrator.py).
+_AGENT_TO_USAGE_PROVIDER = {
+    "claude": "claude_code",
+    "codex": "codex",
+    "gemini": "gemini",
+    "minimax": "minimax",
+    "glm": "glm",
+}
+
+# Verification result states.
+_QUOTA_EXHAUSTED = "exhausted"      # usage_pct >= threshold -> reassign
+_QUOTA_HEADROOM = "headroom"        # usage_pct < threshold -> backoff, keep agent
+_QUOTA_UNAVAILABLE = "unavailable"  # checker missing/errored -> keyword fallback
+
+QuotaGroundTruth = namedtuple("QuotaGroundTruth", ["state", "usage_pct", "detail"])
+
+
+def _run_usage_coro(coro):
+    """Run an async get_usage() coroutine to completion from sync code.
+
+    Mirrors analytics.py: handles the 'already inside a running event loop'
+    case (ASGI) via nest_asyncio, then a fresh-thread fallback. asyncio.run
+    raises RuntimeError before touching the coroutine when a loop is already
+    running, so the coroutine can be safely reused in the fallback.
+    """
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+            return asyncio.run(coro)
+        except ImportError:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, coro).result()
+
+
+def _get_usage_from_provider(provider_name):
+    """Fetch usage_pct for a provider via harness_usage_status.
+
+    Returns ``(usage_pct, error)`` where exactly one element is meaningful:
+      - ``(float, None)`` on success
+      - ``(None, str)`` when the checker is unavailable or errored
+
+    This is the network boundary; callers apply the threshold policy. Split
+    out so tests can patch the seam without exercising the real provider HTTP.
+    """
+    try:
+        from harness_usage_status.config import load_config
+        from harness_usage_status.providers.registry import get_provider
+    except ImportError:
+        return None, "harness_usage_status package not installed"
+
+    try:
+        config = load_config()
+        configs = config.get_provider_configs()
+        if provider_name not in configs:
+            return None, f"provider '{provider_name}' not configured"
+        provider = get_provider(provider_name, configs[provider_name])
+        usage = _run_usage_coro(provider.get_usage())
+        usage.compute_pct()
+    except Exception as e:
+        return None, f"usage check raised: {e}"
+
+    if usage.raw and usage.raw.get("error"):
+        return None, f"usage check error: {usage.raw['error']}"
+    if usage.usage_pct is None:
+        return None, "usage_pct unavailable from provider"
+    return usage.usage_pct, None
+
+
+def _check_provider_usage(agent_key):
+    """Verify the failing provider's real usage against ground truth.
+
+    Returns a :class:`QuotaGroundTruth` (never raises). Maps the agent to its
+    provider name, fetches real usage, and classifies it against the threshold.
+    Every failure mode collapses to UNAVAILABLE so the caller can fall back to
+    keyword-based reassignment with an honest "unverified" comment.
+    """
+    provider_name = _AGENT_TO_USAGE_PROVIDER.get((agent_key or "").lower())
+    if not provider_name:
+        return QuotaGroundTruth(
+            _QUOTA_UNAVAILABLE, None,
+            f"no usage provider mapped for agent '{agent_key}'",
+        )
+
+    pct, err = _get_usage_from_provider(provider_name)
+    if err is not None:
+        return QuotaGroundTruth(_QUOTA_UNAVAILABLE, None, err)
+
+    if pct >= _QUOTA_EXHAUSTED_PCT:
+        return QuotaGroundTruth(
+            _QUOTA_EXHAUSTED, pct,
+            f"{pct:.1f}% used (>= {_QUOTA_EXHAUSTED_PCT:g}% threshold)",
+        )
+    return QuotaGroundTruth(
+        _QUOTA_HEADROOM, pct,
+        f"{pct:.1f}% used (< {_QUOTA_EXHAUSTED_PCT:g}% threshold)",
+    )
+
+
 def _find_alternative_agent(task):
     """Find an alternative AGENT user on the same board, different from current assignee.
 
     Returns (User, model_name) or (None, None) if no alternative is available.
     Selects from board members with role=AGENT, excluding the current assignee.
     Falls back to any AGENT user if no board-scoped alternatives exist.
+
+    Prefers a candidate in the same cost_tier as the current assignee (per
+    agent_models.json), so a quota failure doesn't silently downgrade (or
+    upgrade) the task to a differently-priced agent. Falls back to any
+    candidate if no same-tier match exists.
     """
     from .models import BoardMembership, UserRole
+    from .pricing import get_agent_cost_tiers, get_active_agents
 
     current_assignee_id = task.assignee_id
+    current_assignee = task.assignee
     board_id = task.board_id
+
+    # Only agents in the ACTIVE lineup (agent_models.json) are eligible.
+    # DB agent rows outlive retirement (seedmodels never prunes), and picking
+    # one dispatched #114 to dead gemini — F45.
+    active = get_active_agents()
+
+    def _active_only(users):
+        return [u for u in users if _agent_key(u) in active]
 
     # Prefer agents that are members of the same board
     board_agent_ids = BoardMembership.objects.filter(
@@ -326,31 +917,52 @@ def _find_alternative_agent(task):
         user_id=current_assignee_id,
     ).values_list("user_id", flat=True)
 
-    candidates = User.objects.filter(
+    candidates = _active_only(User.objects.filter(
         id__in=board_agent_ids, role=UserRole.AGENT,
-    )
+    ).order_by("id"))
 
-    if not candidates.exists():
-        # Fallback: any agent user not the current one
-        candidates = User.objects.filter(role=UserRole.AGENT).exclude(
+    if not candidates:
+        # Fallback: any ACTIVE agent user not the current one
+        candidates = _active_only(User.objects.filter(role=UserRole.AGENT).exclude(
             id=current_assignee_id,
-        )
+        ).order_by("id"))
 
-    if not candidates.exists():
+    if not candidates:
         return None, None
 
-    # Pick the first available agent; prefer those with available_models set
-    agent = candidates.order_by("id").first()
+    # Order candidates by the board's standing preference order (task #328)
+    # so the routing peer is deterministic and operator-controlled — the
+    # same order the web settings "Routing" section shows and edits. Agents
+    # not named in the order sort last, keeping their stable id ordering.
+    from .failure_policy import effective_preference_order
+    pref = effective_preference_order(getattr(task, "board", None))
+    pref_index = {name: i for i, name in enumerate(pref)}
 
-    # Determine model: use the agent's default model from available_models,
-    # or derive from the agent name convention
-    model_name = None
-    available = agent.available_models or []
-    if available:
-        # Pick the first model (default) from the agent's available_models
-        if isinstance(available[0], dict):
-            model_name = available[0].get("name")
-        elif isinstance(available[0], str):
+    def _pref_key(user):
+        return pref_index.get(_agent_key(user), len(pref))
+
+    candidates = sorted(candidates, key=lambda c: (_pref_key(c), c.id))
+
+    # Prefer a candidate in the same cost tier as the current assignee,
+    # honouring the preference order within that tier.
+    agent = candidates[0]
+    if current_assignee:
+        cost_tiers = get_agent_cost_tiers()
+        current_tier = cost_tiers.get(_agent_key(current_assignee))
+        if current_tier:
+            same_tier = next(
+                (c for c in candidates if cost_tiers.get(_agent_key(c)) == current_tier),
+                None,
+            )
+            if same_tier:
+                agent = same_tier
+
+    # Model comes from the same single source (agent_models.json default,
+    # then the user's own model data) — never a stale first-list-entry.
+    model_name = _default_model_for_user(agent)
+    if not model_name:
+        available = agent.available_models or []
+        if available and isinstance(available[0], str):
             model_name = available[0]
 
     return agent, model_name
@@ -394,43 +1006,93 @@ def _board_project_root(task):
 
 
 def _maybe_reassign_on_quota_failure(task, report):
-    """If the task failed due to quota exhaustion, reassign to a different agent.
+    """If the task failed due to quota exhaustion, reassign — but only after
+    verifying against ground truth that the provider is actually exhausted.
 
-    Mutates task in place (assignee, model_name) and records history + comment.
-    Does NOT save the task — the caller saves it when setting status to IN_PROGRESS.
+    Task #159: keyword matching alone can't tell a transient per-minute 429
+    (provider has headroom) from real quota exhaustion. Before reassigning,
+    consult harness_usage_status for the failing provider's real usage:
+
+      - EXHAUSTED (>= _QUOTA_EXHAUSTED_PCT): reassign (the real escape hatch).
+      - HEADROOM (< threshold): a transient rate-limit. Keep the same agent,
+        record metadata.rate_limit_backoff so repeats are visible, and let
+        the caller requeue. Do NOT switch providers.
+      - UNAVAILABLE (checker missing/errored): fall back to the pre-#159
+        keyword-based reassignment, but flag it as "unverified" in the comment.
+
+    Mutates task in place (assignee, model_name, metadata) and records history
+    + comment. Returns True when this function posted the operator-facing
+    explanation (so the caller suppresses its continuity comment); False when
+    the failure was not a quota failure and this function was a no-op.
     """
     if not _is_quota_failure(task, report):
-        return
+        return False
 
     task.refresh_from_db(fields=["assignee_id", "model_name", "metadata"])
     old_assignee = task.assignee
     old_model = task.model_name
+    old_assignee_name = old_assignee.name if old_assignee else "unassigned"
+    agent_key = _agent_key(old_assignee)
+
+    verification = _check_provider_usage(agent_key)
+
+    # Transient rate-limit with headroom: keep the agent, record a backoff
+    # signal, do NOT reassign. The caller requeues the same agent.
+    if verification.state == _QUOTA_HEADROOM:
+        _record_rate_limit_backoff(task, agent_key, verification)
+        TaskComment.objects.create(
+            task=task,
+            author_email="system@taskit",
+            author_label="system",
+            content=(
+                f"Transient rate-limit detected for {old_assignee_name} ({old_model or 'unknown model'}) "
+                f"but provider has headroom ({verification.detail}). Keeping assignee and requeuing "
+                f"with backoff; recorded metadata.rate_limit_backoff."
+            ),
+            comment_type=CommentType.STATUS_UPDATE,
+        )
+        logger.info(
+            "[task:%s] Quota keywords matched but %s has headroom (%s) — backoff, no reassignment.",
+            task.id, agent_key or "unknown", verification.detail,
+        )
+        return True
+
+    verified = verification.state == _QUOTA_EXHAUSTED
+    unverified_note = (
+        "" if verified
+        else f" — unverified: usage check unavailable ({verification.detail})"
+    )
 
     new_agent, new_model = _find_alternative_agent(task)
     if new_agent is None:
         logger.warning(
-            "[task:%s] Quota failure detected but no alternative agent available",
-            task.id,
+            "[task:%s] Quota failure detected (verified=%s) but no alternative agent available",
+            task.id, verified,
         )
         TaskComment.objects.create(
             task=task,
             author_email="system@taskit",
             author_label="system",
             content=(
-                f"Quota/rate-limit failure detected for {old_assignee.name if old_assignee else 'unknown'} "
-                f"({old_model or 'unknown model'}), but no alternative agent is available for reassignment."
+                f"Quota/rate-limit failure detected for {old_assignee_name} ({old_model or 'unknown model'})"
+                f"{unverified_note}, but no alternative agent is available for reassignment."
             ),
             comment_type=CommentType.STATUS_UPDATE,
         )
-        return
-
-    old_assignee_name = old_assignee.name if old_assignee else "unassigned"
+        return True
 
     # Update task fields
     task.assignee = new_agent
     if new_model:
         task.model_name = new_model
-    task.save(update_fields=["assignee_id", "model_name"])
+    # Bump cumulative rework-round counter. The continuity path bumps it
+    # for the non-quota case; this branch is mutually exclusive (continuity
+    # short-circuits when assignee/model moved), so the bump lives here
+    # for the quota-reassign case to keep one number per retry.
+    metadata = dict(task.metadata or {})
+    metadata["rework_count"] = int(metadata.get("rework_count", 0) or 0) + 1
+    task.metadata = metadata
+    task.save(update_fields=["assignee_id", "model_name", "metadata"])
 
     # Record history for assignee change
     TaskHistory.objects.create(
@@ -449,48 +1111,174 @@ def _maybe_reassign_on_quota_failure(task, report):
             changed_by="system@taskit",
         )
 
-    # Post explanatory comment
+    # Post explanatory comment naming which path fired.
+    verified_prefix = (
+        f"VERIFIED exhausted ({verification.detail})" if verified else "detected"
+    )
     TaskComment.objects.create(
         task=task,
         author_email="system@taskit",
         author_label="system",
         content=(
-            f"Quota/rate-limit failure detected for {old_assignee_name} ({old_model or 'unknown model'}). "
+            f"Quota/rate-limit failure {verified_prefix} for {old_assignee_name} ({old_model or 'unknown model'}){unverified_note}. "
             f"Reassigned to {new_agent.name} ({new_model or 'default model'}) for retry."
         ),
         comment_type=CommentType.STATUS_UPDATE,
     )
 
     logger.info(
-        "[task:%s] Quota failure reassignment: %s/%s → %s/%s",
-        task.id, old_assignee_name, old_model, new_agent.name, new_model,
+        "[task:%s] Quota failure reassignment (verified=%s): %s/%s → %s/%s",
+        task.id, verified, old_assignee_name, old_model, new_agent.name, new_model,
+    )
+    return True
+
+
+def _record_rate_limit_backoff(task, agent_key, verification):
+    """Record a rate-limit backoff signal on task metadata (task #159).
+
+    A transient 429 with provider headroom should not switch providers, but the
+    signal must be visible so repeats are detectable and a future iteration can
+    apply a real delay. Mirrors the metadata write pattern in
+    ``_record_rework_continuity``.
+    """
+    metadata = dict(task.metadata or {})
+    metadata["rate_limit_backoff"] = {
+        "at": timezone.now().isoformat(),
+        "agent": agent_key,
+        "usage_pct": verification.usage_pct,
+        "detail": verification.detail,
+    }
+    task.metadata = metadata
+    task.save(update_fields=["metadata"])
+
+
+def _record_rework_continuity(task, original_assignee_id, original_model, suppress_comment=False):
+    """Record that a NEEDS_WORK retry preserved assignee+model (F45 mandate #1).
+
+    The default for a NEEDS_WORK retry is to keep what the operator picked.
+    The audit trail must reflect that decision even when the values match
+    pre- and post-transition — otherwise the retry looks the same as a benign
+    re-fire and the operator can't tell when continuity mattered.
+
+    Side effects:
+      - Stamps ``task.metadata["last_rework_reason"]="rework_continuity"`` and
+        ``task.metadata["last_rework_at"]=<iso now>`` for at-a-glance reads.
+      - Writes a TaskHistory row with ``field_name="assignee"`` so the
+        duration-since-last-change readouts still re-anchor at the retry.
+      - Writes a TaskHistory row with ``field_name="model"`` likewise.
+      - Posts a STATUS_UPDATE comment naming the preserved agent+model —
+        unless ``suppress_comment`` is True, in which case the quota path
+        already surfaced the explanation and a second comment would be noise
+        that overwrites the most-recent comment.
+
+    The quota reassign path writes its own history rows inside
+    ``_maybe_reassign_on_quota_failure``; if anything actually changed, this
+    function short-circuits to avoid double-recording.
+    """
+    task.refresh_from_db(fields=["assignee_id", "model_name", "metadata"])
+
+    if task.assignee_id != original_assignee_id or task.model_name != original_model:
+        # Something changed (quota path). Skip — those rows are already
+        # written by `_maybe_reassign_on_quota_failure`.
+        return
+
+    metadata = dict(task.metadata or {})
+    metadata["last_rework_reason"] = "rework_continuity"
+    metadata["last_rework_at"] = timezone.now().isoformat()
+    # Cumulative rework-round counter so the operator can see at a glance
+    # how many times this task has been re-dispatched. Distinct from
+    # ``auto_redispatch_count`` (infra-class only) — this covers every
+    # NEEDS_WORK retry regardless of failure class.
+    metadata["rework_count"] = int(metadata.get("rework_count", 0) or 0) + 1
+    task.metadata = metadata
+    task.save(update_fields=["metadata"])
+
+    assignee_label = (
+        task.assignee.name if task.assignee else "unassigned"
+    )
+
+    TaskHistory.objects.create(
+        task=task,
+        field_name="assignee",
+        old_value=str(original_assignee_id or ""),
+        new_value=str(original_assignee_id or ""),
+        changed_by="system@taskit",
+    )
+    TaskHistory.objects.create(
+        task=task,
+        field_name="model",
+        old_value=original_model or "",
+        new_value=original_model or "",
+        changed_by="system@taskit",
+    )
+    if suppress_comment:
+        # Quota path posted its own explanation (reassign comment OR
+        # "no alternative agent available" warning). The history + metadata
+        # stamp above is enough — adding a second comment would clobber the
+        # operator-visible "most recent comment" with redundant noise.
+        logger.info(
+            "[task:%s] Rework continuity recorded (comment suppressed: quota "
+            "path already explained)",
+            task.id,
+        )
+        return
+    TaskComment.objects.create(
+        task=task,
+        author_email="system@taskit",
+        author_label="system",
+        content=(
+            f"Rework on task kept continuity: assignee '{assignee_label}' "
+            f"and model '{task.model_name or 'unset'}' preserved "
+            f"(F45 default-first mandate)."
+        ),
+        comment_type=CommentType.STATUS_UPDATE,
+    )
+    logger.info(
+        "[task:%s] Rework continuity recorded: assignee=%s model=%s preserved",
+        task.id, original_assignee_id, original_model,
     )
 
 
 def _maybe_escalate_model(task):
-    """Attempt to escalate a failed task to the next higher-priority model.
+    """Escalate a task exactly one deliberate tier — the CAPABILITY path.
+
+    Task #328: a deliberate tier jump is the correct response to a
+    *capability* failure — repeated review rejection, meaning the agent
+    keeps producing work the reviewer won't accept. It is the WRONG
+    response to a protocol/infra hiccup (that path retries same → peer,
+    never a tier jump — see tasks.failure_policy). This function is the
+    single sanctioned tier-escalation mechanism and is now reached ONLY
+    from the reflection rework loop, after ``capability_escalate_after``
+    review rejections — never from the execution-failure path.
 
     Uses the board's model_escalation_priority list. Index 0 = highest priority (rank 1).
-    Walks upward from the current model's position toward index 0.
+    Walks upward from the current model's position toward index 0 (one step).
 
     Mutates task in place (assignee, model_name, metadata). Does NOT save.
     Returns True if escalation happened, False otherwise.
     """
+    from .failure_policy import capability_policy
+
     task.metadata = task.metadata or {}
 
     def _skip(reason):
         task.metadata["escalation_skip_reason"] = reason
         return False
 
-    if not task.board.escalation_enabled:
+    # task #328: the enabled flag and retry cap come from the ONE policy
+    # engine, not raw board fields — so routing_policy (the editable
+    # settings surface) governs the tier jump. capability_policy resolves
+    # routing_policy first, then legacy board fields (Default First).
+    cap = capability_policy(task.board)
+    if not cap.enabled:
         return _skip("disabled")
 
     priority_list = task.board.model_escalation_priority or []
     if not priority_list:
         return _skip("no_priority_list")
 
-    # Check max retries limit
-    max_retries = task.board.failure_max_retries
+    # Check max escalations limit (policy-resolved)
+    max_retries = cap.max_escalations
     current_escalation_count = task.metadata.get("escalation_count", 0)
     if current_escalation_count >= max_retries:
         return _skip("max_retries_reached")
@@ -564,20 +1352,24 @@ def _maybe_escalate_model(task):
         changed_by="system@taskit",
     )
 
-    # Post system comment
+    # Post system comment naming the rule that fired (task #328: no silent
+    # switches). The rejection count is stamped on metadata by the caller.
+    rejections = task.metadata.get("capability_rejections")
+    rejection_note = f" after {rejections} review rejections" if rejections else ""
     TaskComment.objects.create(
         task=task,
         author_email="system@taskit",
         author_label="system",
         content=(
-            f"Auto-escalation: {old_model or 'unknown'} failed. "
-            f"Escalating to {target_model} ({target_agent_name})."
+            f"Capability failure: {old_agent_name}/{old_model or 'unknown'} "
+            f"kept failing review{rejection_note} — escalating exactly one "
+            f"tier to {target_agent_name}/{target_model} (deliberate tier jump)."
         ),
         comment_type=CommentType.STATUS_UPDATE,
     )
 
     logger.info(
-        "[task:%s] Model escalation: %s/%s → %s/%s",
+        "[task:%s] Capability escalation (one tier): %s/%s → %s/%s",
         task.id, old_agent_name, old_model, target_agent_name, target_model,
     )
     return True
@@ -607,6 +1399,34 @@ def user_ide_settings(request):
     settings_obj.preferred_ide_id = preferred_ide_id
     settings_obj.save(update_fields=["preferred_ide_id", "updated_at"])
     return Response(UserSettingSerializer(settings_obj).data)
+
+
+@api_view(["POST"])
+def error_event_disposition(request, event_id):
+    """Update the disposition of one ErrorEvent (task #222).
+
+    Sets ``disposition`` to one of ``open`` / ``fixed`` / ``non-issue``
+    and optionally records a triage note. Returns 404 when the event
+    doesn't exist, 400 when the value is unknown.
+    """
+    from .errors import set_disposition as _set_disposition
+    payload = request.data if isinstance(request.data, dict) else {}
+    new_disposition = (payload.get("disposition") or "").strip()
+    note = (payload.get("note") or "").strip()
+    try:
+        evt = _set_disposition(int(event_id), new_disposition, note=note)
+    except ValueError as exc:
+        return Response(
+            {"detail": str(exc), "allowed": [c for c, _ in ErrorEvent.DISPOSITION_CHOICES]},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except ErrorEvent.DoesNotExist:
+        return Response(
+            {"detail": f"ErrorEvent {event_id} not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    from .errors import serialize_error_event
+    return Response(serialize_error_event(evt))
 
 
 @api_view(["GET"])
@@ -691,12 +1511,31 @@ def _ensure_model_on_user(user, model_name, description=""):
         user.save(update_fields=["available_models"])
 
 
+def _agent_key(user):
+    """Canonical agent name from an agent user's email (strips the +model
+    suffix in identity emails like ``glm+zai-coding-plan/glm-5.2@odin.agent``)."""
+    if not user or not user.email:
+        return ""
+    return user.email.split("@")[0].split("+")[0].lower()
+
+
 def _default_model_for_user(user):
+    """Default model for a user, agent_models.json first (single source, F45).
+
+    Resolution: active-lineup default (agent_models.json) → is_default entry in
+    the user's available_models → first available_models entry → the user's
+    default_model column. None for users with no model data (e.g. humans).
+    """
     if not user:
         return None
+    from .pricing import get_agent_default_model
+
+    model = get_agent_default_model(_agent_key(user))
+    if model:
+        return model
     models = [m for m in (user.available_models or []) if isinstance(m, dict) and m.get("name")]
     if not models:
-        return None
+        return user.default_model or None
     for model in models:
         if model.get("is_default"):
             return model["name"]
@@ -864,10 +1703,14 @@ def _apply_date_range(qs, query_params, field_name, from_key, to_key):
 
 
 def _exclude_hidden_scheduled_tasks(qs):
+    # Only FUTURE occurrences hide from the board (they live on the
+    # Scheduling page until they fire). Once a scheduled task has run,
+    # it is board history like any other task — hiding executed runs
+    # made the daily ops invisible on kanban (user report, task 301).
     return qs.exclude(
         schedule_id__isnull=False,
         schedule__status__in=[ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED],
-        status__in=[TaskStatus.BACKLOG, TaskStatus.TODO, TaskStatus.REVIEW, TaskStatus.TESTING, TaskStatus.DONE, TaskStatus.FAILED],
+        status__in=[TaskStatus.BACKLOG, TaskStatus.TODO],
     )
 
 
@@ -950,6 +1793,55 @@ class UserViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
 
+def enroll_all_active_agents(board, disabled_agents=None):
+    """Enroll every active AGENT User on ``board`` (W10.4 default-on roster).
+
+    Single source of truth for "this agent is allowed on this board".
+    Idempotent — re-running produces zero new rows (ignore_conflicts=True
+    on the underlying BoardMembership unique constraint). Used by:
+
+      * ``BoardViewSet.create`` — every fresh board, regardless of whether
+        the user supplied a working directory or asked for ``auto_init``.
+        Previous default (only the base/CLAUDE agent joined a new board)
+        was the symptom board 6 hit: cheap agents sat idle until the
+        operator learned the curl PATCH path.
+      * ``BoardViewSet._create_agent_memberships`` — kept for the
+        init-odin subprocess path.
+
+    ``disabled_agents`` is the explicit opt-out: agents whose ``name``
+    appears in this list are skipped. Unknown names are ignored (they
+    aren't active; check is by User.name, not email).
+
+    Retired agents (``User.is_active=False``) are always skipped — their
+    rows persist for FK integrity (task #135) but must not join a board.
+
+    Returns the queryset of newly created memberships (may be empty when
+    every active agent was already enrolled or all were in ``disabled_agents``).
+    """
+    disabled_set = set(disabled_agents or [])
+    agent_users = User.objects.filter(role=UserRole.AGENT, is_active=True)
+
+    # Skip anyone already enrolled on this board so the function is a
+    # no-op for the backfill helper use case.
+    already_ids = set(
+        BoardMembership.objects.filter(
+            board=board, user__in=agent_users,
+        ).values_list("user_id", flat=True)
+    )
+
+    new_memberships = []
+    for user in agent_users:
+        if user.id in already_ids:
+            continue
+        if user.name in disabled_set:
+            continue
+        new_memberships.append(BoardMembership(board=board, user=user))
+
+    if new_memberships:
+        BoardMembership.objects.bulk_create(new_memberships, ignore_conflicts=True)
+    return new_memberships
+
+
 class BoardViewSet(viewsets.ModelViewSet):
     serializer_class = BoardSerializer
     pagination_class = StandardPagination
@@ -1026,6 +1918,12 @@ class BoardViewSet(viewsets.ModelViewSet):
             self._validate_working_dir(working_dir)
 
         board = Board.objects.create(**ser.validated_data, working_dir=working_dir)
+
+        # Every new board ships with every active AGENT User enabled — the
+        # operator no longer has to learn the curl PATCH path to make the
+        # cheap-tier agents visible to the planner. The opt-out list still
+        # wins for callers who want fewer agents on this specific board.
+        enroll_all_active_agents(board, disabled_agents=disabled_agents)
 
         if working_dir and auto_init:
             self._init_odin_for_board(board, disabled_agents=disabled_agents)
@@ -1186,18 +2084,26 @@ class BoardViewSet(viewsets.ModelViewSet):
         self._create_agent_memberships(board, disabled_agents=disabled_agents)
 
     def _create_agent_memberships(self, board, disabled_agents=None):
-        """Create BoardMembership records for all agent Users, skipping disabled ones."""
-        disabled_set = set(disabled_agents or [])
-        agent_users = User.objects.filter(role="AGENT")
+        """Create BoardMembership records for all active agent Users, skipping disabled ones.
 
-        new_memberships = []
-        for user in agent_users:
-            if user.name in disabled_set:
-                continue
-            new_memberships.append(BoardMembership(board=board, user=user))
+        Idempotent — calling twice produces no duplicates (bulk_create uses
+        ignore_conflicts=True). Wraps the public helper so the init-odin
+        path stays a one-liner.
+        """
+        enroll_all_active_agents(board, disabled_agents=disabled_agents)
 
-        if new_memberships:
-            BoardMembership.objects.bulk_create(new_memberships, ignore_conflicts=True)
+        # Best-effort seeding: populate reviewer_order with the strongest-
+        # first ordering derived from the agents enabled at creation time.
+        # Not load-bearing — select_reviewer_by_context_size's runtime
+        # fallback already produces identical behavior for a board with an
+        # empty reviewer_order, so this only pins the deterministic order
+        # up-front for a fresh board.
+        if not board.reviewer_order:
+            by_agent = _board_enabled_agents(board)
+            order = _strongest_first_reviewer_order(by_agent)
+            if order:
+                board.reviewer_order = order
+                board.save(update_fields=["reviewer_order"])
 
     @action(detail=False, methods=["get"], url_path="check-dir")
     def check_dir(self, request, *args, **kwargs):
@@ -1324,6 +2230,31 @@ class BoardViewSet(viewsets.ModelViewSet):
         board.save(update_fields=["working_dir", "odin_initialized", "updated_at"])
         return Response(BoardSerializer(board).data)
 
+    @action(detail=True, methods=["post"], url_path="claude-token")
+    def claude_token(self, request, *args, **kwargs):
+        """Write the board's Claude Code OAuth token to <working_dir>/.claude-token.
+
+        The token is stored write-only as a 0600 file the odin microsandbox harness
+        reads (never returned to the client, never committed — .claude-token is
+        gitignored). Obtain it on the host with `claude setup-token`.
+        """
+        board = self.get_object()
+        if not board.working_dir:
+            raise ValidationError({"detail": "Board has no working directory. Link a project first."})
+
+        ser = SetClaudeTokenSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        token = ser.validated_data["token"]
+
+        token_path = Path(board.working_dir) / ".claude-token"
+        try:
+            token_path.write_text(token + "\n")
+            token_path.chmod(0o600)
+        except OSError as exc:
+            raise ValidationError({"detail": f"Failed to write .claude-token: {exc}"})
+
+        return Response(BoardSerializer(board).data)
+
     @action(detail=True, methods=["get"], url_path="members", url_name="members-list")
     def members(self, request, *args, **kwargs):
         """List board members."""
@@ -1384,7 +2315,7 @@ class BoardViewSet(viewsets.ModelViewSet):
             board=board, user__role="AGENT",
         ).select_related("user")
 
-        all_agents = User.objects.filter(role="AGENT")
+        all_agents = User.objects.filter(role="AGENT", is_active=True)
         member_user_ids = {m.user_id for m in memberships}
 
         agents = []
@@ -1423,7 +2354,12 @@ class BoardViewSet(viewsets.ModelViewSet):
         agent_name = kwargs.get("agent_name")
 
         email = f"{agent_name}@odin.agent"
-        agent_user = User.objects.filter(email=email, role="AGENT").first()
+        # is_active=True filters retired agents (qwen/gemini as of task #135)
+        # whose User rows persist for FK integrity but aren't in the active
+        # lineup and can't be toggled onto a board.
+        agent_user = User.objects.filter(
+            email=email, role="AGENT", is_active=True,
+        ).first()
         if not agent_user:
             return Response(
                 {"detail": f"Agent '{agent_name}' not found."},
@@ -1460,6 +2396,61 @@ class BoardViewSet(viewsets.ModelViewSet):
             "board": BoardSerializer(board).data,
         })
 
+    @action(detail=True, methods=["get"], url_path="agent-stats", url_name="agent-stats")
+    def agent_stats(self, request, *args, **kwargs):
+        """Return per-agent success-rate + median cost for odin's history-driven routing.
+
+        Each row has the same shape as ``tasks.agent_stats.AgentStats``
+        and is consumed directly by ``odin.agent_routing.stats_from_dicts``.
+        Agents with zero observed merges are omitted — the suggester
+        treats them as having thin history (the static fallback path).
+        """
+        board = self.get_object()
+        from .agent_stats import compute_agent_stats_for_board
+
+        spec_id = request.query_params.get("spec")
+        spec = None
+        if spec_id is not None:
+            try:
+                spec = Spec.objects.get(pk=spec_id, board=board)
+            except (Spec.DoesNotExist, ValueError):
+                return Response(
+                    {"detail": f"Spec '{spec_id}' not found on this board."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        stats = compute_agent_stats_for_board(board, spec=spec)
+        # Dataclass -> dict for the JSON serializer. Stable ordering by
+        # agent name so the operator-facing table doesn't shuffle.
+        rows = [s.to_dict() for s in stats.values()]
+        rows.sort(key=lambda r: (r["sample_count"] == 0, r["name"]))
+        return Response({"agents": rows})
+
+    @action(detail=True, methods=["get"], url_path="league", url_name="league")
+    def league(self, request, *args, **kwargs):
+        """Per (agent, model) league table over landed tasks (DONE + TESTING).
+
+        Query params:
+            since_spec — odin_id of the cutoff spec; include tasks whose
+                spec was created at or after that spec. Returns empty rows
+                when the named spec is not on this board.
+        """
+        board = self.get_object()
+        from .league import compute_league_for_board
+
+        since_spec = request.query_params.get("since_spec") or None
+
+        rows = compute_league_for_board(board, since_spec=since_spec)
+        row_dicts = [r.to_dict() for r in rows]
+        return Response({
+            "rows": row_dicts,
+            "meta": {
+                "board_id": board.id,
+                "task_count": sum(r["tasks_landed"] for r in row_dicts),
+                "since_spec": since_spec,
+            },
+        })
+
     @action(detail=True, methods=["get"], url_path="routing-config", url_name="routing-config")
     def routing_config(self, request, *args, **kwargs):
         """Return full agent/model routing config for odin planning and execution."""
@@ -1492,7 +2483,40 @@ class BoardViewSet(viewsets.ModelViewSet):
                 "models": models_list,
             })
 
-        return Response({"agents": RoutingAgentSerializer(agents, many=True).data})
+        # task #328: surface the effective routing policy so the web
+        # settings "Routing" section renders the real per-failure-class
+        # actions, the standing preference order, and the escalation tiers
+        # — not a hardcoded guess. Board overrides are already merged in.
+        from .failure_policy import (
+            effective_policy_table,
+            effective_preference_order,
+            capability_policy,
+            DEFAULT_PREFERENCE_ORDER,
+        )
+        cap = capability_policy(board)
+        routing_policy = {
+            "preference_order": effective_preference_order(board),
+            "default_preference_order": list(DEFAULT_PREFERENCE_ORDER),
+            "capability_escalate_after": cap.escalate_after,
+            "capability_escalation_enabled": cap.enabled,
+            "capability_max_escalations": cap.max_escalations,
+            "failure_actions": effective_policy_table(board),
+            "escalation_tiers": board.model_escalation_priority or [],
+            "escalation_enabled": board.escalation_enabled,
+        }
+
+        return Response({
+            "agents": RoutingAgentSerializer(agents, many=True).data,
+            # W10.4: planner can self-direct the operator to the settings
+            # page when the roster is empty. The orchestrator embeds this
+            # URL into the prompt's "Available agents:" block so a board
+            # without enabled agents surfaces "No agents enabled on board
+            # N — enable at /api/boards/N/agents/" instead of routing
+            # silently to the default fallback.
+            "settings_path": _agent_settings_hint(board.id),
+            "empty": not agents,
+            "routing_policy": routing_policy,
+        })
 
     @action(
         detail=True, methods=["patch"],
@@ -1609,6 +2633,37 @@ class BoardViewSet(viewsets.ModelViewSet):
             "tasks_deleted": tasks_deleted,
             "specs_deleted": specs_deleted,
         })
+
+    @action(detail=True, methods=["get"], url_path="story")
+    def story(self, request, pk=None):
+        """Board story: chronological event stream across all specs —
+        landings (with hands-free flag), failures, merge conflicts,
+        reflection escalations, wave open/close. Shared builder with
+        testing_tools/board_story.py (see tasks/board_story.py).
+        """
+        board = get_object_or_404(Board, pk=pk)
+        since = request.query_params.get("since")
+        return Response(build_board_story(board, since=since))
+
+    @action(detail=True, methods=["get"], url_path="factory")
+    def factory(self, request, pk=None):
+        """Factory snapshot: single-call operator view of a board's live
+        state — running tasks, queue depths, recent merges, open error
+        signatures, and a one-line story headline. See
+        tasks/factory_snapshot.py for the assembly logic.
+        """
+        board = get_object_or_404(Board, pk=pk)
+        return Response(build_factory_snapshot(board))
+
+    @action(detail=True, methods=["get"], url_path="inbox")
+    def inbox(self, request, pk=None):
+        """Board inbox: everything waiting on a human in one call —
+        parked merge conflicts, reversibility parks (task #244), the
+        TESTING shelf, and open ErrorEvents. See tasks/inbox.py for the
+        assembly logic.
+        """
+        board = get_object_or_404(Board, pk=pk)
+        return Response(build_inbox(board))
 
 
 class ScheduleViewSet(viewsets.ModelViewSet):
@@ -1802,6 +2857,93 @@ class ScheduleViewSet(viewsets.ModelViewSet):
         schedule.save(update_fields=["status", "canceled_at", "next_run_at_utc", "updated_at"])
         return Response(TaskScheduleSerializer(schedule).data)
 
+    @action(detail=True, methods=["post"])
+    def run_now(self, request, pk=None):
+        """Create and dispatch one real occurrence of this schedule on demand.
+
+        Builds the occurrence through the same release_schedule_occurrence helper
+        the cron tick uses, so the resulting TaskScheduleRun + Task are identical
+        to what the next scheduled firing would produce (same board, template
+        fields, schedule/current_schedule_run linkage, TaskHistory). The run is
+        flagged manual via release_reason and attributed to the request user.
+
+        Guardrails: a manual run never touches cron bookkeeping --
+        next_run_at_utc and last_released_run are left exactly as they were, so
+        "Run now" can neither shift nor skip the next scheduled firing. Double
+        safety comes from reusing the cron path's overlap detection under a
+        select_for_update row lock: if the schedule's materialized task is still
+        active (i.e. a manual run is already in flight), the request is rejected
+        with a 409 rather than creating a second overlapping run.
+        """
+        schedule = self.get_object()
+        requesting_user = _request_task_user(request)
+        created_by = requesting_user.email if requesting_user else "manual@taskit"
+
+        with transaction.atomic():
+            schedule = (
+                TaskSchedule.objects.select_for_update()
+                .select_related("materialized_task", "board")
+                .get(pk=schedule.pk)
+            )
+
+            # Reuse the same overlap concept as the cron path: if the schedule's
+            # materialized task is still active, a manual run is already in
+            # flight. Reject cleanly with a 4xx instead of silently creating a
+            # SKIPPED_OVERLAP run, so two rapid POSTs cannot overlap.
+            active = schedule.materialized_task
+            if active and active.status in ACTIVE_OVERLAP_STATUSES:
+                return Response(
+                    {
+                        "detail": (
+                            f"Schedule {schedule.id} already has an active run "
+                            f"(task {active.id}, status {active.status}). Wait for "
+                            "it to finish before running again."
+                        ),
+                        "code": "schedule_run_in_flight",
+                        "active_task_id": active.id,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            now = timezone.now()
+            materialized_before = schedule.materialized_task_id
+            run, task, outcome = release_schedule_occurrence(
+                schedule,
+                scheduled_for_utc=now,
+                created_by=created_by,
+                release_reason=f"Manual run requested by {created_by}.",
+                reuse_existing=schedule.kind == ScheduleKind.RECURRING,
+                now=now,
+            )
+
+            if outcome == "overlap":
+                # Lost the race between the pre-check and the release -- another
+                # run activated the task. Surface it as a conflict.
+                return Response(
+                    {
+                        "detail": f"Schedule {schedule.id} already has an active run.",
+                        "code": "schedule_run_in_flight",
+                        "active_task_id": task.id if task else None,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            # Persist the materialized_task link the helper set in memory (so the
+            # next double-trigger sees it) without touching cron bookkeeping:
+            # only this field is saved -- next_run_at_utc / last_released_run /
+            # status are left exactly as they were.
+            if schedule.materialized_task_id != materialized_before:
+                schedule.save(update_fields=["materialized_task"])
+
+        return Response(
+            {
+                "task_id": task.id,
+                "run_id": run.id,
+                "task": _task_response(task.id),
+            },
+            status=status.HTTP_200_OK,
+        )
+
     def destroy(self, request, *args, **kwargs):
         schedule = self.get_object()
         schedule.status = ScheduleStatus.CANCELED
@@ -1917,7 +3059,7 @@ def _kill_tmux_session_if_present(task):
     """Kill the tmux session hosting the agent, if one exists.
 
     This is THE essential termination step. odin exec runs CLI agents
-    (claude, gemini, codex, qwen, glm) inside a *detached* tmux session
+    (claude, gemini, codex, glm) inside a *detached* tmux session
     via `tmux new-session -d` — see odin/src/odin/orchestrator.py
     `_execute_via_tmux` and odin/src/odin/tmux.py `launch()`.
 
@@ -2088,6 +3230,7 @@ def _apply_stop_transition(task, target_status, updated_by, reason, stop_result)
     in place so any late execution_result webhook still gets discarded.
     """
     run_token = ((task.metadata or {}).get("active_execution") or {}).get("run_token")
+    task_runs.finish_run(run_token, state=TaskRunState.KILLED)
     metadata = dict(task.metadata or {})
     metadata.pop("active_execution", None)
     metadata.pop("pending_stop_target", None)
@@ -2133,6 +3276,30 @@ def _apply_stop_transition(task, target_status, updated_by, reason, stop_result)
     return {"task": _task_response(task.id), "stop": stop_result}
 
 
+def _reposition_best_effort(task, target_status):
+    """Move a task in kanban order, but never let that kill a run result.
+
+    The kanban reposition is bookkeeping relative to accepting an execution
+    result: a stale column position is harmless, a dropped run result is not.
+    ``move_task`` already retries transient locks; this is the decoupling
+    backstop — if a lock still wins (retries exhausted, sustained writer
+    contention), the reposition is skipped with a warning and the task keeps
+    its existing position. The caller proceeds to persist the status change,
+    history, and comment regardless. (docs/patterns/bookkeeping-never-kills-the-run.md)
+    """
+    try:
+        return move_task(task, target_status=target_status, target_index=None)
+    except OperationalError as exc:
+        if not is_locked_error(exc):
+            raise
+        logger.warning(
+            "Skipping kanban reposition for task %s (%s→%s): database locked "
+            "after retries; keeping existing position. Run result is unaffected.",
+            task.id, task.status, target_status, exc_info=True,
+        )
+        return int(task.kanban_position or 0)
+
+
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     pagination_class = StandardPagination
@@ -2141,7 +3308,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         query_params = self.request.query_params
         qs = (
             Task.objects.select_related("assignee", "spec")
-            .prefetch_related("labels")
+            .prefetch_related("labels", "reflections")
             .annotate(comment_count=Count("comments"))
         )
         qs = _exclude_hidden_scheduled_tasks(qs)
@@ -2228,6 +3395,11 @@ class TaskViewSet(viewsets.ModelViewSet):
         if not model_name and assignee:
             model_name = _default_model_for_user(assignee)
         _validate_forced_task_target(assignee=assignee, model_name=model_name)
+        _validate_dispatch_readiness(
+            board=board,
+            spec_id=d.get("spec_id"),
+            is_dispatch_transition=d.get("status", "TODO") == TaskStatus.IN_PROGRESS,
+        )
 
         task = Task.objects.create(
             board=board,
@@ -2276,6 +3448,38 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         return Response(_task_response(task.id), status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["post"])
+    def rework(self, request, pk=None):
+        """Compose a follow-up task from this task + a one-sentence instruction.
+
+        No model call — pure assembly (tasks/rework.py). The new task is a
+        normal TODO task on the same board (+ spec, if any); existing
+        machinery (twins/quote at dispatch, agent routing) picks it up the
+        same way it would any other task. See tasks/rework.py for the
+        guard rails on the instruction.
+        """
+        parent = get_object_or_404(Task, pk=pk)
+        ser = ReworkTaskSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+
+        created_by = d.get("created_by", "")
+        if d.get("created_by_user_id"):
+            user = get_object_or_404(User, pk=d["created_by_user_id"])
+            created_by = user.email
+
+        try:
+            new_task = compose_rework_task(parent, d["instruction"], created_by=created_by)
+        except ReworkValidationError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info(
+            "Task reworked: parent_id=%s, new_id=%s, created_by=%s",
+            parent.id, new_task.id, created_by,
+        )
+
+        return Response(_task_response(new_task.id), status=status.HTTP_201_CREATED)
+
     def update(self, request, *args, **kwargs):
         task = self.get_object()
         logger.debug("Task update payload: task_id=%s, data=%s", task.id, request.data)
@@ -2303,6 +3507,38 @@ class TaskViewSet(viewsets.ModelViewSet):
                 raise ValidationError({"kanban_target_status": "Must match status when both are provided."})
             if "status" not in d and d["kanban_target_status"] != task.status:
                 raise ValidationError({"kanban_target_status": "Cannot differ from current status without status update."})
+
+        # CANCELED transition gate (fable task 192). The transition matrix
+        # in tasks.state_transitions forbids DONE → CANCELED and direct
+        # EXECUTING → CANCELED via PATCH; only the stop_execution endpoint
+        # can land an EXECUTING task in CANCELED. EXECUTING is also caught
+        # earlier by _check_executing_mutation_lock (→ 409), but an explicit
+        # 400 here keeps the contract tight for callers that bypass the
+        # lock (e.g. tests, scripts).
+        if "status" in d and d["status"] == TaskStatus.CANCELED and d["status"] != task.status:
+            if not is_cancel_transition_allowed(task.status, d["status"]):
+                if str(task.status) == TaskStatus.DONE:
+                    detail = (
+                        f"Task {task.id} is DONE (terminal). CANCELED is not "
+                        "allowed from a finalized task — DONE cannot be "
+                        "retroactively canceled."
+                    )
+                elif str(task.status) == TaskStatus.EXECUTING:
+                    detail = (
+                        f"Task {task.id} is EXECUTING. To CANCELED, use "
+                        "/tasks/{id}/stop_execution/ with target_status=CANCELED "
+                        "so the running process is also torn down."
+                    )
+                else:
+                    detail = (
+                        f"Task {task.id} is {task.status}; CANCELED is not a "
+                        "valid transition from this status."
+                    )
+                return Response(
+                    {"detail": detail, "code": "invalid_cancel_transition"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         updated_by = d["updated_by"]
         histories = []
         normalized_depends_on = None
@@ -2327,7 +3563,17 @@ class TaskViewSet(viewsets.ModelViewSet):
                 task.assignee_id = d["assignee_id"]
                 # Auto-add new assignee to board
                 if d["assignee_id"]:
-                    _ensure_board_membership(task.board, User.objects.get(pk=d["assignee_id"]))
+                    new_user = User.objects.get(pk=d["assignee_id"])
+                    _ensure_board_membership(task.board, new_user)
+                    # Default First (F45): an assignee without an explicit model
+                    # gets the agent's default model — a missing model_name must
+                    # never reach dispatch and fail the run.
+                    if not d.get("model_name") and not task.model_name:
+                        default_model = _default_model_for_user(new_user)
+                        if default_model and _record_change(
+                            histories, task, "model_name", task.model_name or "", default_model, updated_by,
+                        ):
+                            task.model_name = default_model
 
         # Labels M2M — compare as sorted JSON lists
         if "label_ids" in d:
@@ -2350,6 +3596,35 @@ class TaskViewSet(viewsets.ModelViewSet):
             if _record_change(histories, task, "metadata", old_json, new_json, updated_by):
                 task.metadata = d["metadata"]
 
+        # spec_id write — resolves the FK and is the only way to associate a
+        # task with a spec after creation. Previously UpdateTaskSerializer
+        # had no spec_id field, so PATCH /tasks/:id/ with a spec could not
+        # actually wire the task up to a spec. (Task #114 evidence.)
+        if "spec_id" in d:
+            new_spec_id = d["spec_id"]
+            old_spec_id = str(task.spec_id) if task.spec_id else ""
+            new_spec_id_str = str(new_spec_id) if new_spec_id else ""
+            if old_spec_id != new_spec_id_str:
+                spec = None
+                if new_spec_id is not None:
+                    spec = get_object_or_404(Spec, pk=new_spec_id)
+                histories.append(TaskHistory(
+                    task=task, schedule_run=task.current_schedule_run,
+                    field_name="spec_id",
+                    old_value=old_spec_id, new_value=new_spec_id_str,
+                    changed_by=updated_by,
+                ))
+                task.spec = spec
+
+        _validate_dispatch_readiness(
+            board=task.board,
+            spec_id=task.spec_id,
+            is_dispatch_transition=(
+                target_status == TaskStatus.IN_PROGRESS
+                and old_status not in (TaskStatus.IN_PROGRESS, TaskStatus.EXECUTING)
+            ),
+        )
+
         if target_index is not None or old_status != target_status:
             current_status = task.status
             task.status = old_status
@@ -2363,6 +3638,33 @@ class TaskViewSet(viewsets.ModelViewSet):
         if "model_name" in d and d["model_name"]:
             task.metadata = dict(task.metadata or {})
             task.metadata["selected_model"] = d["model_name"]
+
+        # W6.14: human override of routing. When a human changes the
+        # assignee or the model after dispatch, the WHY line in the UI
+        # must flip from "Auto" to "Override" and record who did it.
+        # We only stamp the flag when the picked agent/model actually
+        # moved — edits that don't touch routing leave the dispatch-time
+        # dict intact. Machine actors (odin sync, agent harness, system
+        # workers) never count as overrides — odin PATCHes assignee/model
+        # right after planning to sync its own routing decision, and that
+        # must keep rendering as "Auto".
+        assignee_history = [h for h in histories if h.field_name == "assignee_id"]
+        model_history = [h for h in histories if h.field_name == "model_name"]
+        routing_changed = bool(assignee_history or model_history)
+        if routing_changed and is_human_author(updated_by):
+            task.metadata = dict(task.metadata or {})
+            existing = dict(task.metadata.get("assignment_reason") or {})
+            existing["override"] = True
+            existing["override_by"] = updated_by or ""
+            # Mirror the new pick so the UI can render without an extra
+            # fetch. Fall back to current assignee.name if the
+            # FK lookup happened above (no need to re-query).
+            new_user = task.assignee
+            if new_user is not None:
+                existing["agent"] = new_user.name
+            if task.model_name:
+                existing["model"] = task.model_name
+            task.metadata["assignment_reason"] = existing
 
         if "skip_reflection" in d:
             if _record_change(histories, task, "skip_reflection", task.skip_reflection, d["skip_reflection"], updated_by):
@@ -2412,6 +3714,36 @@ class TaskViewSet(viewsets.ModelViewSet):
         if "status" in d and d["status"] == TaskStatus.REVIEW and old_status != TaskStatus.REVIEW:
             _trigger_auto_reflection(task)
 
+        # API-driven DONE transition: the operator's real flow.  The
+        # spec-finalization path also calls cleanup, but operators
+        # promote via PATCH not via `odin spec finalize`, so without
+        # this hook API promotions leak worktrees indefinitely.
+        # Cleanup failures never block the transition (matches the
+        # spec-finalization contract).
+        if (
+            "status" in d
+            and d["status"] == TaskStatus.DONE
+            and old_status != TaskStatus.DONE
+        ):
+            try:
+                from .dag_executor import _cleanup_done_task_worktree
+                _cleanup_done_task_worktree(task)
+            except Exception:
+                logger.warning(
+                    "Task %s: worktree cleanup on API-driven DONE failed",
+                    task.id, exc_info=True,
+                )
+            # Memory: stamp estimate vs actual on operator-driven DONE flip.
+            # Same trail as the auto-promote + spec-finalize paths; best-effort.
+            try:
+                from .estimation import stamp_actual_and_trail
+                stamp_actual_and_trail(task, transition="api_patch_done")
+            except Exception:
+                logger.warning(
+                    "Task %s: estimate-vs-actual stamp failed on PATCH-DONE",
+                    task.id, exc_info=True,
+                )
+
         if "status" in d and d["status"] != old_status:
             maybe_finalize_schedule_run(task, d["status"])
 
@@ -2448,7 +3780,41 @@ class TaskViewSet(viewsets.ModelViewSet):
         ser.is_valid(raise_exception=True)
 
         assignee = get_object_or_404(User, pk=ser.validated_data["assignee_id"])
-        _validate_forced_task_target(assignee=assignee, model_name=task.model_name)
+
+        # W10.4: refuse to assign a task to an AGENT that is not currently
+        # enabled on this board. Without this guard, an operator could
+        # dispatch work to a roster-disabled agent and the silent fallback
+        # ("pick the cheap tier") would mask the real cause — the very
+        # symptom the task is here to fix. Humans/operators are not gated
+        # here because they may legitimately act across boards while
+        # editing projects; only agent routing respects the roster.
+        if (
+            task.board_id
+            and (assignee.role or "").upper() == "AGENT"
+            and not BoardMembership.objects.filter(
+                board_id=task.board_id, user=assignee,
+            ).exists()
+        ):
+            from rest_framework.exceptions import ValidationError as _VErr
+            settings_path = _agent_settings_hint(task.board_id, assignee.name)
+            raise _VErr({
+                "assignee_id": (
+                    f"Agent '{assignee.name}' is not enabled on this board. "
+                    f"Enable it at {settings_path} or pick a different agent."
+                ),
+                "settings_path": settings_path,
+                "board_id": task.board_id,
+                "agent": assignee.name,
+            })
+        # Default First (F45): assigning an agent to a model-less task resolves
+        # the agent's default model, so dispatch never runs with a stale or
+        # missing model.
+        default_model = None
+        if not task.model_name:
+            default_model = _default_model_for_user(assignee)
+        _validate_forced_task_target(
+            assignee=assignee, model_name=task.model_name or default_model,
+        )
         old_assignee = str(task.assignee_id) if task.assignee_id else ""
 
         if old_assignee != str(assignee.id):
@@ -2459,6 +3825,13 @@ class TaskViewSet(viewsets.ModelViewSet):
             )
 
         task.assignee = assignee
+        if default_model:
+            TaskHistory.objects.create(
+                task=task, schedule_run=task.current_schedule_run, field_name="model_name",
+                old_value="", new_value=default_model,
+                changed_by=ser.validated_data["updated_by"],
+            )
+            task.model_name = default_model
         task.save()
 
         # Auto-add assignee to board
@@ -2799,8 +4172,34 @@ class TaskViewSet(viewsets.ModelViewSet):
         updated_by = d["updated_by"]
         exec_meta = exec_result.get("metadata", {}) or {}
 
-        stopped_run_token = (task.metadata or {}).get("stopped_run_token")
         incoming_run_token = (exec_meta.get("taskit_run_token") or "").strip()
+
+        # TaskRun write fencing (task #210): a write whose run_token doesn't
+        # match the task's current RUNNING run is from a superseded/zombie
+        # run — reject it outright instead of silently corrupting the live
+        # run's status. Tasks not (yet) tracked by TaskRun — legacy dispatch
+        # paths, direct API calls in tests — have no current run, so this
+        # gate is skipped for them; the stopped_run_token guard below still
+        # covers the explicit-stop case for those.
+        current_run = task_runs.current_running_run(task)
+        if current_run is not None and incoming_run_token and incoming_run_token != current_run.run_token:
+            logger.warning(
+                "Rejecting execution_result for task %s: run_token=%s does not match "
+                "current RUNNING run_token=%s (stale/zombie write)",
+                task.id, incoming_run_token, current_run.run_token,
+            )
+            return Response(
+                {
+                    "detail": (
+                        f"Task {task.id}'s run has been superseded by a newer "
+                        "dispatch; this write is from a stale run and was rejected."
+                    ),
+                    "code": "stale_run_token",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        stopped_run_token = (task.metadata or {}).get("stopped_run_token")
         if (task.metadata or {}).get("ignore_execution_results"):
             if not stopped_run_token or not incoming_run_token or incoming_run_token == stopped_run_token:
                 logger.info(
@@ -2854,7 +4253,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         histories = []
         old_status = task.status
         if old_status != new_status:
-            task.kanban_position = move_task(task, target_status=new_status, target_index=None)
+            task.kanban_position = _reposition_best_effort(task, new_status)
             _record_change(histories, task, "status", old_status, new_status, updated_by)
             task.status = new_status
 
@@ -2866,6 +4265,29 @@ class TaskViewSet(viewsets.ModelViewSet):
         # No longer cached in metadata — the trace comment is the source of truth.
         if exec_meta.get("selected_model"):
             task_metadata["selected_model"] = exec_meta["selected_model"]
+        # Task #331: an unconfirmed completion reaches REVIEW with a flag —
+        # the agent never emitted an ODIN-STATUS verdict but the worktree
+        # had real changes, so the reviewer must judge the diff, not the
+        # missing marker. Persist the flag so the reviewer sees it
+        # programmatically (a visible comment is posted by odin too).
+        if success and exec_meta.get("unconfirmed_completion"):
+            task_metadata["unconfirmed_completion"] = exec_meta["unconfirmed_completion"]
+        else:
+            task_metadata.pop("unconfirmed_completion", None)
+        # Task #332: resume-on-truncation bookkeeping. A resumable truncation
+        # (output cap hit mid-task with work in the worktree) leaves the task
+        # FAILED so the truncation AUTO_REQUEUE policy requeues it into the
+        # same worktree with a host-built resume prompt. ``truncation_resume_
+        # pending`` tells the NEXT dispatch to rebuild that prompt; the count
+        # is a durable capability signal task #328's routing table reads. The
+        # count is monotonic (kept even after a successful resume); pending is
+        # cleared the moment a run is NOT a resumable truncation.
+        if exec_meta.get("truncation_resume_count") is not None:
+            task_metadata["truncation_resume_count"] = exec_meta["truncation_resume_count"]
+        if not success and exec_meta.get("truncation_resume_pending"):
+            task_metadata["truncation_resume_pending"] = True
+        else:
+            task_metadata.pop("truncation_resume_pending", None)
         if not success:
             if failure_type:
                 task_metadata["last_failure_type"] = failure_type
@@ -2875,6 +4297,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 task_metadata["last_failure_reason"] = str(exec_result.get("error"))[:FAILURE_REASON_LIMIT]
             if failure_origin:
                 task_metadata["last_failure_origin"] = failure_origin[:FAILURE_ORIGIN_LIMIT]
+            tag_failure_class(task_metadata)
         # Accumulate estimated cost across retries (sum, not overwrite)
         if exec_meta.get("estimated_cost_usd") is not None:
             existing_cost = task_metadata.get("total_estimated_cost_usd") or 0.0
@@ -2886,21 +4309,19 @@ class TaskViewSet(viewsets.ModelViewSet):
         if old_status == TaskStatus.EXECUTING and new_status != TaskStatus.EXECUTING:
             task_metadata.pop("active_execution", None)
             _clear_stop_guards(task_metadata)
+            task_runs.finish_run(
+                current_run.run_token if current_run else incoming_run_token,
+                state=TaskRunState.FINISHED,
+            )
         task.metadata = task_metadata
-
-        # Attempt model escalation on execution failure
-        if not success and new_status == TaskStatus.FAILED:
-            if _maybe_escalate_model(task):
-                new_status = TaskStatus.IN_PROGRESS
-                task.status = new_status
-                # Replace FAILED history entry with IN_PROGRESS
-                histories = [h for h in histories if h.field_name != "status"]
-                task.kanban_position = move_task(task, target_status=new_status, target_index=None)
-                _record_change(histories, task, "status", old_status, new_status, updated_by)
-                _clear_stop_guards(task.metadata)
 
         task.save()
         TaskHistory.objects.bulk_create(histories)
+
+        # Mistakes ledger (task #223): a terminal FAILED (not requeued away)
+        # is distilled to one line. Idempotent per run_token.
+        if task.status == TaskStatus.FAILED:
+            record_execution_mistake(task, run_token=incoming_run_token)
 
         # 6. Create comment
         TaskComment.objects.create(
@@ -2919,13 +4340,24 @@ class TaskViewSet(viewsets.ModelViewSet):
             old_status, new_status,
         )
 
-        # Trigger re-execution if escalated
-        if not success and new_status == TaskStatus.IN_PROGRESS:
-            if task.assignee_id:
-                from .execution import get_strategy
-                strategy = get_strategy()
-                if strategy:
-                    strategy.trigger(task)
+        # Unified routing policy on execution failure (task #328). Odin
+        # reports FAILED to THIS endpoint; the Celery worker path uses the
+        # same dispatcher (dag_executor). Both now route through ONE table
+        # (tasks.failure_policy) instead of the old ad-hoc tier-jump
+        # (_maybe_escalate_model), which escalated a protocol hiccup onto
+        # expensive firepower. Per class: protocol/infra \u2192 retry same agent,
+        # then same-tier routing peer, never a tier jump; crash / env / disk
+        # / unknown \u2192 hold for human. The dispatcher flips FAILED \u2192
+        # IN_PROGRESS and re-triggers execution itself when it requeues.
+        if not success and task.status == TaskStatus.FAILED:
+            task.refresh_from_db()
+            from .failure_policy import apply_failure_policy
+            if not apply_failure_policy(task):
+                # No policy match (human action or failure_class missing):
+                # legacy type-based infra fallback preserves auto-retry.
+                from .dag_executor import _maybe_auto_redispatch_infra_failure
+                _maybe_auto_redispatch_infra_failure(task)
+            new_status = task.status
 
         # Trigger auto-reflection when execution result moves task to REVIEW
         if new_status == TaskStatus.REVIEW and old_status != TaskStatus.REVIEW:
@@ -3044,9 +4476,54 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         ser = ReflectionRequestSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        forced = get_forced_provider_selection()
-        reviewer_agent = forced.provider if forced.enabled else ser.validated_data["reviewer_agent"]
-        reviewer_model = forced.model if forced.enabled else ser.validated_data["reviewer_model"]
+        reviewer_agent = ser.validated_data["reviewer_agent"]
+        reviewer_model = ser.validated_data["reviewer_model"]
+        # Manual endpoint honors the caller's explicit agent/model. Auto-
+        # reflection is the path that applies size-bucketed / reviewer-order
+        # selection; the manual endpoint is for operators explicitly
+        # requesting a specific reviewer. The env-var forced-provider knob
+        # deliberately plays no role in reviewer selection (task: remove
+        # env-forced provider from reviewer selection).
+        raw = request.data or {}
+        req_agent = (raw.get("reviewer_agent") or "").strip()
+        req_model = (raw.get("reviewer_model") or "").strip()
+        if req_agent or req_model:
+            # Caller is pinning a specific reviewer: validate the (agent,
+            # model) pair against the named agent's available_models so a
+            # typo returns 400 listing valid choices instead of silently
+            # burning tokens on a model the agent can't run. (task #325)
+            if req_model:
+                valid_models = _agent_available_model_names(reviewer_agent)
+                if valid_models is not None and reviewer_model not in valid_models:
+                    allowed = ", ".join(valid_models) if valid_models else (
+                        "(agent carries no advertised models)"
+                    )
+                    return Response(
+                        {
+                            "error": "invalid_reviewer_model",
+                            "detail": (
+                                f"Model {reviewer_model!r} is not in agent "
+                                f"{reviewer_agent!r}'s available_models. "
+                                f"Allowed for {reviewer_agent}: {allowed}."
+                            ),
+                            "allowed_models": valid_models,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            selection_reason = "caller_override"
+        else:
+            # No reviewer specified — derive from the same deterministic
+            # selection auto-reflection uses, so a single-provider board
+            # (e.g. codex-only) doesn't crash on a hardcoded claude default.
+            # Falls back to the serializer default when no agent users exist
+            # (backward compat).
+            selection_reason = "manual_default"
+            derived_agent, derived_model, _reason = select_reviewer_by_context_size(
+                task, board=task.board,
+            )
+            if derived_agent and derived_model:
+                reviewer_agent = derived_agent
+                reviewer_model = derived_model
 
         report = ReflectionReport.objects.create(
             task=task,
@@ -3061,6 +4538,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 or "unknown@user"
             ),
             status=ReflectionStatus.PENDING,
+            selection_reason=selection_reason,
         )
 
         from .dag_executor import execute_reflection
@@ -3120,6 +4598,34 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
 
         report.save()
 
+        # Error ledger (task #222): a reviewer that emits a non-canonical
+        # verdict (anything other than PASS/NEEDS_WORK/FAIL) is the "no
+        # verdict in output" failure case from the error ledger — the
+        # reviewer ran but produced prose where the harness expected a
+        # fenced JSON verdict. Capture so the operator can triage.
+        _canonical_verdicts = {"PASS", "NEEDS_WORK", "FAIL"}
+        if new_status == "COMPLETED":
+            _verdict_norm = (report.verdict or "").upper().strip()
+            if _verdict_norm not in _canonical_verdicts:
+                try:
+                    from .errors import record_reflection_error
+                    record_reflection_error(
+                        reflection_id=report.id,
+                        task_id=report.task_id,
+                        symptom=(
+                            report.verdict_summary
+                            or f"Reflection {report.id} completed with unrecognized verdict {_verdict_norm!r}"
+                        ),
+                        reviewer_agent=report.reviewer_agent or "",
+                        reviewer_model=report.reviewer_model or "",
+                        source_id=str(report.id),
+                    )
+                except Exception:
+                    logger.exception(
+                        "error ledger: failed to record reflection_error for report %s",
+                        report.id,
+                    )
+
         # Post a reflection summary comment on the task when completed
         if new_status == "COMPLETED" and report.verdict_summary:
             verdict_label = (report.verdict or "").upper()
@@ -3127,7 +4633,15 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
             TaskComment.objects.create(
                 task=report.task,
                 schedule_run=report.task.current_schedule_run,
-                author_email=report.requested_by or "system@odin.agent",
+                # Attribution (task #250): the verdict speaks AS the reviewer,
+                # never as whoever requested the run — a requester-attributed
+                # verdict once triggered the reply-resume flow as if a human
+                # had spoken.
+                author_email=(
+                    f"{report.reviewer_agent}+{report.reviewer_model}@odin.agent"
+                    if report.reviewer_agent and report.reviewer_model
+                    else "system@odin.agent"
+                ),
                 author_label=f"{report.reviewer_agent}/{report.reviewer_model}",
                 content=comment_content,
                 comment_type=CommentType.REFLECTION,
@@ -3151,6 +4665,27 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
             task.refresh_from_db(fields=["status"])
             if task.status == TaskStatus.REVIEW:
                 _merge_task_on_reflection_pass(task)
+            else:
+                # Silent-skip regression (task #171): if the task already
+                # moved past REVIEW (manual transition, finalize-before-merge,
+                # a previous reflection-PASS chain, etc.), the merge dispatch
+                # would skip without logging. Surface it so the operator
+                # knows the reflection PASSed but the merge never fired.
+                logger.warning(
+                    "[task:%s] reflection %s: PASS but task is in %s (not REVIEW) "
+                    "— merge dispatch skipped (status-not-review)",
+                    task.id, report.id, task.status,
+                )
+                _record_merge_skip(
+                    task,
+                    f"status_not_review:{task.status}",
+                    f"Merge dispatch skipped: reflection verdict was PASS but "
+                    f"task is in `{task.status}` (not REVIEW). This usually "
+                    f"means the task was already moved past REVIEW by another "
+                    f"flow (e.g. spec finalization, manual transition, or a "
+                    f"previous reflection-PASS chain). If the spec branch is "
+                    f"missing this task's code, merge it manually.",
+                )
 
         # Auto-advance: NEEDS_WORK or FAIL verdict retries or fails after 3 attempts
         verdict = (report.verdict or "").upper()
@@ -3160,6 +4695,9 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
         ):
             task = report.task
             task.refresh_from_db(fields=["status"])
+            # Mistakes ledger (task #223): distill this verdict to one line so
+            # future similar tasks carry the warning. Idempotent per report.
+            record_reflection_mistake(report)
             if task.status == TaskStatus.REVIEW:
                 completed_count = ReflectionReport.objects.filter(
                     task=task, status=ReflectionStatus.COMPLETED,
@@ -3192,9 +4730,55 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                         task.id, completed_count,
                     )
                 else:
+                    # Capture pre-rework fields so the continuity audit can compare
+                    # against whatever `_maybe_reassign_on_quota_failure` left in
+                    # place. F45 mandate: rework keeps agent+model by default; the
+                    # audit trail must show the continuity decision even when the
+                    # values did not change.
+                    task.refresh_from_db(fields=["assignee_id", "model_name", "metadata"])
+                    pre_rework_assignee_id = task.assignee_id
+                    pre_rework_model = task.model_name
+
                     # Check if this failure was quota/rate-limit related
-                    # and reassign to a different agent if so
-                    _maybe_reassign_on_quota_failure(task, report)
+                    # and reassign to a different agent if so. The returned
+                    # bool signals whether the quota path surfaced its own
+                    # explanation (a reassignment comment, or a "no alternative
+                    # agent available" warning) — when True, the continuity
+                    # helper below suppresses its duplicate comment so the
+                    # operator's most-recent comment matches reality.
+                    quota_handled = _maybe_reassign_on_quota_failure(task, report)
+
+                    # Capability failure = repeated review rejection (task #328).
+                    # A quota failure is infra, not capability, so it never
+                    # counts toward escalation. Once the reviewer has rejected
+                    # the work `capability_escalate_after` times (default 2),
+                    # escalate exactly ONE deliberate tier — the sanctioned
+                    # tier jump. The FIRST rejection keeps the same agent
+                    # (continuity below); only the repeat escalates.
+                    capability_escalated = False
+                    if not quota_handled:
+                        from .failure_policy import capability_policy
+                        cap = capability_policy(task.board)
+                        if cap.enabled and completed_count >= cap.escalate_after:
+                            task.metadata = dict(task.metadata or {})
+                            task.metadata["capability_rejections"] = completed_count
+                            if _maybe_escalate_model(task):
+                                capability_escalated = True
+                                task.save(update_fields=[
+                                    "assignee", "model_name", "metadata",
+                                ])
+
+                    # F45 continuity record: if assignee+model survived the rework
+                    # transition, write history + comment + metadata so the choice
+                    # is visible. The quota path writes its own history rows
+                    # inside `_maybe_reassign_on_quota_failure`, so we skip when
+                    # anything actually moved.
+                    _record_rework_continuity(
+                        task,
+                        pre_rework_assignee_id,
+                        pre_rework_model,
+                        suppress_comment=quota_handled or capability_escalated,
+                    )
 
                     # Send back for another execution attempt
                     old_status = task.status
@@ -3212,13 +4796,45 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                         "Auto-advanced task %s from REVIEW → IN_PROGRESS after reflection %s (attempt %d)",
                         task.id, verdict, completed_count,
                     )
-                    # Fire execution strategy (mirrors TaskViewSet.update lines 746-756)
+                    # Fire execution strategy (mirrors TaskViewSet.update lines
+                    # 746-756), but gate on DAG_EXECUTOR_MAX_CONCURRENCY so
+                    # reflection-ordered rework can't re-enter EXECUTING past the
+                    # cap. At capacity the task stays IN_PROGRESS (queued) and
+                    # poll_and_execute dispatches it when a slot frees — the same
+                    # slot accounting that gates fresh dispatches.
                     if task.assignee_id:
-                        from .execution import get_strategy
-                        strategy = get_strategy()
-                        if strategy:
-                            logger.info("Firing execution strategy for task %s after %s retry", task.id, verdict)
-                            strategy.trigger(task)
+                        max_concurrency = getattr(
+                            settings, "DAG_EXECUTOR_MAX_CONCURRENCY", 3,
+                        )
+                        executing_count = Task.objects.filter(
+                            status=TaskStatus.EXECUTING,
+                        ).count()
+                        from .dag_executor import _set_dispatch_blocked_reason
+                        from .sandbox_budget import default_vm_mem_mib, spawn_fits
+                        if executing_count >= max_concurrency:
+                            _set_dispatch_blocked_reason(task, "concurrency_cap_reached")
+                            logger.info(
+                                "Rework task %s held queued: %d EXECUTING at cap %d",
+                                task.id, executing_count, max_concurrency,
+                            )
+                        elif not spawn_fits(default_vm_mem_mib()):
+                            # Memory budget gate — mirrors poll_and_execute: a
+                            # rework spawn that would exceed the shared global
+                            # budget waits in line instead of booting into swap.
+                            _set_dispatch_blocked_reason(task, "memory_budget_full")
+                            logger.info(
+                                "Rework task %s held queued: memory budget full",
+                                task.id,
+                            )
+                        else:
+                            from .execution import get_strategy
+                            strategy = get_strategy()
+                            if strategy:
+                                logger.info(
+                                    "Firing execution strategy for task %s after %s retry",
+                                    task.id, verdict,
+                                )
+                                strategy.trigger(task)
 
         return Response(ReflectionReportSerializer(report).data)
 
@@ -3457,6 +5073,17 @@ class SpecViewSet(viewsets.ModelViewSet):
         )
         return Response(SpecDiagnosticSerializer(spec, context={"request": request}).data)
 
+    @action(detail=True, methods=["get"], url_path="story")
+    def story(self, request, pk=None):
+        """Wave story: per-task narrative — dispatch time, agent+model,
+        redo rounds, merge mode/conflicts, tokens/cost, duration, status,
+        and the newest human-relevant comment. Shared builder with
+        testing_tools/spec_trace.py (see tasks/spec_story.py) so the CLI
+        diagnostic and this endpoint never drift.
+        """
+        spec = get_object_or_404(Spec.objects.select_related("board"), pk=pk)
+        return Response(build_spec_story(spec))
+
     @action(detail=True, methods=["post"])
     def clone(self, request, pk=None):
         from django.db import transaction
@@ -3473,6 +5100,7 @@ class SpecViewSet(viewsets.ModelViewSet):
             "taskit_id", "diff_stat", "subprocess_pid", "trace_file",
             "active_execution", "worktree_status", "worktree_error",
             "last_failure_type", "last_failure_reason", "last_failure_origin",
+            "failure_class",
             "escalation_history", "escalation_count", "escalation_max",
         }
 
@@ -3886,7 +5514,7 @@ def timeline(request):
     query_params = request.query_params
     qs = (
         Task.objects.select_related("assignee")
-        .prefetch_related("labels", "history")
+        .prefetch_related("labels", "history", "reflections")
         .annotate(comment_count=Count("comments"))
     )
     qs = _exclude_hidden_scheduled_tasks(qs)
@@ -3944,9 +5572,11 @@ def kanban(request):
     query_params = request.query_params
     base_qs = (
         Task.objects.select_related("assignee")
-        .prefetch_related("labels")
+        .prefetch_related(
+            "labels", "reflections",
+            Prefetch("history", queryset=TaskHistory.objects.filter(field_name="status").order_by("changed_at")),
+        )
         .annotate(comment_count=Count("comments"))
-        .order_by("kanban_position", "id")
     )
     base_qs = _exclude_hidden_scheduled_tasks(base_qs)
     if board_id:
@@ -3965,7 +5595,8 @@ def _kanban_initial(base_qs, query_params):
     for col in KANBAN_COLUMNS:
         col_qs = base_qs.filter(status__in=get_statuses_for_column(col))
         total = col_qs.count()
-        tasks_data = TaskListSerializer(col_qs[:per_status_limit], many=True).data
+        col_qs = order_column_queryset(col_qs, col)
+        tasks_data = TaskKanbanCardSerializer(col_qs[:per_status_limit], many=True).data
         columns[col] = {"tasks": tasks_data, "total_count": total}
     return Response({"columns": columns})
 
@@ -3981,7 +5612,8 @@ def _kanban_load_more(base_qs, status_param, query_params):
     limit = min(int(query_params.get("limit", 20)), 200)
     col_qs = base_qs.filter(status__in=get_statuses_for_column(status_param))
     total = col_qs.count()
-    tasks_data = TaskListSerializer(col_qs[offset:offset + limit], many=True).data
+    col_qs = order_column_queryset(col_qs, status_param)
+    tasks_data = TaskKanbanCardSerializer(col_qs[offset:offset + limit], many=True).data
     return Response({
         "tasks": tasks_data,
         "total_count": total,
@@ -4141,23 +5773,25 @@ def runtime_forced_provider(request):
     return Response(_forced_provider_response())
 
 
-@api_view(["GET"])
-def runtime_provider_usage(request):
-    """Return AI provider usage quotas and health status."""
+def _load_provider_usage():
+    """Assemble provider usage entries for the providers page.
+
+    Returns ``(entries, error)`` where ``error`` is ``None`` on success. This is
+    the network boundary; split out so tests can patch the seam. Mirrors the
+    odin graceful-degradation convention (orchestrator._fetch_quota): it never
+    raises — any failure (package missing, config error, provider fetch error)
+    yields an honest empty list plus a human-readable error string, so the page
+    renders an "unavailable" state instead of a 500.
+    """
     try:
         from harness_usage_status.config import load_config
         from harness_usage_status.providers.registry import get_all_providers
     except ImportError:
-        return Response({
-            "providers": [],
-            "error": "harness_usage_status package not installed",
-            "fetched_at": timezone.now().isoformat(),
-        })
+        return [], "harness_usage_status package not installed"
 
     try:
         config = load_config()
         providers = get_all_providers(config.get_provider_configs())
-
         provider_list = list(providers.values())
 
         async def fetch_all():
@@ -4215,18 +5849,27 @@ def runtime_provider_usage(request):
                 })
 
             result.append(entry)
+        return result, None
+    except Exception as e:
+        logger.warning("Provider usage unavailable: %s", e, exc_info=True)
+        return [], f"provider usage unavailable: {e}"
 
-        return Response({
-            "providers": result,
-            "fetched_at": timezone.now().isoformat(),
-        })
-    except Exception:
-        logger.exception("Failed to fetch provider usage")
-        return Response({
-            "providers": [],
-            "error": "Failed to fetch provider usage data",
-            "fetched_at": timezone.now().isoformat(),
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(["GET"])
+def runtime_provider_usage(request):
+    """Return AI provider usage quotas and health status.
+
+    Always returns HTTP 200. When usage data is unavailable (package missing,
+    misconfigured, or a provider fetch error) the payload carries an honest
+    ``error`` string and an empty ``providers`` list, so the page renders an
+    "unavailable" state rather than a 500.
+    """
+    entries, error = _load_provider_usage()
+    return Response({
+        "providers": entries,
+        "error": error,
+        "fetched_at": timezone.now().isoformat(),
+    })
 
 
 def _list_child_directories(path_value, limit, include_hidden=False):
@@ -4384,8 +6027,166 @@ def runtime_stop(request):
 # ── Presets ──────────────────────────────────────────────────────
 
 @api_view(["GET"])
+def sandbox_config(request):
+    """Read-only sandbox configuration (visible-decisions rule): per-agent
+    VM memory from the repo's .odin/config.yaml plus the backend budget
+    settings. The Settings page renders this so RAM sizing is a decision a
+    human can SEE, not a hidden constant."""
+    import yaml
+    from pathlib import Path
+    from .sandbox_budget import default_vm_mem_mib, get_budget_mib
+    cfg_path = Path(__file__).resolve().parents[3] / ".odin" / "config.yaml"
+    agents = {}
+    try:
+        raw = yaml.safe_load(cfg_path.read_text()) or {}
+        for name, acfg in (raw.get("agents") or {}).items():
+            if isinstance(acfg, dict) and "microsandbox_mem_size_mib" in acfg:
+                agents[name] = acfg["microsandbox_mem_size_mib"]
+    except Exception:
+        agents = {}
+    return Response({
+        "agents_vm_mem_mib": agents,
+        "default_vm_mem_mib": default_vm_mem_mib(),
+        "memory_budget_mib": get_budget_mib(),
+        "source": str(cfg_path),
+    })
+
+
+@api_view(["GET"])
 def list_presets(request):
-    filepath = Path(__file__).resolve().parent.parent / "data" / "task_presets.json"
-    with open(filepath) as f:
-        data = json.load(f)
+    # load_presets validates any preset carrying an `audit` block against the
+    # audit-preset contract (tasks/audit_presets.py) and enforces unique ids.
+    data = load_presets()
+    if request.query_params.get("include_disabled") not in ("1", "true", "True"):
+        data = {**data, "presets": [p for p in data["presets"] if not p.get("disabled")]}
     return Response(data)
+
+
+@api_view(["POST"])
+def manage_preset(request):
+    """The one write path for data/task_presets.json: add / update / delete
+    / disable / enable. Every action is a literal edit to the JSON file on
+    disk (no DB-backed shadow copy) so every preset change is a git diff.
+    """
+    from .audit_presets import PresetValidationError, save_presets, validate_preset_shape
+
+    action = (request.data.get("action") or "").strip().lower()
+    if action not in ("add", "update", "delete", "disable", "enable"):
+        return Response({"error": f"invalid action {action!r}"}, status=400)
+
+    try:
+        data = load_presets()
+    except PresetValidationError as exc:
+        return Response({"error": f"existing presets file invalid: {exc}"}, status=500)
+
+    presets = data["presets"]
+    index_by_id = {p["id"]: i for i, p in enumerate(presets)}
+
+    if action in ("add", "update"):
+        preset = request.data.get("preset")
+        if not isinstance(preset, dict):
+            return Response({"error": "'preset' object required"}, status=400)
+        pid = preset.get("id")
+        if action == "add" and pid in index_by_id:
+            return Response({"error": f"preset {pid!r} already exists"}, status=409)
+        if action == "update" and pid not in index_by_id:
+            return Response({"error": f"preset {pid!r} not found"}, status=404)
+        try:
+            validate_preset_shape(preset)
+        except PresetValidationError as exc:
+            return Response({"error": str(exc)}, status=400)
+        if action == "add":
+            preset.setdefault("sort_order", len(presets) + 1)
+            presets.append(preset)
+        else:
+            presets[index_by_id[pid]] = preset
+    else:
+        pid = request.data.get("id")
+        if pid not in index_by_id:
+            return Response({"error": f"preset {pid!r} not found"}, status=404)
+        if action == "delete":
+            presets.pop(index_by_id[pid])
+        elif action == "disable":
+            presets[index_by_id[pid]]["disabled"] = True
+        elif action == "enable":
+            presets[index_by_id[pid]].pop("disabled", None)
+
+    save_presets(data)
+    return Response(load_presets())
+
+
+# ── Executor Capacity ──────────────────────────────────────────────────────
+
+@api_view(["GET"])
+def executor_capacity(request):
+    """Return running task count and max concurrency limit."""
+    try:
+        setting = SystemSetting.objects.get(key="executor_max_concurrency")
+        max_concurrency = setting.value
+    except SystemSetting.DoesNotExist:
+        max_concurrency = getattr(settings, "DAG_EXECUTOR_MAX_CONCURRENCY", 3)
+
+    running_count = Task.objects.filter(status=TaskStatus.EXECUTING).count()
+
+    # Get suggested max from a dummy SystemSetting instance
+    dummy_setting = SystemSetting(key="executor_max_concurrency", value=max_concurrency)
+    suggested_max = dummy_setting.get_suggested_max()
+
+    return Response({
+        "running": running_count,
+        "max": max_concurrency,
+        "suggested_max": suggested_max,
+    })
+
+
+@api_view(["GET", "POST"])
+def executor_max_concurrency(request):
+    """Get or set the maximum executor concurrency."""
+    if request.method == "GET":
+        try:
+            setting = SystemSetting.objects.get(key="executor_max_concurrency")
+            value = setting.value
+        except SystemSetting.DoesNotExist:
+            value = getattr(settings, "DAG_EXECUTOR_MAX_CONCURRENCY", 3)
+
+        dummy_setting = SystemSetting(key="executor_max_concurrency", value=value)
+        suggested_max = dummy_setting.get_suggested_max()
+
+        return Response({
+            "value": value,
+            "suggested_max": suggested_max,
+        })
+
+    # POST: set max concurrency
+    value = request.data.get("value")
+    if value is None:
+        return Response(
+            {"error": "Missing required field: value"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        value = int(value)
+    except (ValueError, TypeError):
+        return Response(
+            {"error": "value must be an integer"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if value < 1:
+        return Response(
+            {"error": "value must be at least 1"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    setting, created = SystemSetting.objects.update_or_create(
+        key="executor_max_concurrency",
+        defaults={"value": value},
+    )
+
+    suggested_max = setting.get_suggested_max()
+
+    return Response({
+        "value": setting.value,
+        "suggested_max": suggested_max,
+    })

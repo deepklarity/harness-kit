@@ -55,7 +55,7 @@ def overview_board(board, mode="standard"):
         }
         for spec in specs:
             spec_tasks = tasks_by_spec.get(spec.id, [])
-            agg_tokens = sum(extract_token_parts(t.metadata)[0] for t in spec_tasks)
+            agg_tokens = sum(extract_token_parts(t)[0] for t in spec_tasks)
             data["specs"].append({
                 "id": spec.id,
                 "title": spec.title,
@@ -73,7 +73,7 @@ def overview_board(board, mode="standard"):
     if mode == "brief":
         status_counts = Counter(t.status for t in all_tasks)
         status_str = ", ".join(f"{c} {s}" for s, c in sorted(status_counts.items()))
-        agg_tokens = sum(extract_token_parts(t.metadata)[0] for t in all_tasks)
+        agg_tokens = sum(extract_token_parts(t)[0] for t in all_tasks)
         tok = f"{agg_tokens:,}" if agg_tokens else "-"
         print(f"Board #{board.id} '{board.name}': {len(specs)} specs, {len(all_tasks)} tasks ({status_str}) | {tok} tokens")
         for spec in specs:

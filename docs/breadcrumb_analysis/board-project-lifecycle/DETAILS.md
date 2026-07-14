@@ -32,7 +32,7 @@ Steps in order:
    - Best-effort: failure logs warning, continues without worktree support
 
 6. **MCP configs** (lines 290-300)
-   - Generates per-CLI config files for 6 agent CLIs
+   - Generates per-CLI config files for 5 agent CLIs (qwen retired in #102)
    - Reads `cfg.mcps` to determine which MCP servers to include
    - Generates `.claude/settings.local.json` for Claude Code permissions
 

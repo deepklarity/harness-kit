@@ -35,11 +35,6 @@ def _make_orchestrator(tmp_path, model_routing=None, agents=None):
 
     if agents is None:
         agents = {
-            "qwen": AgentConfig(
-                cli_command="qwen",
-                capabilities=["writing", "coding"],
-                cost_tier=CostTier.LOW,
-            ),
             "gemini": AgentConfig(
                 cli_command="gemini",
                 capabilities=["writing", "coding", "research"],
@@ -59,7 +54,6 @@ def _make_orchestrator(tmp_path, model_routing=None, agents=None):
 
     if model_routing is None:
         model_routing = [
-            ModelRoute(agent="qwen", model="coder-model"),
             ModelRoute(agent="gemini", model="gemini-2.5-flash"),
             ModelRoute(agent="glm", model="GLM-4.7"),
             ModelRoute(agent="claude", model="claude-sonnet-4-5"),
@@ -101,11 +95,11 @@ class TestRouteTaskSuggestionRespected:
     @pytest.mark.asyncio
     async def test_suggested_agent_used_when_valid(self, tmp_path):
         """When the LLM suggests 'gemini' and gemini is available + capable,
-        the task should be assigned to gemini, not qwen (first in routing)."""
+        the task should be assigned to gemini, not glm (first in routing)."""
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested="gemini",
@@ -122,7 +116,7 @@ class TestRouteTaskSuggestionRespected:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested="gemini",
@@ -138,7 +132,7 @@ class TestRouteTaskSuggestionRespected:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="low",
                 suggested="glm",
@@ -154,7 +148,7 @@ class TestRouteTaskSuggestionRespected:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["reasoning"],
                 complexity="high",
                 suggested="claude",
@@ -167,13 +161,13 @@ class TestRouteTaskSuggestionRespected:
     @pytest.mark.asyncio
     async def test_multiple_tasks_different_agents(self, tmp_path):
         """Different suggestions → different agents. The bug was that ALL tasks
-        got assigned to qwen regardless of suggestion."""
+        got assigned to glm regardless of suggestion."""
         orch = _make_orchestrator(tmp_path)
 
         results = []
         with _mock_all_available():
-            for suggested in ["qwen", "gemini", "glm", "claude"]:
-                agent, model, _reasoning = await orch._route_task(
+            for suggested in ["gemini", "glm", "claude"]:
+                agent, model, _reasoning, _ar = await orch._route_task(
                     required_caps=["writing"],
                     complexity="medium",
                     suggested=suggested,
@@ -200,14 +194,14 @@ class TestRouteTaskSuggestionFallback:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested=None,
                 quota=None,
             )
 
-        low_tier_agents = {"qwen", "gemini", "glm"}
+        low_tier_agents = {"gemini", "glm"}
         assert agent in low_tier_agents, (
             f"Without suggestion, should pick from LOW tier {low_tier_agents}, got '{agent}'"
         )
@@ -218,42 +212,74 @@ class TestRouteTaskSuggestionFallback:
         orch = _make_orchestrator(tmp_path)
 
         # Gemini is suggested but unavailable
-        with _mock_availability({"qwen", "claude", "glm"}):
-            agent, model, _reasoning = await orch._route_task(
+        with _mock_availability({"claude", "glm"}):
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested="gemini",
                 quota=None,
             )
 
-        assert agent in {"qwen", "glm"}, (
-            f"Gemini unavailable, should fall back to LOW tier (qwen/glm), got '{agent}'"
+        assert agent in {"glm"}, (
+            f"Gemini unavailable, should fall back to LOW tier (glm), got '{agent}'"
         )
+
+    @pytest.mark.asyncio
+    async def test_coding_agent_satisfies_run_shell_command_capability(self, tmp_path):
+        """Coding-capable agents should satisfy shell-capable tasks even when
+        older routing metadata omitted explicit tool-style capabilities."""
+        orch = _make_orchestrator(tmp_path)
+
+        with _mock_all_available():
+            agent, model, _reasoning, _ar = await orch._route_task(
+                required_caps=["run_shell_command"],
+                complexity="low",
+                suggested="gemini",
+                quota=None,
+            )
+
+        assert agent == "gemini"
+        assert model == "gemini-2.5-flash"
 
     @pytest.mark.asyncio
     async def test_suggested_agent_missing_caps_falls_back(self, tmp_path):
         """If suggested agent lacks required capabilities, fall back."""
         orch = _make_orchestrator(tmp_path)
 
-        # qwen doesn't have "research" capability
+        # glm doesn't have "research" capability
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["research"],
                 complexity="medium",
-                suggested="qwen",
+                suggested="glm",
                 quota=None,
             )
 
         assert agent == "gemini", (
-            f"Qwen lacks 'research', should fall to gemini, got '{agent}'"
+            f"GLM lacks 'research', should fall to gemini, got '{agent}'"
         )
 
     @pytest.mark.asyncio
-    async def test_suggested_agent_disabled_falls_back(self, tmp_path):
-        """If suggested agent is disabled, fall back to routing."""
+    async def test_suggested_agent_disabled_raises_named_error(self, tmp_path):
+        """W10.4 follow-on: a planner-suggested agent that is in the lineup
+        but flagged ``enabled=False`` no longer silently falls back to a
+        different agent. The previous behaviour (assert agent == "glm")
+        was the exact symptom board 6 surfaced — the orchestrator picked
+        a viable tier instead of failing loud so the operator could fix
+        the cause (settings). Now it raises ``SuggestedAgentDisabled`` so
+        the error message names the bad agent instead of hiding it.
+
+        Symmetric with ``_route_task_api``'s Phase 0 guard and with the
+        dispatch-side ``AgentNotEnabledOnBoard`` — every layer surfaces
+        the same named error so the operator sees one consistent line
+        whether the trigger is the planner, the dispatcher, or a manual
+        assign.
+        """
+        from odin.orchestrator import SuggestedAgentDisabled
+
         agents = {
-            "qwen": AgentConfig(
-                cli_command="qwen",
+            "glm": AgentConfig(
+                cli_command="glm",
                 capabilities=["writing"],
                 cost_tier=CostTier.LOW,
             ),
@@ -261,39 +287,50 @@ class TestRouteTaskSuggestionFallback:
                 cli_command="gemini",
                 capabilities=["writing"],
                 cost_tier=CostTier.LOW,
-                enabled=False,  # disabled
+                enabled=False,  # disabled — operator flipped the switch
             ),
         }
         orch = _make_orchestrator(tmp_path, agents=agents)
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
-                required_caps=["writing"],
-                complexity="medium",
-                suggested="gemini",
-                quota=None,
-            )
+            with pytest.raises(SuggestedAgentDisabled) as exc_info:
+                await orch._route_task(
+                    required_caps=["writing"],
+                    complexity="medium",
+                    suggested="gemini",
+                    quota=None,
+                )
 
-        assert agent == "qwen", (
-            f"Gemini disabled, should fall back to qwen, got '{agent}'"
-        )
+        # The error must name the agent so the operator sees exactly
+        # which switch to flip — not a generic "no viable route" line.
+        assert exc_info.value.agent == "gemini"
 
     @pytest.mark.asyncio
-    async def test_suggested_agent_unknown_falls_back(self, tmp_path):
-        """If suggested agent doesn't exist in config, fall back."""
+    async def test_suggested_agent_unknown_raises_named_error(self, tmp_path):
+        """W10.4 follow-on: an unknown suggested agent no longer silently
+        falls back to the cheapest tier. The previous behaviour
+        (assert agent in {\"gemini\", \"glm\"}) was the exact symptom
+        board 6 surfaced — the orchestrator picked a viable tier
+        instead of failing loud so the operator could fix the cause
+        (settings). Now it raises ``SuggestedAgentDisabled`` so the
+        error message names the bad agent instead of hiding it.
+        """
+        from odin.orchestrator import SuggestedAgentDisabled
+
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
-                required_caps=["writing"],
-                complexity="medium",
-                suggested="nonexistent_agent",
-                quota=None,
-            )
+            with pytest.raises(SuggestedAgentDisabled) as exc_info:
+                await orch._route_task(
+                    required_caps=["writing"],
+                    complexity="medium",
+                    suggested="nonexistent_agent",
+                    quota=None,
+                )
 
-        assert agent in {"qwen", "gemini", "glm"}, (
-            f"Unknown agent should fall back to LOW tier, got '{agent}'"
-        )
+        # Error names the agent — the operator sees exactly which
+        # switch to flip / which lineup entry to add.
+        assert exc_info.value.agent == "nonexistent_agent"
 
     @pytest.mark.asyncio
     async def test_suggested_agent_over_quota_falls_back(self, tmp_path):
@@ -302,19 +339,18 @@ class TestRouteTaskSuggestionFallback:
 
         quota = {
             "gemini": {"usage_pct": 85, "remaining_pct": 15},
-            "qwen": {"usage_pct": 10, "remaining_pct": 90},
         }
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested="gemini",
                 quota=quota,
             )
 
-        assert agent in {"qwen", "glm"}, (
-            f"Gemini over quota, should fall back to LOW tier (qwen/glm), got '{agent}'"
+        assert agent in {"glm"}, (
+            f"Gemini over quota, should fall back to LOW tier (glm), got '{agent}'"
         )
 
     @pytest.mark.asyncio
@@ -324,11 +360,10 @@ class TestRouteTaskSuggestionFallback:
 
         quota = {
             "gemini": {"usage_pct": 85, "remaining_pct": 15},
-            "qwen": {"usage_pct": 10, "remaining_pct": 90},
         }
 
         with _mock_all_available():
-            agent, model, _reasoning = await orch._route_task(
+            agent, model, _reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="high",
                 suggested="gemini",
@@ -381,7 +416,7 @@ class TestRouteTaskNoViableRoute:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_availability(set()):
-            with pytest.raises(RuntimeError, match=r"qwen/coder-model") as exc_info:
+            with pytest.raises(RuntimeError, match=r"glm/GLM-4.7") as exc_info:
                 await orch._route_task(
                     required_caps=["writing"],
                     complexity="medium",
@@ -392,6 +427,36 @@ class TestRouteTaskNoViableRoute:
 
 
 # ── [mock] Tier-based distribution ─────────────────────────────────────
+
+
+class TestRouteTaskApiCapabilityNormalization:
+    @pytest.mark.asyncio
+    async def test_api_routing_treats_coding_agent_as_shell_capable(self, tmp_path):
+        orch = _make_orchestrator(tmp_path)
+        routing_config = {
+            "agents": [
+                {
+                    "name": "gemini",
+                    "capabilities": ["coding", "writing", "research"],
+                    "cost_tier": "low",
+                    "default_model": "gemini-2.5-flash",
+                    "premium_model": None,
+                    "models": [{"name": "gemini-2.5-flash", "enabled": True}],
+                }
+            ]
+        }
+
+        with _mock_all_available():
+            agent, model, _reasoning, _ar = await orch._route_task_api(
+                required_caps=["run_shell_command"],
+                complexity="low",
+                suggested="gemini",
+                quota=None,
+                routing_config=routing_config,
+            )
+
+        assert agent == "gemini"
+        assert model == "gemini-2.5-flash"
 
 
 class TestRouteTaskTierDistribution:
@@ -406,7 +471,7 @@ class TestRouteTaskTierDistribution:
 
         with _mock_all_available():
             for _ in range(40):
-                agent, model, reasoning = await orch._route_task(
+                agent, model, reasoning, _ar = await orch._route_task(
                     required_caps=["writing"],
                     complexity="medium",
                     suggested=None,
@@ -415,7 +480,7 @@ class TestRouteTaskTierDistribution:
                 agents_seen[agent] += 1
 
         # All should be LOW-tier
-        assert set(agents_seen.keys()).issubset({"qwen", "gemini", "glm"})
+        assert set(agents_seen.keys()).issubset({"gemini", "glm"})
         # Distribution: more than 1 agent should appear
         assert len(agents_seen) > 1, (
             f"Expected distribution across LOW-tier agents, got only: {dict(agents_seen)}"
@@ -427,14 +492,14 @@ class TestRouteTaskTierDistribution:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested=None,
                 quota=None,
             )
 
-        assert agent in {"qwen", "gemini", "glm"}, (
+        assert agent in {"gemini", "glm"}, (
             f"Should pick from LOW tier, not HIGH (claude), got '{agent}'"
         )
         assert "LOW" in reasoning
@@ -445,7 +510,7 @@ class TestRouteTaskTierDistribution:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested=None,
@@ -462,7 +527,7 @@ class TestRouteTaskTierDistribution:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested="gemini",
@@ -498,7 +563,7 @@ class TestRouteTaskPremiumUpgrade:
         orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="high",
                 suggested=None,
@@ -527,7 +592,7 @@ class TestRouteTaskPremiumUpgrade:
         orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="high",
                 suggested="gemini",
@@ -560,7 +625,7 @@ class TestRouteTaskPremiumUpgrade:
         orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="high",
                 suggested="gemini",
@@ -590,7 +655,7 @@ class TestRouteTaskPremiumUpgrade:
         orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="medium",
                 suggested=None,
@@ -628,7 +693,7 @@ class TestRouteTaskPremiumUpgrade:
         orch = Orchestrator(cfg)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="high",
                 suggested=None,
@@ -663,7 +728,7 @@ class TestRouteTaskSuggestedModel:
         orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="low",
                 suggested="gemini",
@@ -691,7 +756,7 @@ class TestRouteTaskSuggestedModel:
         orch = _make_orchestrator(tmp_path, model_routing=routing, agents=agents)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="low",
                 suggested="gemini",
@@ -711,7 +776,7 @@ class TestRouteTaskSuggestedModel:
         orch = _make_orchestrator(tmp_path)
 
         with _mock_all_available():
-            agent, model, reasoning = await orch._route_task(
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="low",
                 suggested=None,
@@ -720,7 +785,7 @@ class TestRouteTaskSuggestedModel:
             )
 
         # Should fall through to tier routing
-        assert agent in {"qwen", "gemini", "glm"}
+        assert agent in {"gemini", "glm"}
         assert "tier" in reasoning
 
     @pytest.mark.asyncio
@@ -728,8 +793,8 @@ class TestRouteTaskSuggestedModel:
         """Planner suggests agent + model but agent unavailable → tier routing."""
         orch = _make_orchestrator(tmp_path)
 
-        with _mock_availability({"qwen", "glm"}):
-            agent, model, reasoning = await orch._route_task(
+        with _mock_availability({"glm"}):
+            agent, model, reasoning, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="low",
                 suggested="gemini",
@@ -737,7 +802,7 @@ class TestRouteTaskSuggestedModel:
                 suggested_model="gemini-2.0-flash",
             )
 
-        assert agent in {"qwen", "glm"}, (
+        assert agent in {"glm"}, (
             f"Unavailable agent should fall back to tier routing, got '{agent}'"
         )
 
@@ -760,7 +825,7 @@ class TestRouteTaskSuggestedModel:
 
         # With suggested_model
         with _mock_all_available():
-            _, _, reasoning_with = await orch._route_task(
+            _, _, reasoning_with, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="low",
                 suggested="gemini",
@@ -770,7 +835,7 @@ class TestRouteTaskSuggestedModel:
 
         # Without suggested_model
         with _mock_all_available():
-            _, _, reasoning_without = await orch._route_task(
+            _, _, reasoning_without, _ar = await orch._route_task(
                 required_caps=["writing"],
                 complexity="low",
                 suggested="gemini",

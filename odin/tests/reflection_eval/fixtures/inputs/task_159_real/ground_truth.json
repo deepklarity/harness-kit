@@ -1,0 +1,11 @@
+{
+  "_fixture_note": "Ground truth supplied by the operator when W3.11 wave-3 closed. Task 159's actual reviewer behavior under both haiku (reports 152, 155, 157) and sonnet (report 161) was a reviewer-failure stream of trust-warning + JSONL noise — see haiku.raw.txt and sonnet.raw.txt in this directory. The human reviewer verdict for the task's substance was NEEDS_WORK (the original FAIL on report 132 was driven by a now-scoped rule, not the work itself).",
+  "verdict": "NEEDS_WORK",
+  "summary": "Substantive work is correct and tested (767 tests pass, harness_usage_status wired into the reflection path), but task-specified proof artifacts were not fully provided and the proof comment was truncated mid-stream.",
+  "fixture_category": "real_capture",
+  "reviewer_selection": {
+    "originally_attempted_with": ["haiku", "sonnet"],
+    "originally_pinned_default": "haiku",
+    "after_3_haiku_failures_pinned_to": "sonnet"
+  }
+}

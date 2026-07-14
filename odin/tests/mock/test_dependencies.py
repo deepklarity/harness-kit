@@ -47,13 +47,31 @@ class TestCheckDeps:
         assert check_deps(t, _make_resolver([dep])) == DepStatus.READY
 
     def test_testing_counts_as_completed(self):
-        """TESTING = reflection passed, unblocks dependents."""
+        """TESTING = dep code has merged to the spec branch; unblocks dependents.
+
+        TESTING is the merge-completed gate: only after the upstream branch
+        is on the spec branch can a dependent safely fork from the spec
+        branch and build against the upstream's code.
+        """
         dep = _task("d1", TaskStatus.TESTING)
         t = _task("a", depends_on=["d1"])
         assert check_deps(t, _make_resolver([dep])) == DepStatus.READY
 
+    def test_done_counts_as_completed(self):
+        """DONE = dep is fully landed; unblocks dependents (final state)."""
+        dep = _task("d1", TaskStatus.DONE)
+        t = _task("a", depends_on=["d1"])
+        assert check_deps(t, _make_resolver([dep])) == DepStatus.READY
+
     def test_review_does_not_count_as_completed(self):
-        """REVIEW = still under reflection, may loop back via NEEDS_WORK."""
+        """REVIEW = agent finished, but code NOT merged → dependent stays WAITING.
+
+        Trust-bucket invariant (fable task 214): REVIEW must NOT satisfy a dep.
+        The dependent worktree forks from the spec branch; if the dep is still
+        in REVIEW the dep code is on a feature branch that has not landed on
+        the spec branch yet, so the dependent would build against missing
+        upstream code.
+        """
         dep = _task("d1", TaskStatus.REVIEW)
         t = _task("a", depends_on=["d1"])
         assert check_deps(t, _make_resolver([dep])) == DepStatus.WAITING
@@ -157,6 +175,25 @@ class TestCheckDeps:
         d3 = _task("d3", TaskStatus.IN_PROGRESS)
         t = _task("a", depends_on=["d1", "d2", "d3"])
         assert check_deps(t, _make_resolver([d1, d2, d3])) == DepStatus.BLOCKED
+
+    def test_dep_review_to_testing_unblocks_dependent(self):
+        """The merge gate: dependent is WAITING in REVIEW, READY on TESTING.
+
+        The whole point of removing REVIEW from COMPLETED_STATUSES: dependents
+        must wait until the upstream merges to the spec branch (TESTING). The
+        dep status flow REVIEW → TESTING must flip the dependent from
+        WAITING to READY at runtime (no caching).
+        """
+        dep = _task("d1", TaskStatus.REVIEW)
+        t = _task("a", depends_on=["d1"])
+        resolver = _make_resolver([dep])
+
+        # Pre-merge: dependent waits.
+        assert check_deps(t, resolver) == DepStatus.WAITING
+
+        # Post-merge: dependent becomes ready.
+        dep.status = TaskStatus.TESTING
+        assert check_deps(t, resolver) == DepStatus.READY
 
     def test_multi_level_chain_recovery(self):
         """A→B→C: A fails, gets fixed, B becomes ready, B completes, C becomes ready."""

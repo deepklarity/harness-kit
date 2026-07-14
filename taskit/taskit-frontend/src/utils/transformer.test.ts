@@ -38,6 +38,14 @@ describe('classifyStatus', () => {
   it('classifies TESTING as testing', () => {
     expect(classifyStatus('TESTING')).toBe('testing')
   })
+
+  it('classifies CANCELED as canceled', () => {
+    expect(classifyStatus('CANCELED')).toBe('canceled')
+  })
+
+  it('classifies canceled (lowercase) as canceled', () => {
+    expect(classifyStatus('canceled')).toBe('canceled')
+  })
 })
 
 describe('getStatusColor', () => {

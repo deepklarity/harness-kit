@@ -64,12 +64,12 @@ class TestExtractAgentText:
         assert success is True
         assert summary == "Assembled final HTML."
 
-    def test_qwen_cli_result_field(self):
-        """Qwen CLI: extract text from {"type":"result","subtype":"success","result":"..."}."""
+    def test_gemini_cli_result_field(self):
+        """Gemini CLI: extract text from {"type":"result","subtype":"success","result":"..."}."""
         lines = [
-            json.dumps({"type": "system", "subtype": "init", "session_id": "abc", "model": "coder-model"}),
+            json.dumps({"type": "system", "subtype": "init", "session_id": "abc", "model": "gemini-2.5-flash"}),
             json.dumps({"type": "result", "subtype": "success", "session_id": "abc",
-                         "result": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated qwen.html.",
+                         "result": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated gemini.html.",
                          "usage": {"input_tokens": 25540, "output_tokens": 276, "total_tokens": 25816},
                          "permission_denials": []}),
         ]
@@ -77,7 +77,7 @@ class TestExtractAgentText:
         agent_text = Orchestrator._extract_agent_text(raw)
         _, success, summary = Orchestrator._parse_envelope(agent_text)
         assert success is True
-        assert summary == "Created qwen.html."
+        assert summary == "Created gemini.html."
 
     def test_multiple_text_events_concatenated(self):
         """Multiple text events are joined with newlines."""
@@ -94,13 +94,13 @@ class TestExtractAgentText:
         assert success is True
         assert summary == "Done."
 
-    def test_qwen_with_warning_prefix(self):
-        """Qwen CLI: non-JSON warning line before JSON events."""
+    def test_gemini_with_warning_prefix(self):
+        """Gemini CLI: non-JSON warning line before JSON events."""
         lines = [
-            "Unsupported Qwen OAuth model 'coder-model', falling back to 'coder-model'.",
-            json.dumps({"type": "system", "subtype": "init", "session_id": "abc", "model": "coder-model"}),
+            "Unsupported Gemini OAuth model 'gemini-2.5-flash', falling back to 'gemini-2.5-flash'.",
+            json.dumps({"type": "system", "subtype": "init", "session_id": "abc", "model": "gemini-2.5-flash"}),
             json.dumps({"type": "result", "subtype": "success", "session_id": "abc",
-                         "result": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated qwen.html.",
+                         "result": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated gemini.html.",
                          "usage": {"total_tokens": 25816},
                          "permission_denials": []}),
         ]
@@ -108,7 +108,7 @@ class TestExtractAgentText:
         agent_text = Orchestrator._extract_agent_text(raw)
         _, success, summary = Orchestrator._parse_envelope(agent_text)
         assert success is True
-        assert summary == "Created qwen.html."
+        assert summary == "Created gemini.html."
 
     def test_pure_plain_text_no_json(self):
         """Plain text with no JSON at all passes through."""
@@ -273,6 +273,32 @@ class TestActorIdentity:
         """When odin has a model (e.g. planning), uses agent format."""
         email = TaskManager._format_actor_email("odin", "sonnet-4-5")
         assert email == "odin+sonnet-4-5@odin.agent"
+
+    def test_model_with_spaces_and_parens_is_email_safe(self):
+        # agy's display model is "Gemini 3.5 Flash (High)" — spaces and parens are
+        # invalid in an email local part and made the execution_result POST 400
+        # ("Enter a valid email address"), failing the task after a successful run
+        # (#125 secondary failure). The email must sanitize to something valid.
+        from django.core.validators import validate_email
+
+        email = TaskManager._format_actor_email("agy", "Gemini 3.5 Flash (High)")
+        validate_email(email)  # raises if invalid
+        assert " " not in email and "(" not in email and ")" not in email
+        assert email.endswith("@odin.agent") and email.startswith("agy+")
+
+    def test_model_with_slash_preserved(self):
+        # slashes are valid in a local part and existing agents rely on it — don't
+        # over-sanitize (glm's "zai-coding-plan/glm-5.2" worked before).
+        from django.core.validators import validate_email
+
+        email = TaskManager._format_actor_email("glm", "zai-coding-plan/glm-5.2")
+        validate_email(email)
+        assert email == "glm+zai-coding-plan/glm-5.2@odin.agent"
+
+    def test_label_keeps_pretty_model_name(self):
+        # the human label keeps the original display string; only the email is slugged.
+        label = TaskManager._format_actor_label("agy", "Gemini 3.5 Flash (High)")
+        assert label == "agy (Gemini 3.5 Flash (High))"
 
     def test_label_with_model(self):
         label = TaskManager._format_actor_label("claude", "sonnet-4-5")

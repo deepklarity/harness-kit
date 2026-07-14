@@ -1,0 +1,62 @@
+You are auditing a task executed by an AI agent.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.**
+
+## TASK UNDER REVIEW
+Title: Quota failover verifies ground truth before switching providers (W3.11)
+Status: REVIEW
+Agent: claude (claude-haiku-4-5)
+Duration: 120000ms | Tokens: 18,000
+
+## [CTX:description] Task Description
+Add a quota-failover reassignment step to TaskIt's reflection flow. Before
+reassigning an agent based on a 429, use harness_usage_status to check
+ground-truth quota usage at the 95% threshold. Genuine exhaustion
+reassigns to a same-cost-tier fallback; 429-with-headroom backs off the
+same agent.
+
+## [CTX:execution_result] Execution Output
+The agent ran the diff, all unit tests passed, the harness_usage_status
+module is wired into views.py:_maybe_reassign_on_quota_failure. Suite output:
+`767 passed in 4.733s` (with the new test class included).
+
+## [CTX:comments] Comments & Proof
+- [status_update] Did the work. Tests pass.
+- [proof] 767 tests pass. Cost per task unchanged. Verification:
+  `python manage.py test` (full output in `.proof/backend_tests.txt`).
+
+## [CTX:dependencies] Dependent Tasks
+- Task #155: Quota failover as merged in **W3.11**: detection → ground-truth
+  check via `harness_usage_status` (95% threshold) → 429-with-headroom
+  backs off the *same* agent, genuine exhaustion reassigns to a
+  same-cost-tier fallback.
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers.
+
+### Required JSON contract
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason.",
+  "slop_detection": "None.",
+  "improvements": "None.",
+  "agent_optimization": "None.",
+  "quota_failure": "None.",
+  "fix_list": []
+}
+```
+
+### Verdict rubric
+
+- PASS — every acceptance criterion verifiably met, code correct, builds/runs.
+- NEEDS_WORK — substantially correct but has a fixable gap.
+- FAIL — work is wrong, unsafe, or unverifiable.

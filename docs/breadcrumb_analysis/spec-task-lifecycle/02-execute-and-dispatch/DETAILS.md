@@ -51,7 +51,7 @@ There are TWO independent dependency checks. Both must use the same
 
 Key logic:
 - Always queries DB at runtime — never cached. This enables recovery: fix a FAILED upstream, dependent auto-unblocks on next poll
-- `COMPLETED_STATUSES = {DONE, TESTING}` (line 21). REVIEW is excluded — task is still under reflection and may loop back to IN_PROGRESS via NEEDS_WORK
+- `COMPLETED_STATUSES = {DONE, TESTING}` (dependencies.py:36) — REVIEW is excluded (fable task 214). The dependent worktree forks from the spec branch, so the dep must already be merged (TESTING) before dependents can safely build against it
 - Algorithm: any FAILED → BLOCKED, all completed → READY, else → WAITING
 
 Data in: `task.depends_on` (list of task IDs)
@@ -66,7 +66,7 @@ Data out: `DepStatus.READY | WAITING | BLOCKED`
 
 Key logic:
 - Same algorithm as TaskIt's check but operates on odin's Pydantic Task model
-- `COMPLETED_STATUSES = {DONE, TESTING}` — must match TaskIt's definition
+- `COMPLETED_STATUSES = {DONE, TESTING}` (dependencies.py:35) — must match TaskIt's definition; REVIEW is intentionally excluded (fable task 214)
 - If these diverge: TaskIt dispatches the task (EXECUTING) but odin skips it (exit 0, no output), DAG executor sets REVIEW, reflection sees no implementation → FAIL
 
 DIVERGENCE RISK: These two files define COMPLETED_STATUSES independently.
@@ -113,7 +113,7 @@ Key logic:
   2. **Reflection feedback** (lines 674-677): `_build_reflection_context()` scans for latest `NEEDS_WORK` reflection comment. **Gap**: Only NEEDS_WORK verdicts are injected — FAIL verdicts are skipped even if task is manually retried.
   3. **Self-context** (lines 680-682): `_build_self_context()` finds latest `summary` comment + human notes posted after it. **Gap**: Returns empty string if no summary exists (common on first retry). Status_update, proof, and agent execution output comments are never included.
 
-**Known gap**: On re-execution after reflection, the agent often receives only the original task description with no history of what was attempted, what feedback was given, or what proof was submitted. See `docs/solutions/architecture/exec-task-context-injection-gap-20260227.md` for full analysis and fix plan.
+**Known gap**: On re-execution after reflection, the agent often receives only the original task description with no history of what was attempted, what feedback was given, or what proof was submitted.
 
 Side effects:
 - Updates task status to EXECUTING (in `_execute_task`)

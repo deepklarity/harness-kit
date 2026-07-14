@@ -20,10 +20,16 @@ tests/
 
   unit/                    # Pure logic — no I/O, no mocks
     test_config.py         # Config loading, hierarchy, env var substitution
+    test_doctor.py         # `odin doctor`: service/agent/sandbox/host probes, capability matrix
     test_cost_estimator.py # Pricing table loading, cost estimation from tokens
     test_dag.py            # DAG validation (cycle detection), wave grouping, envelope parsing
+    test_merge_agent.py    # Merge-conflict classifier, in-worktree resolution, comment formatters, additive-non-overlapping auto-resolve gate (task 254)
     test_reflection.py     # Reflection prompt builder and report parser
+    test_agent_routing.py  # Pure suggester: cheapest-capable ranks, escalation, thin-history fallback
+    test_route_task_suggester.py # Orchestrator wiring of the suggester into _route_task tier distribution
+    test_fetch_agent_stats.py # TaskIt client for /boards/{id}/agent-stats/ REST endpoint
     test_routing.py        # Agent routing: suggestion respected/fallback, quota awareness
+    test_self_audit_script.py # scripts/self_audit_diff.sh replay vs task-170 fixture (local git)
     test_specs.py          # derive_spec_status, spec_short_tag
 
   disk/                    # Disk I/O only — no network, no subprocesses
@@ -31,12 +37,14 @@ tests/
     test_logging.py        # StructuredLogger JSONL output
     test_specs_io.py       # SpecStore CRUD, multi-spec coexistence
     test_taskit.py         # TaskManager CRUD, lifecycle, prefix resolution, filtering
+    test_merge_agent_disk.py # Real-git replay of task 249's additive conflict (auto-merges) + modify-vs-add (still parks)
 
   mock/                    # Mocked subprocesses/HTTP — no real services
     test_comments.py       # Comment bridge, actor identity, metrics composition
     test_context_injection.py # Upstream context injection in exec_task()
     test_e2e_comments.py   # End-to-end comment pipeline (mock harness → TaskIt)
     test_execution_logging.py # Execution I/O debug comments
+    test_harness_subprocess_errors.py # Harness timeout, non-zero exit, HTTP errors (all 6 harnesses)
     test_mock_harness.py   # Mock harness for testing without real LLMs
     test_mock_mode.py      # Mock mode: no backend writes, EXECUTING status transitions
     test_question_poll_roundtrip.py # Question→poll→reply cycle (mocked HTTP)
@@ -48,7 +56,7 @@ tests/
 
   integration/             # Real CLI agents required — excluded by default
     conftest.py            # Integration-specific fixtures (work_dir, _make_config)
-    test_real.py           # Real CLI agent integration tests (gemini, qwen, codex)
+    test_real.py           # Real CLI agent integration tests (gemini, codex)
 ```
 
 ---
@@ -59,14 +67,16 @@ tests/
 
 | Test | What it checks |
 |---|---|
-| `TestDefaultConfig::test_default_config_has_agents` | Built-in defaults include claude, gemini, qwen |
+| `TestDefaultConfig::test_default_config_has_agents` | Built-in defaults include claude, gemini |
 | `TestDefaultConfig::test_default_config_base_agent` | Default base agent is "claude" |
 | `TestDefaultConfig::test_default_config_model_routing` | Default config has ModelRoute entries |
 | `TestDefaultConfig::test_default_config_source` | config_source field set from source argument |
-| `TestDefaultConfig::test_default_agent_cost_tiers` | Claude=HIGH, gemini/qwen=LOW |
+| `TestDefaultConfig::test_default_agent_cost_tiers` | Claude=HIGH, gemini=LOW |
 | `TestDefaultConfig::test_default_cli_agents_enabled` | minimax and glm agents enabled by default |
 | `TestYAMLLoading::test_load_from_yaml` | YAML with base_agent and agents loads correctly |
 | `TestYAMLLoading::test_empty_yaml_returns_defaults` | Empty YAML falls back to defaults |
+| `TestYAMLLoading::test_max_turns_defaults_none` | Unset max_turns leaves the agent loop unbounded |
+| `TestYAMLLoading::test_max_turns_parsed_from_yaml` | max_turns step budget parsed from config |
 | `TestYAMLLoading::test_unknown_keys_ignored` | Unknown keys stored in extras, not rejected |
 | `TestConfigHierarchy::test_explicit_path_takes_priority` | --config path beats local config |
 | `TestConfigHierarchy::test_no_config_uses_defaults` | No config files returns defaults |
@@ -96,6 +106,20 @@ tests/
 | `TestEstimateCost::test_partial_null_tokens` | One None token → None |
 | `TestEstimateCost::test_large_token_count` | 100k/50k on gemini-2.5-flash → $0.045 |
 
+### test_project_notes.py — Durable per-project notes reader
+
+| Test | What it checks |
+|---|---|
+| `TestReadProjectNotes::test_returns_empty_when_no_working_dir` | Empty string when no working dir |
+| `TestReadProjectNotes::test_returns_empty_when_file_absent` | Empty when PROJECT_NOTES.md missing |
+| `TestReadProjectNotes::test_reads_default_path` | Reads default PROJECT_NOTES.md at project root |
+| `TestReadProjectNotes::test_respects_configured_relative_path` | Honors config-relative path (e.g. docs/PROJECT_NOTES.md) |
+| `TestReadProjectNotes::test_returns_empty_for_empty_file` | Whitespace-only file yields empty |
+| `TestReadProjectNotes::test_strips_surrounding_whitespace` | Leading/trailing whitespace stripped |
+| `TestReadProjectNotes::test_caps_at_max_chars_keeping_newest` | Over-cap content keeps newest entries (bottom) |
+| `TestReadProjectNotes::test_truncation_adds_consolidate_note` | Truncation prepends a "consolidate" note |
+| `TestReadProjectNotes::test_under_cap_passes_through_unchanged` | Under-cap content passes through verbatim |
+
 ### test_dag.py — DAG validation and wave grouping
 
 | Test | What it checks |
@@ -119,6 +143,89 @@ tests/
 | `TestParseEnvelope::test_wrap_prompt_with_mcp_includes_mcp_section` | MCP section injected with task ID and tool names |
 | `TestParseEnvelope::test_wrap_prompt_mcp_section_between_prompt_and_envelope` | MCP section ordered between prompt and ODIN-STATUS |
 | `TestParseEnvelope::test_wrap_prompt_with_working_dir_and_mcp` | Working dir + MCP + envelope compose together |
+| `TestParseEnvelope::test_wrap_prompt_working_dir_includes_prebaked_python_env_hint` | Pre-baked python env hint injected with working_dir (forbids venv/pip for suites) |
+| `TestParseEnvelope::test_wrap_prompt_no_env_hint_without_working_dir` | No env hint when working_dir absent |
+| `TestOrientationBlock::test_efficiency_block_always_present_by_default` | Tool-batching/efficiency guidance rides on every wrapped prompt |
+| `TestOrientationBlock::test_orient_false_omits_block` | orient=False restores the bare pre-fix prompt |
+| `TestOrientationBlock::test_orientation_references_claude_md_when_present` | CLAUDE.md surfaced when it exists in working dir |
+| `TestOrientationBlock::test_orientation_references_breadcrumb_index_when_present` | Breadcrumb index surfaced only when it exists |
+| `TestOrientationBlock::test_no_orientation_section_when_docs_absent` | Never points agent at docs that aren't there |
+| `TestOrientationBlock::test_orientation_ordered_before_task_and_envelope` | Orientation precedes task text and ODIN-STATUS |
+| `TestSelfAuditGate::test_gate_section_always_present` | Pre-completion self-audit gate rides on every wrapped prompt (no MCP/working-dir needed) |
+| `TestSelfAuditGate::test_gate_present_with_mcp_and_working_dir` | Gate survives full assembly (preamble + MCP + envelope) |
+| `TestSelfAuditGate::test_gate_names_both_defect_classes` | Gate names duplicate definitions + commented-out dead code (task-170 failure modes) |
+| `TestSelfAuditGate::test_gate_references_mechanical_assist_script` | Gate points at scripts/self_audit_diff.sh |
+| `TestSelfAuditGate::test_gate_runs_before_odin_status` | Gate heading says it runs BEFORE ODIN-STATUS |
+| `TestSelfAuditGate::test_gate_ordered_after_task_and_before_envelope` | Gate sits after task body, before the ODIN-STATUS envelope separator |
+| `TestSelfAuditGate::test_gate_ordered_before_envelope_with_mcp` | Ordering holds across the MCP-laden assembly |
+| `TestProjectNotesInjection::test_omitted_when_no_notes` | No notes section when project_notes is empty |
+| `TestProjectNotesInjection::test_present_when_notes_provided` | Notes injected when provided |
+| `TestProjectNotesInjection::test_section_is_labeled` | Notes section carries a `## Project Notes` label |
+| `TestProjectNotesInjection::test_notes_placed_after_brief_before_envelope` | Notes sit after the brief, before ODIN-STATUS |
+| `TestProjectNotesInjection::test_notes_before_mcp_section` | Notes precede the MCP/proof block |
+| `TestProjectNotesInjection::test_notes_compose_with_working_dir` | Notes compose with working_dir preamble |
+
+### test_self_audit_script.py — scripts/self_audit_diff.sh replay against task-170 fixture
+
+| Test | What it checks |
+|---|---|
+| `TestScriptExists::test_script_is_present_and_executable` | The mechanical assist script exists on disk |
+| `TestReplayTask170Bad::test_exits_nonzero` | Replaying fe766f45 (known-bad) exits 1 — issues found |
+| `TestReplayTask170Bad::test_flags_duplicate_extract_agent` | Flags the duplicate `_extract_agent` definition (headline task-170 defect) |
+| `TestReplayTask170Bad::test_flags_commented_out_code` | Flags the commented-out contextStats dead-code blocks |
+| `TestReplayTask170Bad::test_machine_scannable_summary_line` | Last line is `SELF_AUDIT: duplicates=N commented_blocks=N ...` |
+| `TestReplayTask170Clean::test_exits_zero` | Replaying e0a8e187 (cleanup) exits 0 — no false positives |
+| `TestReplayTask170Clean::test_does_not_flag_extract_agent` | `_extract_agent` not flagged after cleanup |
+| `TestUsageErrors::test_missing_commit_exits_two` | Bad ref → exit 2 (usage error distinct from 'issues found') |
+
+### test_agent_routing.py — Pure suggester
+
+The pure suggestion logic that ranks viable candidates using measured
+history. Independent of Django / HTTP / the orchestrator. Pairs with
+`agent_routing.suggest_routing()` consumed by `_route_task` via
+`_pick_from_tier_candidates`.
+
+| Test | What it checks |
+|---|---|
+| `TestSuggestRoutingCheapestClearsThreshold::test_clear_winner_in_cheapest_tier` | Cheap-tier agent with high success_rate wins |
+| `TestSuggestRoutingCheapestClearsThreshold::test_lower_median_cost_wins_among_qualifying_candidates` | Tiebreaker = lower median_tokens |
+| `TestSuggestRoutingEscalation::test_no_cheapest_tier_qualifier_escalates` | Cross-tier, only expensive clears threshold |
+| `TestSuggestRoutingEscalation::test_multi_tier_partial_qualifiers_promote_cheapest` | Cheapest qualifying tier wins |
+| `TestSuggestRoutingEscalation::test_no_qualifier_anywhere_returns_static` | StaticFallback when nobody qualifies |
+| `TestSuggestRoutingThinHistory::test_all_candidates_below_min_samples_static` | < min_samples → static |
+| `TestSuggestRoutingThinHistory::test_empty_history_static` | {} → static |
+| `TestSuggestRoutingThinHistory::test_partial_thin_only_eligible_agents_count` | Thin agents excluded from rank, eligible survivors compete |
+| `TestSuggestRoutingThresholdDisqualification::test_below_threshold_disqualified` | Below threshold dropped from rank |
+| `TestSuggestRoutingThresholdDisqualification::test_threshold_exact_boundary_passes` | success_rate >= threshold is inclusive |
+| `TestDecisionShape::test_history_driven_decision_records_inputs` | RoutingDecision records threshold/min_samples/reason |
+| `TestDecisionShape::test_static_fallback_records_inputs` | StaticFallback records threshold/min_samples/reason |
+| `TestDecisionShape::test_history_driving_inputs_dataclass` | SuggestionInput dataclass round-trip |
+
+### test_route_task_suggester.py — Orchestrator + suggester integration
+
+The orchestrator's tier-distribution phase replaced random.choice with
+the history-driven suggester. These tests pin the wiring: suggester
+win/lose paths, planner-override semantics, defensive degradation.
+
+| Test | What it checks |
+|---|---|
+| `TestRouteTaskHistoryDriven::test_clear_winner_in_cheapest_tier_picked` | Suggester beats random.distribute |
+| `TestRouteTaskHistoryDriven::test_static_config_keeps_higher_cost_winner_in_cheap_tier` | Lower median_tokens within qualifiers |
+| `TestRouteTaskHistoryDriven::test_cheap_tier_clear_winner_picked_consistently` | Deterministic with thick history |
+| `TestRouteTaskThinHistoryFallback::test_thin_history_distributes_across_cheap_tier` | Static fallback path still randomizes |
+| `TestRouteTaskThinHistoryFallback::test_thin_history_reasoning_marks_static` | Reasoning states the rule that fired |
+| `TestRouteTaskSuggestionOverridesSuggester::test_suggested_agent_used_even_if_history_disagrees` | Planner's suggested_agent overrides history |
+| `TestRouteTaskFetchesAgentStats::test_fetches_stats_once_per_route_call` | Fetcher is invoked per route call |
+| `TestRouteTaskFetchesAgentStats::test_exception_in_fetch_does_not_break_routing` | Default First: backend blip → static fallback |
+
+### test_fetch_agent_stats.py — TaskIt client for /boards/{id}/agent-stats/
+
+| Test | What it checks |
+|---|---|
+| `test_fetch_agent_stats_parses_rows` | URL + parse happy path |
+| `test_fetch_agent_stats_forwards_spec_id_param` | ?spec= forwarded as query param |
+| `test_fetch_agent_stats_exception_returns_empty` | Backend error → empty rows |
+| `test_fetch_agent_stats_non_dict_payload_returns_empty` | Garbage JSON → empty rows |
 
 ### test_routing.py — Agent routing and fallback
 
@@ -145,12 +252,17 @@ tests/
 | `TestClaudeHarnessMcpConfig::test_no_mcp_config_no_flag` | No flag without config |
 | `TestClaudeHarnessMcpConfig::test_mcp_config_in_interactive_command` | Interactive mode gets MCP flag |
 | `TestClaudeHarnessMcpConfig::test_mcp_config_with_model` | MCP + model flags coexist |
+| `TestClaudeHarnessMcpConfig::test_max_turns_flag_added_when_set` | Step budget becomes --max-turns N |
+| `TestClaudeHarnessMcpConfig::test_no_max_turns_flag_when_absent` | No --max-turns unless a budget is set |
+| `TestClaudeHarnessMcpConfig::test_no_max_turns_flag_when_zero_or_none` | 0/None treated as unbounded |
 | `TestGeminiHarnessMcpConfig::test_adds_mcp_config_flag` | Gemini adds --mcp-config flag |
 | `TestGeminiHarnessMcpConfig::test_no_mcp_config_no_flag` | No flag without config |
 | `TestGeminiHarnessMcpConfig::test_mcp_config_in_interactive_command` | Interactive mode gets MCP flag |
-| `TestQwenHarnessMcpConfig::test_adds_mcp_config_flag` | Qwen adds --mcp-config flag |
-| `TestQwenHarnessMcpConfig::test_no_mcp_config_no_flag` | No flag without config |
 | `TestCodexHarnessNoMcp::test_no_mcp_flag_even_with_config` | Codex ignores MCP config |
+| `TestCodexChromeDevtoolsFlags::test_chrome_devtools_browser_url_flags` | Codex emits `--browserUrl` (host CDP), drops launch flags |
+| `TestMicrosandboxBrowserUrl::test_helper_default_when_unset` | `_microsandbox_browser_url` default is host :9222 |
+| `TestMicrosandboxBrowserUrl::test_helper_honors_override` | `chrome_devtools.browser_url` override wins |
+| `TestMicrosandboxBrowserUrl::test_generated_claude_config_has_browser_url` | Generated claude config uses `--browserUrl`, no launch flags |
 | `TestMcpConfigGeneration::test_generates_valid_json` | Config is valid JSON |
 | `TestMcpConfigGeneration::test_config_has_correct_env_vars` | Env vars match orchestrator state |
 | `TestMcpConfigGeneration::test_config_command_is_taskit_mcp` | Command is taskit-mcp |
@@ -192,7 +304,6 @@ tests/
 | `TestServerFragmentClaude::test_command_is_npx` | Command is npx |
 | `TestServerFragmentGemini::test_has_trust` | Gemini has trust:true |
 | `TestServerFragmentGemini::test_command_is_npx` | Command is npx |
-| `TestServerFragmentQwen::test_has_trust` | Qwen has trust:true |
 | `TestServerFragmentCodex::test_returns_flag_list` | Returns -c flag list |
 | `TestServerFragmentCodex::test_contains_mobile_command` | Contains mobile command |
 | `TestServerFragmentOpencode::test_structure` | type:local, command array |
@@ -269,6 +380,7 @@ tests/
 | Test | What it checks |
 |---|---|
 | `TestBuildReflectionPrompt::test_prompt_contains_readonly_instruction` | READ-ONLY mode instruction present |
+| `TestBuildReflectionPrompt::test_prompt_contains_efficiency_guidance` | Batching/no-re-read efficiency lever injected into audit prompt |
 | `TestBuildReflectionPrompt::test_prompt_includes_task_title_and_description` | Task title and description in prompt |
 | `TestBuildReflectionPrompt::test_prompt_includes_execution_output` | Execution output section populated |
 | `TestBuildReflectionPrompt::test_prompt_includes_dependent_tasks` | Dependent tasks listed |
@@ -276,6 +388,7 @@ tests/
 | `TestBuildReflectionPrompt::test_prompt_omits_custom_prompt_section_when_empty` | No ADDITIONAL INSTRUCTIONS when empty |
 | `TestBuildReflectionPrompt::test_prompt_includes_agent_and_model_info` | Agent and model in context |
 | `TestBuildReflectionPrompt::test_prompt_includes_section_headers` | All 5 report section headers present |
+| `TestBuildReflectionPrompt::test_prompt_guides_durable_project_notes_capture` | Reviewer checks durable facts were appended to PROJECT_NOTES.md (improvement, not verdict) |
 | `TestParseReflectionReport::test_parse_extracts_all_five_sections` | All sections extracted from well-formed output |
 | `TestParseReflectionReport::test_parse_extracts_verdict_pass` | PASS verdict parsed |
 | `TestParseReflectionReport::test_parse_extracts_verdict_needs_work` | NEEDS_WORK verdict parsed |
@@ -284,6 +397,63 @@ tests/
 | `TestParseReflectionReport::test_parse_handles_missing_sections_gracefully` | Missing sections → empty strings |
 | `TestParseReflectionReport::test_parse_handles_empty_output` | Empty string → all empty fields |
 | `TestParseReflectionReport::test_parse_handles_no_headers` | Plain text → empty structured fields |
+| `TestStripTrustWarning::test_strips_trust_warning_line` | Claude CLI trust warning removed from output |
+| `TestStripTrustWarning::test_preserves_text_without_warning` | No-op when warning absent |
+| `TestStripTrustWarning::test_strips_warning_mid_stream` | Warning stripped mid-JSONL stream |
+| `TestParseJsonReviewBlock::test_extracts_json_fenced_block` | ```json ... ``` fence extracted and parsed |
+| `TestParseJsonReviewBlock::test_extracts_bare_fenced_block` | ``` ... ``` (no lang) fence also works |
+| `TestParseJsonReviewBlock::test_extracts_block_with_surrounding_markdown` | Fence found in mixed prose |
+| `TestParseJsonReviewBlock::test_returns_none_for_no_fence` | No fence → None (caller falls through) |
+| `TestParseJsonReviewBlock::test_returns_none_for_invalid_json` | Malformed JSON → None |
+| `TestParseJsonReviewBlock::test_returns_none_for_empty_fence` | Empty fence → None |
+| `TestParseJsonReviewBlock::test_picks_last_block_when_multiple` | Last parseable JSON wins (stray example ignored) |
+| `TestParseJsonReviewBlock::test_strips_code_fence_inside_json_string` | ``` inside JSON string doesn't break fence parser |
+| `TestParseReflectionJsonContract::test_json_only_no_markdown` | JSON-only review populates all fields |
+| `TestParseReflectionJsonContract::test_json_with_markdown_rendering_after` | JSON wins over following markdown sections |
+| `TestParseReflectionJsonContract::test_json_with_minimal_fields` | Minimal JSON (verdict+summary) parses; missing → "" |
+| `TestParseReflectionJsonContract::test_json_with_unrecognized_verdict_value` | JSON verdict "MAYBE" → ERROR |
+| `TestParseReflectionJsonContract::test_json_with_non_string_verdict` | JSON verdict=42 → ERROR |
+| `TestParseReflectionJsonContract::test_json_takes_precedence_over_markdown_sections` | JSON is source of truth when both present |
+| `TestCapturedTask159BadOutputs::test_haiku_trust_warning_plus_jsonl_noise_errors` | Task 159 haiku noise → ERROR (not contentless NEEDS_WORK) |
+| `TestCapturedTask159BadOutputs::test_sonnet_trust_warning_only_errors` | Task 159 sonnet trust warning only → ERROR |
+| `TestCapturedTask159BadOutputs::test_trust_warning_alone_with_no_keyword_errors` | Init JSONL alone, no verdict → ERROR with raw head |
+| `TestBareKeywordLaunderingHardErrors::test_bare_pass_alone_is_honored` | Bare "PASS" → PASS (safe lenient) |
+| `TestBareKeywordLaunderingHardErrors::test_bare_needs_work_alone_errors` | Bare "NEEDS_WORK" → ERROR (no fix list = no rework) |
+| `TestBareKeywordLaunderingHardErrors::test_bare_fail_alone_errors` | Bare "FAIL" → ERROR (same gate) |
+| `TestBareKeywordLaunderingHardErrors::test_bare_keyword_buried_in_unrelated_text_errors` | "rate_limit_failure" word → ERROR |
+| `TestBareKeywordLaunderingHardErrors::test_bare_pass_buried_in_unrelated_text_is_honored` | PASS buried in noise still honored |
+| `TestBareKeywordLaunderingHardErrors::test_error_includes_raw_head_for_debuggability` | ERROR summary embeds raw head for operator triage |
+| `TestPromptRequiresJsonContract::test_prompt_requires_fenced_json_block` | Prompt names `verdict` and `fix_list` keys |
+| `TestPromptRequiresJsonContract::test_prompt_warns_against_bare_keyword` | Prompt warns against bare keyword laundering |
+| `TestPromptRequiresJsonContract::test_prompt_explains_markdown_rendering_is_optional` | Prompt says markdown rendering is optional |
+
+### test_claude_harness.py — claude CLI invocation contract
+
+| Test | What it checks |
+|---|---|
+| `TestClaudeRegistration::test_registered_in_registry` | `claude` harness discoverable |
+| `TestClaudeRegistration::test_registry_class_is_claude_harness` | Registry class is `ClaudeHarness` |
+| `TestClaudeBuildExecuteCommand::test_uses_configured_cli_binary` | First arg is `claude` (or override) |
+| `TestClaudeBuildExecuteCommand::test_prompt_passed_via_dash_p` | `-p <prompt>` is in the command |
+| `TestClaudeBuildExecuteCommand::test_stream_json_output_format` | `--output-format stream-json` is set |
+| `TestClaudeBuildExecuteCommand::test_no_setting_sources_by_default` | Regular task execution does NOT emit `--setting-sources` — preserves project-level `.claude/settings.local.json` safety hooks (task 165 review feedback: prior version disabled safety hooks for every regular task) |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_from_context_emitted` | Reviewer sets `context["setting_sources"]="user"` → `--setting-sources user` emitted |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_comma_list_preserved` | `context["setting_sources"]="user,project"` → verbatim forwarded |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_false_disables_flag` | Explicit `False` opts out |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_none_disables_flag` | `None` opts out |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_empty_string_disables_flag` | Empty string opts out |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_non_string_disables_flag` | Non-string value (list/dict/int) opts out |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_already_in_execute_args_idempotent` | Operator-supplied `--setting-sources` in `execute_args` wins; no duplicate flag |
+| `TestClaudeBuildExecuteCommand::test_model_appended_when_in_context` | `--model` only when context provides one |
+| `TestClaudeBuildExecuteCommand::test_no_model_flag_when_not_in_context` | No `--model` flag without context |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_emitted_with_model` | Reviewer path: `--setting-sources` and `--model` coexist |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_strip_whitespace` | Leading/trailing whitespace stripped |
+| `TestClaudeBuildExecuteCommand::test_setting_sources_whitespace_only_no_flag` | Whitespace-only treated as no flag |
+| `TestClaudeBuildInteractiveCommand::test_no_setting_sources_by_default` | Interactive path default: no `--setting-sources` |
+| `TestClaudeBuildInteractiveCommand::test_setting_sources_from_context_emitted` | Interactive path honors context flag |
+| `TestClaudeBuildInteractiveCommand::test_setting_sources_already_in_execute_args_idempotent` | Interactive path: operator's flag wins |
+| `TestClaudeBuildInteractiveCommand::test_model_passes_through` | Interactive path: `--model` from context |
+| `TestClaudeBuildInteractiveCommand::test_setting_sources_with_model` | Interactive path: parity with one-shot |
 
 ### test_specs.py — Spec pure functions
 
@@ -305,6 +475,53 @@ tests/
 ---
 
 ## Disk Tests (disk/)
+
+### test_warm_start.py — Task-brief → doc suggestions injected into the prompt `[disk]`
+
+| Test | What it checks |
+|---|---|
+| `TestBriefMatching::test_planning_failed_brief_picks_planning_flow_debug` | A planning-decomposition brief's top match is `planning-flow/.../DEBUG.md` |
+| `TestBriefMatching::test_token_count_brief_picks_trace_data_pipeline` | A trace/token brief matches the `trace-data-pipeline` breadcrumb |
+| `TestBriefMatching::test_worktree_isolation_brief_picks_worktree_breadcrumb` | A merge-conflict brief matches the `git-worktree-isolation` breadcrumb |
+| `TestBriefMatching::test_known_similar_outranks_unrelated` | Parity with twins scorer: topically-close doc outranks unrelated |
+| `TestNoMatch::test_nonsense_brief_yields_nothing` | A gibberish brief returns no suggestions |
+| `TestNoMatch::test_no_section_rendered_on_no_match` | `format_warm_start_section([])` is the empty string |
+| `TestNoMatch::test_missing_docs_root_returns_empty` | Missing docs dir → `[]` |
+| `TestNoMatch::test_none_docs_root_returns_empty` | `None` docs root → `[]` |
+| `TestOutputShape::test_caps_at_three` | Never more than `MAX_SUGGESTIONS` |
+| `TestOutputShape::test_paths_are_repo_relative` | All emitted paths start with `docs/` and carry a reason |
+| `TestOutputShape::test_results_sorted_descending` | Suggestions sorted by score, descending |
+| `TestOutputShape::test_format_section_renders_bullets` | Section header + every path rendered as bullets |
+| `TestMetadataRecording::test_records_suggestions_onto_task_metadata` | `_record_warm_start_docs` writes `metadata["warm_start_docs"]` |
+| `TestMetadataRecording::test_skipped_under_mock` | No metadata write under `mock=True` |
+| `TestMetadataRecording::test_empty_suggestions_writes_nothing` | Empty suggestion list writes nothing |
+| `TestMetadataRecording::test_end_to_end_suggest_then_record` | suggest → record round-trip on a real-shaped brief |
+
+### test_warm_start_corpus.py — Broadened corpus + configurable floor (task #242) `[disk]`
+
+| Test | What it checks |
+|---|---|
+| `TestBreadcrumbFlowHeadings::test_flow_file_heading_enriches_match` | A brief phrased after a FLOW.md summary matches that FLOW.md (file's own headings indexed) |
+| `TestBreadcrumbFlowHeadings::test_unindexed_details_file_is_discovered` | A DETAILS.md referenced nowhere in _INDEX is found by the file walk |
+| `TestBreadcrumbFlowHeadings::test_breadcrumb_paths_repo_relative` | Breadcrumb paths start with `docs/breadcrumb_analysis/` |
+| `TestWikiToc::test_wiki_entry_matched_on_toc_summary` | A wiki TOC one-liner matches on its title/summary/tags |
+| `TestWikiToc::test_wiki_paths_repo_relative` | Wiki paths start with `docs/wiki/` and carry a reason |
+| `TestPatternsH2::test_pattern_h2_heading_text_indexed` | A brief matching an H2-only term reaches the pattern |
+| `TestFloorConfig::test_min_score_override_respected` | Lower floor surfaces ≥ matches than a 0.99 floor; default omitted |
+| `TestFloorConfig::test_default_floor_uses_module_constant` | Omitting min_score falls back to MIN_SCORE (backward compatible) |
+| `TestFloorConfig::test_all_scores_unfiltered` | `score_all` returns every entry sorted desc, below the default floor |
+
+### test_warm_start_replay.py — Offline replay harness for floor tuning (task #242) `[disk]`
+
+| Test | What it checks |
+|---|---|
+| `TestCoverageCurve::test_curve_is_monotonic_nonincreasing` | Coverage never rises as the floor goes up |
+| `TestCoverageCurve::test_zero_floor_matches_everything_with_overlap` | Floor 0 matches briefs sharing tokens; gibberish still matches nothing |
+| `TestCoverageCurve::test_high_floor_matches_subset_of_low` | A 0.5 floor matches ≤ a 0.0 floor |
+| `TestCoverageCurve::test_results_carry_top_match` | Each result has its top suggestion; no-overlap briefs have `top=None` |
+| `TestCoverageCurve::test_relevance_sample_picks_k` | `relevance_sample` returns up to k matched briefs with reasons |
+| `TestCoverageCurve::test_empty_briefs_curve` | Empty briefs → zero coverage, no crash |
+
 
 ### test_cost_tracking.py — Cost persistence and summarization
 
@@ -386,6 +603,28 @@ tests/
 | `TestReadyTasks::test_dep_blocks_task` | Unmet dep blocks task |
 | `TestReadyTasks::test_dep_satisfied_unblocks_task` | Completing dep unblocks |
 | `TestReadyTasks::test_backlog_tasks_not_ready` | Unassigned not ready |
+
+### test_worktree_disk.py — WorktreeManager merge lifecycle (real git)
+
+| Test | What it checks |
+|---|---|
+| `TestProvenanceTrailers::test_auto_commit_message_has_trailers` | Auto-commit carries Task-Id/Spec-Id trailers |
+| `TestProvenanceTrailers::test_merge_commit_message_has_trailers` | Merge commit carries Task-Id/Spec-Id trailers |
+| `TestProvenanceTrailers::test_trailers_extractable_by_key` | `git log --format=%(trailers:key=…)` returns the value |
+| `TestProvenanceTrailers::test_trailers_present_without_title` | Merge with no title still gets trailers |
+
+### test_why.py — `testing_tools/why.py` provenance walker
+
+| Test | What it checks |
+|---|---|
+| `TestWhySingleLine::test_line_with_trailers` | `file:LINE` resolves blame → Task-Id/Spec-Id |
+| `TestWhySingleLine::test_line_without_trailers` | Trailerless commit degrades gracefully (—) |
+| `TestWhyRange::test_range_resolves_each_line` | `file:START-END` resolves the span |
+| `TestWhyRange::test_comma_lines` | `file:N,M` resolves each listed line |
+| `TestWhyFileSummary::test_whole_file_summary` | Bare `file` shows distinct commit provenances |
+| `TestWhyErrors::test_nonexistent_file` | Missing file exits non-zero |
+| `TestWhyErrors::test_nonexistent_line` | Bad line exits non-zero, no traceback |
+| `TestWhyErrors::test_no_arg_prints_usage` | No arg prints usage hint |
 
 ---
 
@@ -562,6 +801,21 @@ tests/
 | `TestExecutionDebugComments::test_execution_result_includes_effective_input` | effective_input in execution_result payload |
 | `TestExecutionDebugComments::test_debug_output_truncated_at_8000` | Debug content truncated at 8000 chars |
 
+### test_harness_subprocess_errors.py — Harness subprocess error paths (all 6 harnesses)
+
+| Test | What it checks |
+|---|---|
+| `TestHarnessTimeoutKillsSubprocess::test_timeout_kills_subprocess_and_returns_failed` | Timeout context kills subprocess via terminate_subprocess() → TaskResult.success=False, error contains "timed out" (x6 harnesses) |
+| `TestHarnessTimeoutKillsSubprocess::test_timeout_kills_subprocess_when_communicate_times_out` | asyncio.TimeoutError from wait_for → subprocess killed, TaskResult.success=False (x6 harnesses) |
+| `TestHarnessNonZeroExit::test_non_zero_exit_returns_failed_with_stderr` | returncode=1 → TaskResult.success=False, error=stderr (x6 harnesses) |
+| `TestHarnessNonZeroExit::test_stderr_only_output_returns_failed` | returncode=2 with stderr-only → TaskResult.success=False (x6 harnesses) |
+| `TestHarnessNonZeroExit::test_non_zero_exit_with_partial_stdout_returns_failed` | returncode=137 (OOM kill) with partial stdout → success=False (x6 harnesses) |
+| `TestApiHarnessHttpErrors::test_http_500_server_error_returns_failed` | HTTP 500 from CLI → success=False (minimax, glm) |
+| `TestApiHarnessHttpErrors::test_http_401_auth_error_returns_failed` | HTTP 401 → success=False (minimax, glm) |
+| `TestApiHarnessHttpErrors::test_http_429_rate_limit_returns_failed` | HTTP 429 → success=False (minimax, glm) |
+| `TestApiHarnessHttpErrors::test_network_connection_error_returns_failed` | Connection refused → success=False (minimax, glm) |
+| `TestApiHarnessHttpErrors::test_http_error_includes_partial_stdout_for_debugging` | Partial stdout preserved alongside error (minimax, glm) |
+
 ### test_e2e_comments.py — End-to-end comment pipeline (mock harness → TaskIt)
 
 | Test | What it checks |
@@ -577,7 +831,6 @@ tests/
 |---|---|
 | `TestBuildCommandOutputFormat::test_claude_uses_stream_json_verbose` | --output-format stream-json --verbose |
 | `TestBuildCommandOutputFormat::test_gemini_uses_stream_json` | --output-format stream-json |
-| `TestBuildCommandOutputFormat::test_qwen_uses_stream_json` | --output-format stream-json |
 | `TestBuildCommandOutputFormat::test_minimax_uses_format_json` | --format json |
 | `TestBuildCommandOutputFormat::test_glm_uses_format_json` | --format json |
 | `TestBuildCommandOutputFormat::test_codex_has_no_output_format` | No format flag |
@@ -608,7 +861,7 @@ These tests live in the taskit-backend, not in odin's test tree, but cover Odin-
 |---|---|
 | `DepsSatisfiedTests::test_no_deps_always_satisfied` | No deps → always satisfied |
 | `DepsSatisfiedTests::test_all_deps_done` | All DONE → satisfied |
-| `DepsSatisfiedTests::test_review_counts_as_satisfied` | REVIEW counts as satisfied |
+| `DepsSatisfiedTests::test_review_counts_as_satisfied` | REVIEW counts as satisfied (removed in fable task 214 — REVIEW does NOT satisfy; TESTING does) |
 | `DepsSatisfiedTests::test_partial_deps_not_satisfied` | Mixed → not satisfied |
 | `DepsSatisfiedTests::test_deps_in_todo_not_satisfied` | TODO dep → not satisfied |
 | `DepsSatisfiedTests::test_deps_executing_not_satisfied` | EXECUTING dep → not satisfied |
@@ -635,7 +888,10 @@ These tests live in the taskit-backend, not in odin's test tree, but cover Odin-
 | `TestReflectTask::test_updates_report_to_running` | PATCHes report status to RUNNING |
 | `TestReflectTask::test_gathers_context_from_api` | Fetches task detail from TaskIt API |
 | `TestReflectTask::test_calls_harness_with_working_dir` | Harness receives working_dir from metadata |
+| `TestReflectTask::test_passes_setting_sources_user` | Reviewer passes `setting_sources="user"` so the claude harness emits `--setting-sources user` (opt-in, scoped to reviewer only — preserves safety hooks for regular task execution, task 165 review feedback) |
 | `TestReflectTask::test_submits_parsed_report` | PATCHes report with COMPLETED + parsed sections |
+| `TestReflectTask::test_round_trips_json_review` | JSON contract review (fenced ```json block```) round-trips through parser into the completed-report PATCH |
+| `TestReflectTask::test_captures_captured_bad_output_as_error` | Task 159 captured haiku noise (trust warning + JSONL thinking_tokens + bare "NEEDS_WORK" keyword) → ERROR, not laundered into a contentless NEEDS_WORK verdict |
 | `TestReflectTask::test_report_has_correct_sections` | Parsed result includes all 5 sections + verdict |
 | `TestReflectTask::test_handles_harness_failure` | Harness error → FAILED report with error_message |
 | `TestReflectTask::test_posts_failed_status_on_error` | HTTP error → FAILED status posted |
@@ -662,7 +918,7 @@ Requires TaskIt running at `TASKIT_URL`. Loads credentials from `odin/temp_test_
 
 ### test_real.py — Real CLI agent integration tests
 
-Requires `gemini`, `qwen`, `codex` CLIs on PATH.
+Requires `gemini`, `codex` CLIs on PATH.
 
 ```bash
 python -m pytest tests/integration/ -v
@@ -670,10 +926,9 @@ python -m pytest tests/integration/ -v
 
 | Test | What it checks |
 |---|---|
-| `TestHarnessAvailability::test_harness_is_available` | gemini/qwen/codex CLIs on PATH (x3) |
-| `TestHarnessAvailability::test_all_expected_harnesses_registered` | All 6 harness names in registry |
+| `TestHarnessAvailability::test_harness_is_available` | gemini/codex CLIs on PATH (x2) |
+| `TestHarnessAvailability::test_all_expected_harnesses_registered` | All 5 harness names in registry |
 | `TestSingleHarnessExecute::test_gemini_returns_output` | Real gemini call returns output |
-| `TestSingleHarnessExecute::test_qwen_returns_output` | Real qwen call returns output |
 | `TestDecomposition::test_decompose_returns_valid_subtasks` | Codex decomposes spec into subtasks |
 | `TestFullPoemE2E::test_poem_html_generated` | Full pipeline produces poem.html |
 | `TestPlanOnly::test_plan_creates_tasks_without_executing` | plan() creates tasks, no execution |
@@ -682,7 +937,6 @@ python -m pytest tests/integration/ -v
 | `TestReassign::test_reassign_changes_agent` | assign_task() changes agent |
 | `TestDiskWriteCapability::test_codex_can_write_file` | Codex creates file on disk |
 | `TestDiskWriteCapability::test_gemini_can_write_file` | Gemini creates file on disk |
-| `TestDiskWriteCapability::test_qwen_can_write_file` | Qwen creates file on disk |
 
 ### test_mobile_mcp_live.py — Mobile MCP + TaskIt integration
 
@@ -697,3 +951,100 @@ python -m pytest tests/integration/test_mobile_mcp_live.py -v
 | `TestMobileListDevices::test_mobile_list_devices` | Mobile MCP lists running emulators |
 | `TestMobileScreenshot::test_mobile_screenshot_saves_to_file` | Screenshot saved as PNG |
 | `TestMobileScreenshotToTaskitProof::test_mobile_screenshot_to_taskit_proof` | Full flow: screenshot → TaskIt proof |
+
+### test_microsandbox_harness.py (mock) — MicrosandboxHarness contract
+
+Unit tests for the microsandbox sandbox decorator harness (no real VM). Covers the
+config model, registry dispatch (incl. `run_in_forkd` back-compat), `msb run` command
+construction, and `TaskResult` mapping. 16 tests.
+
+| Test | What it checks |
+|---|---|
+| `test_registry_wraps_when_sandbox_mode_microsandbox` | `sandbox_mode=microsandbox` → `MicrosandboxHarness`; `build_execute_command` is None |
+| `test_run_in_forkd_backcompat_still_wraps_forkd` | legacy `run_in_forkd: true` still → `ForkdHarness` |
+| `test_build_msb_command_structure` | `msb run` argv: worktree mount, workdir, timeout, memory, inner cmd after `--` |
+| `test_build_msb_command_applies_net_policy` | `--net-default` / `--net-rule` egress allowlist wired through |
+| `test_execute_success_writes_trace_and_metadata` | `execute()` → `TaskResult` (sandbox=microsandbox) + trace/out files |
+| `test_execute_missing_status_fails` | missing ODIN-STATUS block → `success=False` |
+| `test_execute_sync_invokes_msb_with_worktree_mount` | `_execute_sync` builds+runs `msb` with the worktree mounted |
+| `test_is_available_*` | availability = `msb` present AND inner yields a command |
+| `test_supports_system_prompt_flag_delegates_to_inner` | wrapper delegates the flag to inner (planning read it and crashed with AttributeError before) |
+
+### test_microsandbox_cleanup.py (mock) — run-end sandbox lifecycle
+
+Pins the leak fix: every `msb run` carries a deterministic `--name odin-msb-*`
+so the run's finally block can `msb sandbox remove` it — across success,
+non-zero exit, host timeout, and exception paths. Plus the safety nets: named
+sandboxes (`odinbuild`) and snapshots (`odin-agents`) never appear in any
+removal set; the tempdir used for MCP staging is also always cleaned. Pure
+mock — no `msb` required. 17 tests.
+
+| Test | What it checks |
+|---|---|
+| `test_run_command_includes_named_sandbox_flag` | every `msb run` carries `--name odin-msb-…` |
+| `test_success_path_removes_sandbox` | success path issues `msb sandbox remove <name>` |
+| `test_success_path_remove_runs_after_run` | cleanup call ordered AFTER the run call |
+| `test_nonzero_exit_path_removes_sandbox` | non-zero msb exit still removes the sandbox |
+| `test_timeout_path_removes_sandbox` | host TimeoutExpired still removes the sandbox |
+| `test_exception_path_removes_sandbox` | unexpected exception still removes the sandbox |
+| `test_temp_dir_removed_alongside_sandbox` | the `odin-msb-*` tempdir is rmtree'd too |
+| `test_named_sandboxes_never_in_removal_set` | refuses anything not starting with `odin-msb-` |
+| `test_snapshots_dir_never_touched` | never addresses `~/.microsandbox/snapshots/` |
+| `test_cleanup_runs_in_finally_not_only_on_success` | finally-style guarantee, parameterized over 4 control-flow cases |
+| `TestEphemeralSandboxNameFilter::*` | the prefix filter rejects odinbuild/odin-agents/etc. |
+| `TestOrphanListingParser::*` | parsing both JSON and plain `msb list` keeps ephemeral-only |
+
+### test_microsandbox_gc.py (mock) — `odin gc` + startup sweep
+
+`odin gc` reports sandboxes / snapshots / worktrees (with `node_modules`
+breakdown), refuses to prune named sandboxes or snapshots, and the
+`MicrosandboxHarness.sweep_startup_orphans()` backstop also only removes
+`odin-msb-*` orphans. Pure mock. 16 tests.
+
+| Test | What it checks |
+|---|---|
+| `TestPartitionOrphans::*` | the single safety net for any remove list |
+| `TestStartupOrphanSweep::*` | backstop removes only ephemeral; dry-run never issues `msb remove` |
+| `TestGcReportShape::*` | the report's four keys + totals consistency |
+| `TestGcPrune::*` | `--prune` removes only ephemeral sandboxes, never touches snapshots |
+| `TestGcCliContract::*` | `OdinCLI.gc` exists, default is dry-run |
+| `TestSizeBreakdownEdgeCases::*` | missing paths return 0; node_modules kept separate from rest |
+
+
+### test_clarification_gate.py (mock) — Pre-planning clarification gate
+
+The clarification gate runs before task breakdown: the planner surfaces
+questions, a summary, and an HTML preview, then waits for a human nod.
+Tests cover prompt construction, orchestrator dispatch order, answer
+injection, preview-path surfacing, and the mandatory confirmation. 19 tests.
+
+| Test | What it checks |
+|---|---|
+| `TestClarificationPrompt::*` | Prompt includes spec text, output paths, questions/summary keywords, quick-mode instruction |
+| `TestGateAutoMode::test_gate_runs_before_decomposition` | Order is clarification → gate_callback → decomposition |
+| `TestGateAutoMode::test_gate_disabled_skips_clarification` | `gate=False` → no clarification file, only decomposition runs |
+| `TestGateAutoMode::test_answers_appended_to_decomposition_prompt` | Callback answers appear in the decomposition prompt |
+| `TestGateAutoMode::test_clarification_files_written` | Both JSON + HTML files exist with correct content |
+| `TestGateAutoMode::test_gate_callback_none_proceeds_without_answers` | No callback → files written, planning proceeds |
+| `TestGateAutoMode::test_gate_callback_returns_none_aborts` | Callback `None` → `RuntimeError`, no plan file |
+| `TestGateAutoMode::test_orchestrator_injects_preview_path` | Clarification dict includes `preview_path` + `preview_exists` |
+| `TestInteractivePromptGate::*` | Interactive prompt includes/excludes gate section based on `gate` flag |
+| `TestGateInteraction::test_surfaces_preview_path` | CLI gate prints the preview file path to the human |
+| `TestGateInteraction::test_requires_nod_even_with_no_questions` | No questions + "n" → aborts (no auto-proceed) |
+| `TestGateInteraction::test_proceeds_on_yes_with_no_questions` | No questions + "y" → proceeds with empty answers |
+| `TestGateInteraction::test_requires_nod_after_answering_questions` | Questions answered + "n" → still aborts |
+| `TestGateInteraction::test_proceeds_with_answers_on_yes` | Questions answered + "y" → returns answers |
+| `TestGateInteraction::test_eof_on_confirm_aborts` | EOFError on confirmation → aborts (non-interactive safe) |
+| `TestGateInteraction::test_no_preview_path_does_not_crash` | Missing preview_path key handled gracefully |
+
+
+
+### test_microsandbox_real.py (integration) — real microVM end-to-end
+
+Requires `msb` (microsandbox) installed. Boots a real libkrun microVM.
+Run: `python -m pytest tests/integration/test_microsandbox_real.py -o addopts="" -v`
+
+| Test | What it checks |
+|---|---|
+| `test_microsandbox_executes_inner_command_in_real_vm` | full `execute()` path in a live VM → `TaskResult` success, ODIN-STATUS validated |
+| `test_microsandbox_workspace_edits_persist_to_host` | guest writes to `/workspace` persist back to the host worktree |

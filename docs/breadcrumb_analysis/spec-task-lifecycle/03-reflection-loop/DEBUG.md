@@ -23,9 +23,9 @@
 | Auto-reflection didn't trigger after REVIEW | `taskit_detail.log` | `auto-reflection` or `Skipping auto-reflection` — duplicate guard may have blocked it |
 | Agent not using reflection feedback on rework | Check task comments | Reflection comment should appear in agent's context on re-execution |
 | Quota failure not detected | `reflection_inspect.py` | Check `quota_failure` field; also check `task_inspect.py` for `last_failure_type` |
-| Task retrying same agent after quota error | `taskit_detail.log` | `Quota failure reassignment:` — if missing, detection didn't trigger |
-| Quota detected but no reassignment | `taskit_detail.log` | `no alternative agent available` — no other AGENT users on the board |
-| Wrong agent selected after reassignment | `taskit_detail.log` | `Quota failure reassignment: X → Y` — check BoardMembership agents |
+| Task retrying same agent after a 429 | `taskit.log` | Often **correct** (W3.11): `provider has headroom` / `rate_limit_backoff` metadata means a deliberate same-agent backoff, not a detection miss. See `../../quota-failover-reassignment/DEBUG.md`. |
+| Quota detected but no reassignment | `taskit.log` | `no alternative agent available` — no other active AGENT on the board |
+| Wrong agent selected after reassignment | `taskit.log` | `Quota failure reassignment (verified=…): X/Y → Z/W` — see the quota-failover breadcrumb |
 | Dual dep check disagreement (task skipped by odin) | `spec_*_task_<id>.log` | `Waiting — unmet deps` — see 02-execute-and-dispatch DEBUG.md |
 
 ## Quick commands
@@ -87,15 +87,14 @@ cd taskit/taskit-backend && python testing_tools/reflection_inspect.py <report_i
 
 ## Common breakpoints
 
-- `views.py:_trigger_auto_reflection()` line 74 — auto-trigger entry, see if duplicate guard blocks
-- `dag_executor.py:execute_reflection()` line 412 — guard check, see if report is in expected state
-- `dag_executor.py:execute_reflection()` line 463 — fallback status, odin didn't update report
-- `reflection.py:reflect_task()` line ~394 — prompt construction, see what context was gathered
-- `reflection.py:parse_reflection_report()` line ~195 — verdict extraction, see if parsing worked
-- `views.py:ReflectionReportViewSet.partial_update()` line ~1319 — PASS verdict → TESTING transition
-- `views.py:ReflectionReportViewSet.partial_update()` line ~1344 — NEEDS_WORK verdict → retry or fail logic
-- `views.py:_is_quota_failure()` line ~116 — quota detection check (inspect 3 sources)
-- `views.py:_find_alternative_agent()` line ~146 — agent selection for reassignment
+- `views.py:_trigger_auto_reflection()` ~277 — auto-trigger entry; duplicate guard + dynamic reviewer default
+- `dag_executor.py:execute_reflection()` ~1219 — PENDING guard
+- `dag_executor.py:execute_reflection()` ~1274 — fallback status when odin didn't PATCH
+- `reflection.py:reflect_task()` ~620/759 — context assembly + prompt construction
+- `reflection.py:parse_reflection_report()` ~409 (verdict regex ~482) — verdict extraction
+- `views.py:ReflectionReportViewSet.partial_update()` ~3610 — PASS → merge → TESTING
+- `views.py:ReflectionReportViewSet.partial_update()` ~3620 — NEEDS_WORK/FAIL → retry or fail
+- `views.py:_is_quota_failure()` ~358 / `_find_alternative_agent()` ~507 — see `../../quota-failover-reassignment/`
 
 ## Known failure modes
 
@@ -104,8 +103,8 @@ cd taskit/taskit-backend && python testing_tools/reflection_inspect.py <report_i
 | Reflection passes but task stays in REVIEW | `refresh_from_db` found task no longer in REVIEW (race) | Task in REVIEW + report COMPLETED with PASS verdict | Manually move to TESTING |
 | Infinite retry loop | NEEDS_WORK verdict every time, count never reaches 3 | Check completed report count vs task status | Manual intervention or adjust reflection prompt |
 | Agent ignores reflection feedback on rework | Feedback appears only as a comment, not structured injection | Check agent's effective_input in execution_result | Ensure reflection comments are visible in task context |
-| Reflection timeout kills the loop | 300s not enough for complex reviews | Report stuck in RUNNING, fallback status applied | Increase timeout or cancel and retry |
+| Reflection timeout kills the loop | 1800s (`DAG_EXECUTOR_REFLECTION_TIMEOUT_SECONDS`) not enough for a huge review | Report stuck in RUNNING, fallback status applied | Raise the timeout or cancel and retry |
 | Manual reflection bumps count | `completed_count` includes ALL completed reports, not just auto | Task fails at 3 even though only 1 was auto | Filter by `requested_by` if this becomes a problem |
 | Duplicate auto-reflection after re-execution | Duplicate guard only checks PENDING/RUNNING, not recent COMPLETED | Multiple reports created in quick succession | Guard prevents true duplicates; multiple cycles are expected |
-| Quota reassigned but new agent also over quota | Reassignment doesn't check live quota availability | Task cycles through agents, hits 3-strike limit | Add more agents to the board, or wait for quota reset |
-| Reflection itself hits quota | Reviewer agent (Claude) over quota | Report marked FAILED by dag_executor fallback | Retry manually or wait for quota reset |
+| Quota reassigned but new agent also over quota | W3.11 verifies the *failed* provider, not the target's headroom | Task cycles through agents, hits 3-strike limit | Add more agents; see `../../quota-failover-reassignment/` |
+| Reflection itself hits quota | The selected reviewer (gemini/codex/claude) is over quota | Report marked FAILED by dag_executor fallback | Retry manually or wait for quota reset |

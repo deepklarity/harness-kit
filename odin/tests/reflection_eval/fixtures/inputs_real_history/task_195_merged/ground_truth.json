@@ -1,0 +1,6 @@
+{
+  "verdict": "PASS",
+  "summary": "Task 195 (Frontend deps in task worktrees: honest verify gate (W4.11)) was merged after its reflection verdict passed \u2014 operator-asserted PASS is the ground truth.",
+  "fixture_category": "real_capture",
+  "source": ".proof/task-195/proof.md + merge diffstat"
+}

@@ -19,6 +19,7 @@ dependencies = [
     "fastmcp>=2.0",
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "hypothesis>=6.0",
 ]
 
 [project.scripts]
@@ -31,8 +32,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = [
     "llm: requires real LLM CLI agents on PATH",
     "tmux_real: requires tmux installed and running",
 ]
-addopts = "--ignore=tests/integration"
+addopts = "--ignore=tests/integration --ignore=tests/sandbox"

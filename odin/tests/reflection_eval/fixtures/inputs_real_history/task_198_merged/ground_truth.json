@@ -1,0 +1,6 @@
+{
+  "verdict": "PASS",
+  "summary": "Task 198 (Promote gate: run verify.sh via sh, survive lost exec bits (W5.2)) was merged after its reflection verdict passed \u2014 operator-asserted PASS is the ground truth.",
+  "fixture_category": "real_capture",
+  "source": ".proof/task-198/proof.md + merge diffstat"
+}

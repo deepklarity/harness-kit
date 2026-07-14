@@ -18,6 +18,7 @@ from .models import (
 
 TERMINAL_SUCCESS_STATUSES = {TaskStatus.DONE, TaskStatus.TESTING}
 TERMINAL_FAILURE_STATUSES = {TaskStatus.FAILED}
+TERMINAL_CANCELED_STATUSES = {TaskStatus.CANCELED}
 ACTIVE_OVERLAP_STATUSES = {TaskStatus.IN_PROGRESS, TaskStatus.EXECUTING}
 WEEKDAY_INDEX = {
     "MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4, "SAT": 5, "SUN": 6,
@@ -338,6 +339,97 @@ def compute_schedule_next_run(schedule: TaskSchedule, reference_utc: datetime | 
     )
 
 
+def release_schedule_occurrence(
+    schedule: TaskSchedule,
+    *,
+    scheduled_for_utc: datetime,
+    created_by: str,
+    release_reason: str,
+    reuse_existing: bool,
+    now: datetime,
+) -> tuple[TaskScheduleRun, Task | None, str]:
+    """Create/claim the TaskScheduleRun for one occurrence and materialize its task.
+
+    Shared by the cron tick (release_due_schedules) and the manual "Run now"
+    endpoint so both build identical occurrences: the same get_or_create
+    idempotency on the unique (schedule, scheduled_for_utc) occurrence, the same
+    overlap skip, the same materialize_task_from_schedule call, and the matching
+    TaskHistory row.
+
+    Why a helper instead of calling materialize_task_from_schedule directly from
+    the view: the run lifecycle (get_or_create on the occurrence, overlap skip,
+    RELEASED transition, history row) is identical for both callers. Duplicating
+    it in the view would be a parallel copy of the cron path -- exactly what we
+    want to avoid. Only run creation + materialization lives here; the caller
+    owns cron bookkeeping (advancing next_run_at_utc, setting last_released_run,
+    completing one-time schedules), so a manual run can leave the cron cadence
+    untouched.
+
+    Sets schedule.materialized_task in memory when first materialized; the
+    caller is responsible for persisting the schedule. Returns a tuple
+    (run, task, outcome) where outcome is:
+      - "released": the run was released and its task materialized
+      - "overlap": a prior occurrence's task is still active, so this run was
+        marked SKIPPED_OVERLAP (task is that still-active task)
+      - "already": this occurrence was already processed (released or skipped
+        before); the run is returned untouched
+    """
+    run, created = TaskScheduleRun.objects.get_or_create(
+        schedule=schedule,
+        scheduled_for_utc=scheduled_for_utc,
+        defaults={
+            "run_number": schedule.runs.count() + 1,
+            "status": ScheduleRunStatus.PENDING_RELEASE,
+            "template_snapshot": _run_snapshot(schedule),
+        },
+    )
+    if not created and run.status != ScheduleRunStatus.PENDING_RELEASE:
+        return run, run.task, "already"
+
+    task = schedule.materialized_task
+    if reuse_existing and task and task.status in TERMINAL_CANCELED_STATUSES:
+        # CANCELED is terminal — do NOT auto-revive on the next occurrence
+        # (the operator canceled the task). Mark the run CANCELED so the
+        # audit trail is unambiguous; re-enabling means canceling the
+        # schedule or un-canceling the task by hand. (Carried over from
+        # the pre-refactor cron path, c3b710f8.)
+        run.status = ScheduleRunStatus.CANCELED
+        run.result_summary = (
+            f"Skipped: task {task.id} is CANCELED — schedule does not "
+            "auto-revive a canceled task."
+        )
+        run.finished_at_utc = now
+        run.save(update_fields=["status", "result_summary", "finished_at_utc"])
+        return run, task, "canceled"
+
+    if reuse_existing and task and task.status in ACTIVE_OVERLAP_STATUSES:
+        run.status = ScheduleRunStatus.SKIPPED_OVERLAP
+        run.result_summary = f"Skipped because task {task.id} is still active."
+        run.finished_at_utc = now
+        run.save(update_fields=["status", "result_summary", "finished_at_utc"])
+        return run, task, "overlap"
+
+    task = materialize_task_from_schedule(
+        schedule, run, created_by=created_by, reuse_existing=reuse_existing,
+    )
+    if not schedule.materialized_task_id:
+        schedule.materialized_task = task
+    run.task = task
+    run.status = ScheduleRunStatus.RELEASED
+    run.released_at_utc = now
+    run.release_reason = release_reason
+    run.save(update_fields=["task", "status", "released_at_utc", "release_reason"])
+    TaskHistory.objects.create(
+        task=task,
+        schedule_run=run,
+        field_name="status",
+        old_value="",
+        new_value=TaskStatus.IN_PROGRESS,
+        changed_by="system@taskit",
+    )
+    return run, task, "released"
+
+
 def release_due_schedules(now: datetime | None = None) -> int:
     now = now or timezone.now()
     released = 0
@@ -354,47 +446,21 @@ def release_due_schedules(now: datetime | None = None) -> int:
             if schedule.status != ScheduleStatus.ACTIVE or not schedule.next_run_at_utc or schedule.next_run_at_utc > now:
                 continue
 
-            run, created = TaskScheduleRun.objects.get_or_create(
-                schedule=schedule,
+            run, task, outcome = release_schedule_occurrence(
+                schedule,
                 scheduled_for_utc=schedule.next_run_at_utc,
-                defaults={
-                    "run_number": schedule.runs.count() + 1,
-                    "status": ScheduleRunStatus.PENDING_RELEASE,
-                    "template_snapshot": _run_snapshot(schedule),
-                },
+                created_by=schedule.created_by,
+                release_reason="Released by schedule due time.",
+                reuse_existing=schedule.kind == ScheduleKind.RECURRING,
+                now=now,
             )
-            if not created and run.status != ScheduleRunStatus.PENDING_RELEASE:
+            if outcome == "already":
                 continue
-
-            task = schedule.materialized_task
-            if schedule.kind == ScheduleKind.RECURRING and task and task.status in ACTIVE_OVERLAP_STATUSES:
-                run.status = ScheduleRunStatus.SKIPPED_OVERLAP
-                run.result_summary = f"Skipped because task {task.id} is still active."
-                run.finished_at_utc = now
-                run.save(update_fields=["status", "result_summary", "finished_at_utc"])
-            else:
-                task = materialize_task_from_schedule(
-                    schedule, run, created_by=schedule.created_by,
-                    reuse_existing=schedule.kind == ScheduleKind.RECURRING,
-                )
-                if not schedule.materialized_task_id:
-                    schedule.materialized_task = task
+            if outcome == "released":
                 schedule.last_released_run = run
-                run.task = task
-                run.status = ScheduleRunStatus.RELEASED
-                run.released_at_utc = now
-                run.release_reason = "Released by schedule due time."
-                run.save(update_fields=["task", "status", "released_at_utc", "release_reason"])
-                TaskHistory.objects.create(
-                    task=task,
-                    schedule_run=run,
-                    field_name="status",
-                    old_value="",
-                    new_value=TaskStatus.IN_PROGRESS,
-                    changed_by="system@taskit",
-                )
-                released += 1
 
+            # Cron bookkeeping advances the cadence for both released and
+            # overlap-skipped occurrences (an overlapped tick still moves on).
             if schedule.kind == ScheduleKind.ONE_TIME:
                 schedule.status = ScheduleStatus.COMPLETED
                 schedule.completed_at = now
@@ -411,6 +477,8 @@ def release_due_schedules(now: datetime | None = None) -> int:
                     schedule.status = ScheduleStatus.COMPLETED
                     schedule.completed_at = now
             schedule.save()
+            if outcome == "released":
+                released += 1
     return released
 
 
@@ -422,6 +490,8 @@ def maybe_finalize_schedule_run(task: Task, new_status: str) -> None:
         return
     if new_status in TERMINAL_SUCCESS_STATUSES:
         run.status = ScheduleRunStatus.COMPLETED_SUCCESS
+    elif new_status in TERMINAL_CANCELED_STATUSES:
+        run.status = ScheduleRunStatus.CANCELED
     elif new_status in TERMINAL_FAILURE_STATUSES:
         run.status = ScheduleRunStatus.COMPLETED_FAILED
     else:

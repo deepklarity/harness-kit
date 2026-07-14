@@ -105,9 +105,8 @@ Flat list of all tasks. Same as today. But now each task shows its spec tag, so 
 │ b2c3d4e5 │ Integration tests      │ assigned │ gemini │ profile  │ d4e5f6a1, f6a1b2c3     │
 │ 1234abcd │ Diagnose token expiry  │ done     │ claude │ auth-fix │ -                      │
 │ 5678ef01 │ Fix + regression test  │ done     │ claude │ auth-fix │ 1234abcd               │
-│ 9abc0123 │ Write hero copy        │ done     │ qwen   │ landing  │ -                      │
 │ 4567def8 │ Feature descriptions   │ done     │ gemini │ landing  │ -                      │
-│ 890abcde │ Assemble HTML          │ done     │ codex  │ landing  │ 9abc0123, 4567def8     │
+│ 890abcde │ Assemble HTML          │ done     │ codex  │ landing  │ 4567def8               │
 └──────────┴────────────────────────┴──────────┴────────┴──────────┴────────────────────────┘
 ```
 

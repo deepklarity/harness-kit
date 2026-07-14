@@ -1,0 +1,23 @@
+You are auditing a task executed by an AI agent.
+
+## CONSTRAINTS
+- READ-ONLY mode.
+
+## TASK UNDER REVIEW
+Title: Add rate-limiting middleware
+Status: REVIEW
+Agent: claude (claude-sonnet-5)
+Duration: 60000ms | Tokens: 9,500
+
+## [CTX:description]
+Add a per-IP rate limiter to the public /auth/login/ endpoint. 5 attempts per minute per IP, then 429.
+
+## [CTX:execution_result]
+The agent added tasks/ratelimit.py and wired it into config/urls.py. Running `python manage.py runserver` and curling /auth/login/ 6 times returns 500 on the 6th request with a KeyError, not 429.
+
+## [CTX:comments]
+- [status_update] Added the rate limiter.
+
+## YOUR REPORT
+
+Output the review.

@@ -1,4 +1,3 @@
-import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 interface SwitchProps {
@@ -7,14 +6,16 @@ interface SwitchProps {
     disabled?: boolean;
     id?: string;
     className?: string;
+    'aria-label'?: string;
 }
 
-export function Switch({ checked, onCheckedChange, disabled, id, className }: SwitchProps) {
+export function Switch({ checked, onCheckedChange, disabled, id, className, 'aria-label': ariaLabel }: SwitchProps) {
     return (
         <button
             type="button"
             role="switch"
             aria-checked={checked}
+            aria-label={ariaLabel}
             id={id}
             disabled={disabled}
             onClick={() => !disabled && onCheckedChange(!checked)}

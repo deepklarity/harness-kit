@@ -8,10 +8,92 @@ import logging
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
 _TERMINAL_STATUSES = frozenset({"DONE", "FAILED"})
+
+
+def _dispatch_task_failed_notification(task, actor_email=""):
+    from .models import BoardMembership, Task
+    from .notification_service import notify
+
+    metadata = dict(task.metadata or {})
+    if metadata.get("failure_notified_at"):
+        return False
+
+    recipient_ids = list(
+        BoardMembership.objects.filter(board=task.board).values_list("user_id", flat=True)
+    )
+    body = f"{metadata.get('last_failure_reason', '')}".strip() or "Task entered FAILED status."
+
+    notify(
+        recipient_ids=recipient_ids,
+        notification_type="task_failed",
+        title=f'Task "{task.title}" failed',
+        body=body,
+        task=task,
+        board=task.board,
+        actor_email=actor_email or "",
+    )
+
+    metadata["failure_notified_at"] = timezone.now().isoformat()
+    metadata.pop("failure_reminder_sent_at", None)
+    Task.objects.filter(id=task.id).update(metadata=metadata)
+    logger.info(
+        "[notification_signals] task_failed notification dispatched for task %s",
+        task.pk,
+    )
+    return True
+
+
+def _clear_failure_notification_guards(task):
+    from .models import Task
+
+    metadata = dict(task.metadata or {})
+    changed = False
+    for key in ("failure_notified_at", "failure_reminder_sent_at"):
+        if key in metadata:
+            metadata.pop(key)
+            changed = True
+    if changed:
+        Task.objects.filter(id=task.id).update(metadata=metadata)
+
+
+@receiver(post_save, sender="tasks.Task")
+def notify_on_failed_task_saved(sender, instance, created, **kwargs):
+    if (instance.status or "").upper() != "FAILED":
+        _clear_failure_notification_guards(instance)
+        return
+
+    _dispatch_task_failed_notification(instance)
+
+
+@receiver(post_save, sender="tasks.TaskHistory")
+def notify_on_task_failed(sender, instance, created, **kwargs):
+    if not created:
+        return
+
+    if instance.field_name != "status":
+        return
+
+    if (instance.new_value or "").upper() != "FAILED":
+        return
+
+    from .models import Task
+
+    try:
+        task = Task.objects.select_related("board").get(pk=instance.task_id)
+    except Task.DoesNotExist:
+        logger.warning(
+            "[notification_signals] TaskHistory %s references missing task %s — skipping",
+            instance.pk,
+            instance.task_id,
+        )
+        return
+
+    _dispatch_task_failed_notification(task, instance.changed_by or "")
 
 
 @receiver(post_save, sender="tasks.TaskHistory")

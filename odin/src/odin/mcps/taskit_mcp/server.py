@@ -98,7 +98,7 @@ class AttachmentType(str, Enum):
 def _coerce_list(val: str | list | None) -> list[str] | None:
     """Coerce a value to list[str] or None.
 
-    Some agents (notably Qwen) send JSON-encoded strings like ``'["/tmp/a.png"]'``
+    Some agents send JSON-encoded strings like ``'["/tmp/a.png"]'``
     instead of actual arrays.  This normalises both forms.
     """
     if val is None:

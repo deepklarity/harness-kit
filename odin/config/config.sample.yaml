@@ -10,22 +10,81 @@ base_agent: claude          # Which agent does task decomposition
 agents:
   claude:
     cli_command: claude
+    sandbox_mode: microsandbox
+    microsandbox_snapshot: odin-agents
+    run_in_forkd: false
+    forkd_bin: ${FORKD_BIN}
+    forkd_kernel: ${FORKD_KERNEL}
+    forkd_scripts_dir: ${FORKD_SCRIPTS_DIR}
+    forkd_mode: controller
+    forkd_controller_url: http://127.0.0.1:8889
+    forkd_snapshot_tag: odin-node22-4g-cli-browser
+    forkd_mem_size_mib: 4096
+    forkd_per_child_netns: true
   codex:
     cli_command: codex
+    sandbox_mode: microsandbox
+    microsandbox_snapshot: odin-agents
+    run_in_forkd: false
+    forkd_bin: ${FORKD_BIN}
+    forkd_kernel: ${FORKD_KERNEL}
+    forkd_scripts_dir: ${FORKD_SCRIPTS_DIR}
+    forkd_mode: controller
+    forkd_controller_url: http://127.0.0.1:8889
+    forkd_snapshot_tag: odin-node22-4g-cli-browser
+    forkd_mem_size_mib: 4096
+    forkd_per_child_netns: true
   gemini:
     cli_command: gemini
-  qwen:
-    cli_command: qwen
+    sandbox_mode: microsandbox
+    microsandbox_snapshot: odin-agents
+    run_in_forkd: false
+    forkd_bin: ${FORKD_BIN}
+    forkd_kernel: ${FORKD_KERNEL}
+    forkd_scripts_dir: ${FORKD_SCRIPTS_DIR}
+    forkd_mode: controller
+    forkd_controller_url: http://127.0.0.1:8889
+    forkd_snapshot_tag: odin-node22-4g-cli-browser
+    forkd_mem_size_mib: 4096
+    forkd_per_child_netns: true
   minimax:
     cli_command: opencode
     api_key: ${MINIMAX_API_KEY}
+    sandbox_mode: microsandbox
+    microsandbox_snapshot: odin-agents
+    microsandbox_timeout_secs: 2700
+    run_in_forkd: false
+    forkd_bin: ${FORKD_BIN}
+    forkd_kernel: ${FORKD_KERNEL}
+    forkd_scripts_dir: ${FORKD_SCRIPTS_DIR}
+    forkd_mode: controller
+    forkd_controller_url: http://127.0.0.1:8889
+    forkd_snapshot_tag: odin-node22-4g-cli-browser
+    forkd_mem_size_mib: 4096
+    forkd_per_child_netns: true
   glm:
     cli_command: opencode
     api_key: ${ZAI_API_KEY}
+    sandbox_mode: microsandbox
+    microsandbox_snapshot: odin-agents
+    microsandbox_timeout_secs: 2700
+    run_in_forkd: false
+    forkd_bin: ${FORKD_BIN}
+    forkd_kernel: ${FORKD_KERNEL}
+    forkd_scripts_dir: ${FORKD_SCRIPTS_DIR}
+    forkd_mode: controller
+    forkd_controller_url: http://127.0.0.1:8889
+    forkd_snapshot_tag: odin-node22-4g-cli-browser
+    forkd_mem_size_mib: 4096
+    forkd_per_child_netns: true
 
 task_storage: .odin/tasks   # Project-local task storage
 log_dir: .odin/logs         # Project-local log directory
 execution_timeout_seconds: 1800  # 0 or negative = no timeout
+# Optional agentic step budget passed to the coding CLI (Claude Code --max-turns).
+# Bounds runaway step counts on mechanical tasks (each step is a full model
+# round-trip). Unset/None = unbounded; the wall-clock timeout is the only bound.
+# max_turns: 60
 
 # Board backend: "taskit" (recommended) or "local" (disk-based JSON files)
 board_backend: taskit
@@ -44,3 +103,9 @@ taskit:
 
 chrome_devtools:
   headless: true
+  # microsandbox agents can't launch a browser in-guest (the aarch64 microVM
+  # SIGTRAPs), so the in-guest MCP connects to a host-side browser over CDP.
+  # Default: http://127.0.0.1:9222 (127.0.0.1 -> host LAN IP when staged in-guest).
+  # Start the host browser with docs/fable_roadmap/bootstrap/sandbox_image/run_host_browser.sh
+  # Uncomment to point elsewhere:
+  # browser_url: http://127.0.0.1:9222

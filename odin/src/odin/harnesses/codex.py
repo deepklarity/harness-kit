@@ -6,7 +6,7 @@ import shutil
 import time
 from typing import AsyncIterator
 
-from odin.harnesses.base import BaseHarness, read_with_tee, extract_text_from_stream, SUBPROCESS_STREAM_LIMIT, validate_odin_status
+from odin.harnesses.base import BaseHarness, read_with_tee, extract_text_from_stream, extract_token_usage, SUBPROCESS_STREAM_LIMIT, terminate_subprocess, validate_odin_status, validate_odin_status_full
 from odin.harnesses.registry import register_harness
 from odin.models import AgentConfig, TaskResult
 
@@ -42,8 +42,25 @@ class CodexHarness(BaseHarness):
             cmd.extend(["-c", 'mcp_servers.mobile.args=["-y", "@mobilenext/mobile-mcp@latest"]'])
 
         if context.get("chrome_devtools_mcp_enabled"):
+            cd_args = ["-y", "chrome-devtools-mcp@latest"]
+            browser_url = context.get("chrome_devtools_browser_url")
+            if browser_url:
+                # Connect to a host-side browser over CDP (microsandbox microVM can't
+                # launch Chromium); launch-only flags conflict with --browserUrl.
+                cd_args.extend(["--browserUrl", browser_url])
+            else:
+                if context.get("chrome_devtools_headless"):
+                    cd_args.append("--headless")
+                executable_path = context.get("chrome_devtools_executable_path")
+                if executable_path:
+                    cd_args.extend(["--executablePath", executable_path])
+                if context.get("chrome_devtools_isolated"):
+                    cd_args.append("--isolated")
+                for chrome_arg in context.get("chrome_devtools_chrome_args") or []:
+                    cd_args.append(f"--chromeArg={chrome_arg}")
+            args_toml = "[" + ", ".join(f'"{a}"' for a in cd_args) + "]"
             cmd.extend(["-c", 'mcp_servers.chrome-devtools.command="npx"'])
-            cmd.extend(["-c", 'mcp_servers.chrome-devtools.args=["-y", "chrome-devtools-mcp@latest"]'])
+            cmd.extend(["-c", f"mcp_servers.chrome-devtools.args={args_toml}"])
 
         cmd.append(prompt)
         return cmd
@@ -54,6 +71,7 @@ class CodexHarness(BaseHarness):
         output_file = context.get("output_file")
         timeout_seconds = context.get("timeout_seconds", 300)
         timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
+        proc: asyncio.subprocess.Process | None = None
         try:
             cmd = self.build_execute_command(prompt, context)
             proc = await asyncio.create_subprocess_exec(
@@ -66,13 +84,14 @@ class CodexHarness(BaseHarness):
             self._current_pid = proc.pid
 
             if output_file:
-                stdout_text = await read_with_tee(proc, output_file)
+                raw_str = await read_with_tee(proc, output_file)
                 await asyncio.wait_for(proc.wait(), timeout=timeout)
             else:
                 stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+                raw_str = stdout_bytes.decode("utf-8", errors="replace")
 
-            stdout_text = extract_text_from_stream(stdout_text)
+            usage = extract_token_usage(raw_str)
+            stdout_text = extract_text_from_stream(raw_str)
 
             duration = (time.monotonic() - start) * 1000
             stderr_text = ""
@@ -84,17 +103,30 @@ class CodexHarness(BaseHarness):
                     pass
 
             self._current_pid = None
+            meta = {"usage": usage} if usage else {}
             if proc.returncode == 0:
                 if context.get("validate_status", True):
-                    agent_success, agent_error = validate_odin_status(stdout_text)
+                    status = validate_odin_status_full(
+                        stdout_text,
+                        worktree_path=context.get("working_dir"),
+                    )
+                    agent_success, agent_error = status.as_legacy_tuple()
                 else:
                     agent_success, agent_error = True, None
+                    status = None
+                if status is not None and status.raw_block is not None:
+                    meta["malformed_status"] = {
+                        "raw_block": status.raw_block,
+                        "inferred": status.inferred,
+                        "inference_reason": status.inference_reason,
+                    }
                 return TaskResult(
                     success=agent_success,
                     output=stdout_text,
                     error=agent_error,
                     duration_ms=round(duration, 1),
                     agent=self.name,
+                    metadata=meta,
                 )
             else:
                 return TaskResult(
@@ -103,9 +135,12 @@ class CodexHarness(BaseHarness):
                     error=stderr_text,
                     duration_ms=round(duration, 1),
                     agent=self.name,
+                    metadata=meta,
                 )
         except asyncio.TimeoutError:
             self._current_pid = None
+            if proc is not None:
+                await terminate_subprocess(proc)
             timeout_msg = (
                 f"Command timed out after {timeout_seconds}s"
                 if timeout_seconds and timeout_seconds > 0

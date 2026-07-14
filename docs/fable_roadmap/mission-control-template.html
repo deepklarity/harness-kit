@@ -1,0 +1,450 @@
+<title>{{PROGRAM}} — Mission Control</title>
+<!--
+  MISSION CONTROL — reference template.
+  The page the away human opens to catch up in two minutes. It answers, in
+  this order: what is broken, what is running, what waits on them, what
+  landed, where the mission stands.
+
+  How to use it:
+  1. LIVING artifact: rewrite the whole page and redeploy to the SAME URL
+     (see RESUME Facts). Never append, never mint a new URL.
+  2. Every number comes from the board or the roadmap. If a number has no
+     script or file behind it, it does not go on the page.
+  3. Voice: TONE.md. A verdict is a plain spoken sentence, not a headline.
+     No system shorthand a stranger would not know.
+  4. Scores come from the fable_roadmap.md table, graded per SCORECARD.md.
+     They move only at audits. Overall = plain average.
+  5. The content below is a WORKED EXAMPLE so the layout reads as real.
+     Do not let it bias you: a calm shift is a green page with an empty
+     faults panel (use the .allclear block) and nothing waiting.
+  6. Delete this comment and the banner div below when publishing.
+-->
+<style>
+:root{
+  --bg:#ffffff; --bg-2:#f7f8fa;
+  --line:#e4e6ea; --line-strong:#cfd3da;
+  --ink:#16181d; --ink-2:#4b5160; --ink-3:#9aa0ad; --mono-ink:#6d7484;
+  --accent:#1d4ed8; --accent-soft:#eff4ff; --accent-deep:#1e40af;
+  --low:#b3392f; --low-soft:#fdf1f0;
+  --mid:#a36a1c; --mid-soft:#fdf6ea;
+  --high:#1f7a4d; --high-soft:#edf7f1;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#14161b; --bg-2:#1b1e25;
+  --line:#2a2e37; --line-strong:#3a3f4b;
+  --ink:#e8e9ec; --ink-2:#aeb3bf; --ink-3:#666c79; --mono-ink:#868d9c;
+  --accent:#7da2ff; --accent-soft:#1c2536; --accent-deep:#a5bdff;
+  --low:#e07a6e; --low-soft:#2c1e1c;
+  --mid:#d9a441; --mid-soft:#2a2418;
+  --high:#6fbf8f; --high-soft:#1a2b22;
+}}
+:root[data-theme="dark"]{
+  --bg:#14161b; --bg-2:#1b1e25;
+  --line:#2a2e37; --line-strong:#3a3f4b;
+  --ink:#e8e9ec; --ink-2:#aeb3bf; --ink-3:#666c79; --mono-ink:#868d9c;
+  --accent:#7da2ff; --accent-soft:#1c2536; --accent-deep:#a5bdff;
+  --low:#e07a6e; --low-soft:#2c1e1c;
+  --mid:#d9a441; --mid-soft:#2a2418;
+  --high:#6fbf8f; --high-soft:#1a2b22;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --bg-2:#f7f8fa;
+  --line:#e4e6ea; --line-strong:#cfd3da;
+  --ink:#16181d; --ink-2:#4b5160; --ink-3:#9aa0ad; --mono-ink:#6d7484;
+  --accent:#1d4ed8; --accent-soft:#eff4ff; --accent-deep:#1e40af;
+  --low:#b3392f; --low-soft:#fdf1f0;
+  --mid:#a36a1c; --mid-soft:#fdf6ea;
+  --high:#1f7a4d; --high-soft:#edf7f1;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg) !important}
+body{color:var(--ink) !important;font:16px/1.6 var(--sans);padding:0 2rem 6rem;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,p,td,th,li,div,span,time{color:inherit}
+.wrap{max-width:64rem;margin:0 auto}
+a{color:var(--accent)}
+p{color:var(--ink-2)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:.8rem;color:var(--mono-ink)}
+
+/* ---- preview banner (delete in real page) ---- */
+.tnote{border:1px dashed var(--accent);background:var(--accent-soft);color:var(--accent-deep);
+  font:12px/1.5 var(--mono);padding:.7rem 1rem;margin:1.2rem 0 0}
+
+/* ---- signature section labels ---- */
+h2.label{display:flex;align-items:center;gap:.75rem;margin:0 0 1.3rem;
+  font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--mono-ink)}
+h2.label::before{content:"";width:2rem;height:3px;background:var(--accent)}
+h2.label .count{color:var(--ink-3);text-transform:none;letter-spacing:.02em}
+section{padding:3rem 0 0}
+
+/* ---- verdict band ---- */
+header{padding:3.6rem 0 2.4rem;border-bottom:1px solid var(--line);
+  display:flex;gap:3rem;align-items:flex-start;flex-wrap:wrap}
+.kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mono-ink);margin:0 0 1rem;display:flex;align-items:center;gap:.75rem}
+.kicker::before{content:"";width:2rem;height:3px;background:var(--accent)}
+h1.verdict{font-weight:800;letter-spacing:-.03em;line-height:1.12;
+  font-size:clamp(1.7rem,3.8vw,2.7rem);margin:0;max-width:26ch;text-wrap:balance}
+h1.verdict em{font-style:normal;color:var(--accent)}
+.headmeta{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1.3rem}
+.chip{font-family:var(--mono);font-size:.72rem;border:1px solid var(--line-strong);
+  background:var(--bg);padding:.3rem .75rem;color:var(--ink-2)}
+.chip strong{color:var(--ink);font-weight:600}
+.attn{margin-left:auto;text-align:right;flex-shrink:0;background:var(--bg);
+  border:1px solid var(--line);padding:1.3rem 1.5rem;min-width:13rem}
+.attn .big{font-family:var(--mono);font-size:3.6rem;line-height:1;font-weight:700;letter-spacing:-.04em}
+.attn .rule-note{font-size:.74rem;color:var(--mono-ink);max-width:14rem;margin:.5rem 0 0;font-family:var(--mono)}
+.attn.grade-low .big{color:var(--low)}
+.attn.grade-mid .big{color:var(--mid)}
+.attn.grade-high .big{color:var(--high)}
+.attn .sub{display:flex;gap:.9rem;justify-content:flex-end;margin-top:.7rem;font-family:var(--mono);font-size:.72rem}
+.attn .sub b{font-weight:700}
+.attn .sub .f{color:var(--low)} .attn .sub .d{color:var(--mid)} .attn .sub .ok{color:var(--high)}
+
+/* ---- anchor nav ---- */
+nav.jump{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);
+  display:flex;gap:.2rem;overflow-x:auto;padding:.4rem 0}
+nav.jump a{font:600 .7rem/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;
+  text-decoration:none;color:var(--mono-ink);padding:.55rem .8rem;white-space:nowrap}
+nav.jump a:hover{color:var(--accent)}
+nav.jump a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* ---- pulse strip ---- */
+.pulse{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));border:1px solid var(--line);border-right:none;margin-top:1.6rem}
+.pv{border-right:1px solid var(--line);background:var(--bg);padding:.9rem 1.1rem}
+.pv b{display:block;font-family:var(--mono);font-size:1.5rem;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.pv span{font-size:.72rem;color:var(--mono-ink);font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase}
+.pv.bad b{color:var(--low)} .pv.warn b{color:var(--mid)} .pv.ok b{color:var(--high)}
+
+/* ---- fault cards ---- */
+.finding{background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--low);
+  padding:1.15rem 1.35rem;margin:0 0 .8rem}
+.finding h3{margin:0 0 .35rem;font-size:1.02rem;font-weight:700;letter-spacing:-.01em;
+  display:flex;gap:.8rem;align-items:baseline;flex-wrap:wrap}
+.finding h3 .mono{margin-left:auto}
+.finding p{margin:.2rem 0;max-width:72ch;font-size:.94rem}
+.finding .fix{margin-top:.45rem;font-size:.86rem;color:var(--ink-2)}
+.finding .fix b{font-family:var(--mono);font-size:.68rem;letter-spacing:.07em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-right:.4rem}
+.allclear{background:var(--high-soft);border:1px solid var(--line);border-left:3px solid var(--high);
+  padding:1rem 1.35rem;color:var(--ink-2);font-size:.94rem}
+
+/* ---- tags ---- */
+.tag{font-family:var(--mono);font-size:.64rem;letter-spacing:.06em;text-transform:uppercase;
+  padding:.22rem .55rem;font-weight:600;white-space:nowrap}
+.tag.fault{background:var(--low-soft);color:var(--low)}
+.tag.run{background:var(--accent-soft);color:var(--accent-deep)}
+.tag.hi{background:var(--accent);color:#fff}
+.tag.md{background:var(--accent-soft);color:var(--accent-deep)}
+.tag.ok{background:var(--high-soft);color:var(--high)}
+
+/* ---- in flight rows ---- */
+.flight{border:1px solid var(--line);border-bottom:none;margin-bottom:.8rem}
+.frow{display:grid;grid-template-columns:1fr auto auto;gap:1rem;align-items:baseline;
+  background:var(--bg);border-bottom:1px solid var(--line);padding:.8rem 1.2rem}
+.frow .t{font-size:.94rem;font-weight:650;color:var(--ink)}
+.frow .d{grid-column:1/-1;font-size:.85rem;color:var(--ink-2);margin:0;max-width:72ch}
+.frow .ref{font-family:var(--mono);font-size:.74rem;color:var(--mono-ink)}
+.qhealth{font-size:.86rem;padding:.7rem 1.2rem;border:1px solid var(--line);background:var(--bg-2);color:var(--ink-2)}
+.qhealth b{color:var(--mid)}
+
+/* ---- waiting on you: numbered leverage list ---- */
+ol.top5{margin:0;padding:0;list-style:none;counter-reset:t5}
+ol.top5 li{counter-increment:t5;display:flex;gap:1.1rem;align-items:baseline;
+  background:var(--bg);border:1px solid var(--line);padding:1rem 1.2rem;margin-bottom:.55rem;
+  font-size:.95rem;flex-wrap:wrap}
+ol.top5 li::before{content:counter(t5,decimal-leading-zero);font-family:var(--mono);
+  font-weight:700;font-size:1.1rem;color:var(--accent);min-width:1.8rem}
+ol.top5 .body{flex:1;min-width:16rem;color:var(--ink-2)}
+ol.top5 .body b{color:var(--ink)}
+ol.top5 .lev{margin-left:auto;flex-shrink:0;text-align:right}
+ol.top5 .lev .why{display:block;font-family:var(--mono);font-size:.68rem;color:var(--mono-ink);margin-top:.35rem;max-width:13rem}
+
+/* ---- tables ---- */
+table{border-collapse:collapse;width:100%;font-size:.9rem;background:var(--bg)}
+.tablewrap{overflow-x:auto;border:1px solid var(--line)}
+th,td{text-align:left;padding:.65rem .9rem;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+th{font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mono-ink);font-weight:600;background:var(--bg-2)}
+
+/* ---- scoreboard grid ---- */
+.grid{border:1px solid var(--line);border-bottom:none}
+.cell{display:grid;grid-template-columns:minmax(10rem,13rem) 1fr minmax(3.6rem,auto) minmax(14rem,1.4fr);
+  gap:1.2rem;align-items:center;background:var(--bg);border-bottom:1px solid var(--line);
+  padding:.85rem 1.2rem}
+.cell:hover{background:var(--bg-2)}
+.cell .name{font-size:.9rem;font-weight:700;letter-spacing:-.01em}
+.cell .sc{font-family:var(--mono);font-weight:700;font-size:1.1rem;text-align:right;white-space:nowrap}
+.cell .sc small{font-size:.66rem;font-weight:600;letter-spacing:.05em;vertical-align:.2em}
+.sc small.up{color:var(--high)} .sc small.down{color:var(--low)} .sc small.hold{color:var(--ink-3)}
+.meter{height:5px;background:var(--line);overflow:hidden;min-width:6rem}
+.meter i{display:block;height:100%;width:calc(var(--v)/10*100%)}
+.score-none .sc{color:var(--ink-3)} .score-none .meter i{background:transparent}
+.score-low .sc{color:var(--low)} .score-low .meter i{background:var(--low)}
+.score-mid .sc{color:var(--mid)} .score-mid .meter i{background:var(--mid)}
+.score-high .sc{color:var(--high)} .score-high .meter i{background:var(--high)}
+.cell .why{font-size:.82rem;color:var(--ink-2);line-height:1.45;margin:0}
+@media (max-width:44rem){.cell{grid-template-columns:1fr auto;gap:.4rem 1rem}
+  .cell .meter{grid-column:1/-1}.cell .why{grid-column:1/-1}}
+
+/* ---- overall score band ---- */
+.oscore{display:flex;align-items:center;gap:1.4rem;border:1px solid var(--line);
+  background:var(--bg);padding:1.1rem 1.4rem;margin-bottom:.8rem;flex-wrap:wrap}
+.oscore .big{font-family:var(--mono);font-size:2.8rem;line-height:1;font-weight:700;letter-spacing:-.04em}
+.oscore .of{font-size:1.1rem;color:var(--ink-3);font-weight:400}
+.oscore.grade-low .big{color:var(--low)} .oscore.grade-mid .big{color:var(--mid)} .oscore.grade-high .big{color:var(--high)}
+.oscore p{margin:0;font-size:.84rem;color:var(--ink-2);max-width:40rem}
+
+/* ---- shift log ---- */
+.wave{display:grid;grid-template-columns:9rem 1fr;gap:1.2rem;padding:.9rem 0;border-bottom:1px solid var(--line)}
+.wave time{font:600 .74rem/1.4 var(--mono);color:var(--accent);padding-top:.2rem}
+.wave p{margin:.15rem 0;font-size:.92rem;max-width:75ch}
+.wave .lesson{color:var(--mono-ink);font-size:.82rem}
+.wave .lesson b{font-family:var(--mono);font-size:.66rem;letter-spacing:.07em;text-transform:uppercase;font-weight:600;color:var(--accent);margin-right:.3rem}
+
+.quiet{color:var(--ink-3);font-size:.85rem;max-width:75ch}
+footer{margin-top:3.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
+  font-size:.76rem;color:var(--mono-ink);font-family:var(--mono)}
+footer p{max-width:80ch;margin:.3rem 0;color:var(--mono-ink)}
+</style>
+
+<div class="wrap">
+
+<div class="tnote">TEMPLATE — the content below is a worked example. Fill every value from the board and roadmap, then delete this banner.</div>
+
+<header>
+  <div>
+    <p class="kicker">Mission Control · Fable roadmap · harness-kit</p>
+    <h1 class="verdict"><em>Two things are broken.</em> Nothing needs you. The tests pass on everything merged, and fixing the merge agent comes first.</h1>
+    <div class="headmeta">
+      <span class="chip">overall <strong>5.2/10</strong></span>
+      <span class="chip">board <strong>Fable #5</strong></span>
+      <span class="chip">branch <strong>feat/forkd-harness-toggle</strong></span>
+      <span class="chip">tests <strong>all passing</strong></span>
+      <span class="chip">projects <strong>2 running</strong></span>
+      <span class="chip">agents <strong>1 out of service</strong></span>
+    </div>
+  </div>
+  <div class="attn grade-mid">
+    <div class="big">2</div>
+    <div class="sub"><span class="f"><b>2</b> faults</span><span class="d"><b>0</b> decisions</span></div>
+    <p class="rule-note">items needing your eyes, worst first, all below the fold in order</p>
+  </div>
+</header>
+
+<nav class="jump">
+  <a href="#pulse">Pulse</a>
+  <a href="#faults">Faults</a>
+  <a href="#flight">Running now</a>
+  <a href="#you">Waiting on you</a>
+  <a href="#next">Next five</a>
+  <a href="#landed">Just landed</a>
+  <a href="#score">Scoreboard</a>
+  <a href="#log">History</a>
+</nav>
+
+<!-- ============ PULSE ============ -->
+<section id="pulse">
+  <div class="pulse">
+    <div class="pv bad"><b>2</b><span>broken now</span></div>
+    <div class="pv ok"><b>3/4</b><span>tasks running</span></div>
+    <div class="pv ok"><b>0</b><span>waiting on you</span></div>
+    <div class="pv ok"><b>19</b><span>merged since last visit</span></div>
+    <div class="pv ok"><b>0</b><span>failures missed</span></div>
+    <div class="pv warn"><b>3</b><span>fixed by hand</span></div>
+  </div>
+</section>
+
+<!-- ============ FAULTS ============ -->
+<section id="faults">
+<h2 class="label">What's broken <span class="count">— 2 open, worst first</span></h2>
+
+<div class="finding">
+  <h3>The merge agent can merge two versions of a file wrong, without asking anyone <span class="mono">task 344 · Trust</span></h3>
+  <p>When two versions of the same file conflict, it is allowed to merge them on its own. Three times in one night it merged them wrong — the result looked fine, ran fine, but lost or mixed up changes, and a person had to untangle it in git each time. The check we added catches code that won't run. It can't catch a merge that runs but is wrong.</p>
+  <p class="fix"><b>Plan</b>Change the rule: merge only when the result is provably right, otherwise stop and ask a person — and act on their written answer. First item on the next-five list.</p>
+</div>
+
+<div class="finding">
+  <h3>The agy agent crashes as soon as it starts a task <span class="mono">out of service</span></h3>
+  <p>It crashed on startup three times, so no tasks are sent to it for now and no work is lost — but one of five agents is out, and it's the one best suited to the browser and screenshot work.</p>
+  <p class="fix"><b>Plan</b>A fix task is queued; it runs before the proof-screenshot work that needs the browser lane.</p>
+</div>
+
+<!-- All-clear state (replaces the cards when the board is clean):
+<div class="allclear">Nothing broken. Every failure this shift was triaged and requeued the moment it appeared.</div> -->
+</section>
+
+<!-- ============ IN FLIGHT ============ -->
+<section id="flight">
+<h2 class="label">Running now <span class="count">— 3 tasks, room for 4</span></h2>
+<div class="flight">
+  <div class="frow">
+    <span class="t">Proof screenshots, end to end</span>
+    <span class="tag run">glm</span><span class="ref">task 351</span>
+    <p class="d">Visual work still proves itself in prose. This wires a screenshot from inside the sandbox onto the task as evidence.</p>
+  </div>
+  <div class="frow">
+    <span class="t">Cards taste pass (external track)</span>
+    <span class="tag run">opus</span><span class="ref">task 356</span>
+    <p class="d">Chunk 9 — the generated idea cards get a read-through for voice and layout before the first real batch goes out.</p>
+  </div>
+  <div class="frow">
+    <span class="t">Cards UI check</span>
+    <span class="tag run">minimax</span><span class="ref">task 341</span>
+    <p class="d">Browser pass over the cards page against the acceptance list.</p>
+  </div>
+</div>
+<div class="qhealth"><b>The queue is running low.</b> Three tasks running with room for more. The standing rule is to add work before doing anything else, so that happens next.</div>
+</section>
+
+<!-- ============ WAITING ON YOU ============ -->
+<section id="you">
+<h2 class="label">Waiting on you <span class="count">— nothing right now</span></h2>
+<div class="allclear">Nothing needs a decision from you. Work continues from the next-five list below.</div>
+</section>
+
+<!-- ============ NEXT FIVE ============ -->
+<section id="next">
+<h2 class="label">The next five <span class="count">— across the whole roadmap, ranked by what each moves</span></h2>
+<ol class="top5">
+<li>
+  <span class="body"><b>Fix the merge agent.</b> Today it may merge two conflicting versions of a file on its own, and sometimes gets it wrong without telling anyone. New rule: merge only when it's sure, otherwise stop and ask a person. This is the last kind of failure that still needs someone to fix things in git by hand.</span>
+  <span class="lev"><span class="tag hi">Trust 7/10</span><span class="why">blocks the 8th trust point</span></span>
+</li>
+<li>
+  <span class="body"><b>Second instance on the Linux box.</b> A setup task, not a decision — msb runs on KVM there the same way it runs on HVF here. Own ports, own database. Ends sleep-freezes, lifts the one-sandbox RAM ceiling, enables overnight runs.</span>
+  <span class="lev"><span class="tag hi">Runs anywhere 2/10</span><span class="why">lowest bucket on the board</span></span>
+</li>
+<li>
+  <span class="body"><b>The inbox, rethought.</b> Your finding: today it's rows that say nothing FAILED doesn't. Design together first — the five things that need a decision, options inline. This page and the inbox should converge.</span>
+  <span class="lev"><span class="tag md">Human's seat 6/10</span><span class="why">design with you, then build</span></span>
+</li>
+<li>
+  <span class="body"><b>Audits on a schedule.</b> The metrics script so audits stop hand-counting, then the presets run on a schedule instead of when a person remembers to ask.</span>
+  <span class="lev"><span class="tag md">Audits 4/10</span><span class="why">every score above depends on honest measurement</span></span>
+</li>
+<li>
+  <span class="body"><b>Quickstart follow-ups.</b> The Quickstart shipped and works — live-tested on an outside workspace. Left from that run: multi-repo workspaces, scoring for them, self-contained tone rules, and cost logging so adopters see the price of the loop.</span>
+  <span class="lev"><span class="tag md">Getting started 3/10</span><span class="why">shipped; leftovers move the score</span></span>
+</li>
+</ol>
+</section>
+
+<!-- ============ JUST LANDED ============ -->
+<section id="landed">
+<h2 class="label">Just landed <span class="count">— merged and verified since the last rewrite</span></h2>
+<div class="tablewrap"><table>
+<tr><th>What</th><th>Proof</th></tr>
+<tr><td>Run outcomes come from evidence, not the old log file</td><td class="mono">harnesses/base.py:368</td></tr>
+<tr><td>Truncated runs resume in their own worktree</td><td class="mono">test_truncation_resume_outcome.py</td></tr>
+<tr><td>One editable routing table replaced the escalation ladder</td><td class="mono">failure_policy.py:60</td></tr>
+<tr><td>Merges pass a syntax gate before landing</td><td class="mono">worktree.py:1293</td></tr>
+</table></div>
+</section>
+
+<!-- ============ SCOREBOARD ============ -->
+<section id="score">
+<h2 class="label">Scoreboard <span class="count">— graded against SCORECARD.md, moves only at audits</span></h2>
+<div class="oscore grade-mid">
+  <div><span class="big">5.2</span><span class="of">/10</span></div>
+  <p>Overall — the plain average of the eleven scored categories. Autonomy joins the average at its first audit; Moonshots is an idea funnel and carries no score.</p>
+</div>
+<div class="grid">
+  <div class="cell score-high">
+    <span class="name">Trust</span>
+    <span class="meter"><i style="--v:7"></i></span>
+    <span class="sc">7<small class="down">▼1</small></span>
+    <p class="why">Results are now judged by what a run actually produced, and failures show up in the product. But the merge agent blended files wrong three times, so the score went down.</p>
+  </div>
+  <div class="cell score-none">
+    <span class="name">Autonomy</span>
+    <span class="meter"><i style="--v:0"></i></span>
+    <span class="sc">–</span>
+    <p class="why">New category: how much work lands without a person touching it. First score at the next audit, from the hands-free counter.</p>
+  </div>
+  <div class="cell score-mid">
+    <span class="name">Memory</span>
+    <span class="meter"><i style="--v:6"></i></span>
+    <span class="sc">6<small class="up">▲1</small></span>
+    <p class="why">Repeat errors get answered from history and failed work files its own lesson. Not yet measured whether any of it changes results.</p>
+  </div>
+  <div class="cell score-high">
+    <span class="name">Routing &amp; cost</span>
+    <span class="meter"><i style="--v:7"></i></span>
+    <span class="sc">7<small class="up">▲1</small></span>
+    <p class="why">One editable policy table replaced the hand-typed ladder. Assignments still come from a typed list, which is why one agent has never worked a task.</p>
+  </div>
+  <div class="cell score-mid">
+    <span class="name">Getting oriented</span>
+    <span class="meter"><i style="--v:6"></i></span>
+    <span class="sc">6<small class="up">▲1</small></span>
+    <p class="why">Projects carry their own notes now. The kit itself still starts every session cold.</p>
+  </div>
+  <div class="cell score-mid">
+    <span class="name">Watching</span>
+    <span class="meter"><i style="--v:6"></i></span>
+    <span class="sc">6<small class="up">▲1</small></span>
+    <p class="why">Failures show up in the product. One page that shows the whole machine's health is still missing.</p>
+  </div>
+  <div class="cell score-mid">
+    <span class="name">The human's seat</span>
+    <span class="meter"><i style="--v:6"></i></span>
+    <span class="sc">6<small class="up">▲1</small></span>
+    <p class="why">Planning now asks questions before it plans. Deciding on a stuck task still sometimes means digging for context.</p>
+  </div>
+  <div class="cell score-mid">
+    <span class="name">Project powers</span>
+    <span class="meter"><i style="--v:5"></i></span>
+    <span class="sc">5<small class="up">▲4</small></span>
+    <p class="why">First outside project running with its own planner and no operator in the loop. Moves again when it ships something a person uses.</p>
+  </div>
+  <div class="cell score-mid">
+    <span class="name">Audits</span>
+    <span class="meter"><i style="--v:4"></i></span>
+    <span class="sc">4<small class="hold">—</small></span>
+    <p class="why">Good audits exist, but every one happens because a person asks. Nothing runs on a schedule and metrics are counted by hand.</p>
+  </div>
+  <div class="cell score-low">
+    <span class="name">Getting started</span>
+    <span class="meter"><i style="--v:3"></i></span>
+    <span class="sc">3<small class="hold">—</small></span>
+    <p class="why">The Quickstart shipped and worked once on an outside workspace. Strangers setting it up routinely is still unproven.</p>
+  </div>
+  <div class="cell score-low">
+    <span class="name">Runs anywhere</span>
+    <span class="meter"><i style="--v:2"></i></span>
+    <span class="sc">2<small class="hold">—</small></span>
+    <p class="why">Still one laptop. The second instance on the Linux box (next-five #2) is the whole move.</p>
+  </div>
+  <div class="cell score-none">
+    <span class="name">Moonshots</span>
+    <span class="meter"><i style="--v:0"></i></span>
+    <span class="sc">–</span>
+    <p class="why">Idea funnel, not a capability — keeps its ideas, carries no score, not in the average.</p>
+  </div>
+</div>
+<p class="quiet" style="margin-top:.8rem">Rows in the roadmap's own order — never re-sorted by score. Definitions and anchors: <span class="mono">docs/fable_roadmap/SCORECARD.md</span>. WHYs and ideas: <span class="mono">fable_roadmap.md → buckets/</span>.</p>
+</section>
+
+<!-- ============ SHIFT LOG ============ -->
+<section id="log">
+<h2 class="label">Recent history <span class="count">— one row per audit close, with its lesson</span></h2>
+<div class="wave"><time>Trust rebuild, pt 1</time><div>
+  <p>Outcomes moved onto evidence from the worktree and the live stream; truncated runs learned to resume where they stopped instead of starting over.</p>
+  <p class="lesson"><b>Lesson</b>A run judged by a stale log file will kill its own retries — judge by what the run actually produced.</p>
+</div></div>
+<div class="wave"><time>Trust rebuild, pt 2</time><div>
+  <p>One editable routing table replaced the hand-typed ladder, failures now show up in the product, the ledger answers repeat failures, and merges pass a syntax gate.</p>
+  <p class="lesson"><b>Lesson</b>The same failure should never be diagnosed twice — the second time, answer it from history.</p>
+</div></div>
+<p class="quiet" style="margin-top:.8rem">Full detail: <span class="mono">docs/fable_roadmap/audits/</span> and the error ledger.</p>
+</section>
+
+<footer>
+<p>Living document — rewritten at every meaningful transition, same URL, never appended. The board is the truth; audits/ carries history. Every number traces to a script or endpoint anyone can run.</p>
+</footer>
+</div>

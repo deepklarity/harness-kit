@@ -23,13 +23,13 @@ class TestSpecCommentModel(APITestCase):
         """SpecComment can be created with all required fields."""
         comment = SpecComment.objects.create(
             spec=self.spec,
-            author_email="claude+claude-opus-4-6@odin.agent",
-            author_label="claude (claude-opus-4-6)",
+            author_email="claude+claude-opus-4-8@odin.agent",
+            author_label="claude (claude-opus-4-8)",
             content="Planning completed successfully.",
             comment_type=CommentType.PLANNING,
         )
         self.assertEqual(comment.spec_id, self.spec.id)
-        self.assertEqual(comment.author_email, "claude+claude-opus-4-6@odin.agent")
+        self.assertEqual(comment.author_email, "claude+claude-opus-4-8@odin.agent")
         self.assertEqual(comment.comment_type, "planning")
         self.assertIsNotNone(comment.created_at)
 
@@ -120,7 +120,7 @@ class TestPlanningResultEndpoint(APITestCase):
                 "raw_output": "Exploring codebase...\nAnalyzing spec...\nPlan: 3 tasks.",
                 "duration_ms": 45000,
                 "agent": "claude",
-                "model": "claude-opus-4-6",
+                "model": "claude-opus-4-8",
                 "effective_input": "Plan this spec: build a login page...",
                 "success": True,
             },
@@ -143,7 +143,7 @@ class TestPlanningResultEndpoint(APITestCase):
                 "raw_output": "Full agent trace here...",
                 "duration_ms": 30000,
                 "agent": "claude",
-                "model": "claude-opus-4-6",
+                "model": "claude-opus-4-8",
                 "effective_input": "Plan prompt...",
                 "success": True,
             },
@@ -155,7 +155,7 @@ class TestPlanningResultEndpoint(APITestCase):
         self.assertIn("planning_trace", self.spec.metadata)
         trace = self.spec.metadata["planning_trace"]
         self.assertEqual(trace["agent"], "claude")
-        self.assertEqual(trace["model"], "claude-opus-4-6")
+        self.assertEqual(trace["model"], "claude-opus-4-8")
         self.assertEqual(trace["duration_ms"], 30000)
         self.assertTrue(trace["success"])
 
@@ -167,7 +167,7 @@ class TestPlanningResultEndpoint(APITestCase):
                 "raw_output": "Error: agent crashed.",
                 "duration_ms": 5000,
                 "agent": "claude",
-                "model": "claude-opus-4-6",
+                "model": "claude-opus-4-8",
                 "effective_input": "Plan prompt...",
                 "success": False,
             },
@@ -188,7 +188,7 @@ class TestPlanningResultEndpoint(APITestCase):
                 "raw_output": "trace...",
                 "duration_ms": 1000,
                 "agent": "claude",
-                "model": "claude-opus-4-6",
+                "model": "claude-opus-4-8",
                 "effective_input": "prompt...",
                 "success": True,
             },
@@ -213,7 +213,7 @@ class TestPlanningResultEndpoint(APITestCase):
                 "raw_output": "",
                 "duration_ms": 2000,
                 "agent": "claude",
-                "model": "claude-opus-4-6",
+                "model": "claude-opus-4-8",
                 "effective_input": "prompt...",
                 "success": True,
             },

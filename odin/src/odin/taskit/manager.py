@@ -12,6 +12,16 @@ if TYPE_CHECKING:
     from odin.backends.base import BoardBackend
 
 
+class BackendUnreachable(Exception):
+    """Raised when the task backend cannot be reached to resolve a task ID.
+
+    Distinguished from a genuinely wrong/ambiguous prefix (which returns
+    ``None``): an unreachable backend is a transient infrastructure error
+    that should be retried, not a permanent 'task not found' that crashes
+    the run as an agent failure (task #339).
+    """
+
+
 class TaskManager:
     """High-level task operations backed by disk storage or a board backend.
 
@@ -167,10 +177,31 @@ class TaskManager:
             author=author,
             content=content,
             attachments=attachments or [],
+            comment_type=comment_type,
         )
         task.comments.append(comment)
         self._update(task)
         return task
+
+    @staticmethod
+    def _email_safe_model(model_name: str) -> str:
+        """Slug a model *display* name into a valid email local-part fragment.
+
+        Model display strings can carry characters that are illegal in an email
+        local part — e.g. agy's ``"Gemini 3.5 Flash (High)"`` (spaces, parens),
+        which made the ``execution_result`` POST 400 with "Enter a valid email
+        address" and failed the task after a successful run (#125). Characters the
+        RFC/Django local-part accepts are kept as-is (so ``zai-coding-plan/glm-5.2``
+        is unchanged); everything else collapses to a single ``-``. Leading/trailing
+        ``-`` and ``.`` are stripped (Django rejects those at the boundary).
+        """
+        import re
+
+        # Django's unquoted local-part atom set, minus '+' (our agent/model joiner)
+        # and minus boundary-sensitive '.' handling below.
+        safe = re.sub(r"[^A-Za-z0-9!#$%&'*/=?^_`{|}~.+-]+", "-", model_name)
+        safe = re.sub(r"-{2,}", "-", safe).strip("-.")
+        return safe or "model"
 
     @staticmethod
     def _format_actor_email(agent: str, model_name: Optional[str] = None) -> str:
@@ -178,12 +209,13 @@ class TaskManager:
 
         Examples:
           ("minimax", "MiniMax-M2.5") -> "minimax+MiniMax-M2.5@odin.agent"
+          ("agy", "Gemini 3.5 Flash (High)") -> "agy+Gemini-3.5-Flash-High@odin.agent"
           ("odin", None) -> "odin@harness.kit"
         """
         if agent == "odin" and not model_name:
             return "odin@harness.kit"
         if model_name:
-            return f"{agent}+{model_name}@odin.agent"
+            return f"{agent}+{TaskManager._email_safe_model(model_name)}@odin.agent"
         return f"{agent}@odin.agent"
 
     @staticmethod
@@ -211,7 +243,12 @@ class TaskManager:
         if not task:
             return []
         return [
-            {"content": c.content, "author": c.author, "attachments": c.attachments}
+            {
+                "content": c.content,
+                "author": c.author,
+                "attachments": c.attachments,
+                "comment_type": c.comment_type,
+            }
             for c in task.comments
         ]
 
@@ -278,10 +315,27 @@ class TaskManager:
     def resolve_task_id(self, prefix: str) -> Optional[str]:
         """Resolve a task ID prefix to a full ID.
 
-        Returns the full ID if exactly one task matches, None otherwise.
+        Returns the full ID if exactly one task matches, ``None`` if the
+        backend was reachable but no task matched (wrong prefix / ambiguous).
+
+        Raises :class:`BackendUnreachable` when the backend call fails or a
+        configured backend returns no data — a transient outage must not be
+        confused with a genuinely wrong ID (which would crash the task as an
+        agent failure). A local-disk store with no tasks returns ``None``
+        (a genuinely empty board is not an outage).
         """
         prefix = str(prefix)
-        tasks = self._load_all()
+        try:
+            tasks = self._load_all()
+        except Exception as exc:
+            raise BackendUnreachable(
+                f"Could not reach task backend to resolve task {prefix!r}: {exc}"
+            ) from exc
+        if not tasks and self._backend is not None:
+            raise BackendUnreachable(
+                f"Task backend returned no tasks while resolving {prefix!r} "
+                f"— the backend may be unreachable or restarting"
+            )
         matches = [t.id for t in tasks if t.id.startswith(prefix)]
         if len(matches) == 1:
             return matches[0]

@@ -35,7 +35,6 @@ Odin is a task-board orchestration CLI for human + AI collaboration. Treat it as
 - **MCP harness integration** — `_generate_mcp_config()` in orchestrator writes per-CLI MCP config files. Each CLI has its own config location and format:
   - **Claude Code**: `.mcp.json` (also supports `--mcp-config` flag — orchestrator writes to `.odin/logs/mcp_<task_id>.json` and passes the path)
   - **Gemini**: `.gemini/settings.json` in working dir (auto-discovered, no CLI flag)
-  - **Qwen**: `.qwen/settings.json` in working dir (auto-discovered, no CLI flag)
   - **Codex**: `.codex/config.toml` in working dir (TOML format, auto-discovered)
   - **Kilo Code / OpenCode**: `opencode.json` in working dir (both `kilo` and `opencode` CLIs read this; different JSON structure: `"mcp"` key, `"type": "local"`, `command` as array)
 

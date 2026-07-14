@@ -1,0 +1,310 @@
+You are auditing a task executed by an AI agent.
+
+
+## CTX — proof artifact (`.proof/task-194/proof.md`)
+
+The worker writes the canonical, complete proof file to `.proof/task-194/proof.md`
+in the worktree (read-only worktree mount; `cat`, `grep`, `head` freely).
+Raw suite outputs sit beside it as `.proof/task-194/<name>.txt` — full output, no
+cap. Read **`.proof/task-194/proof.md` first** — it is the primary, authoritative
+source for what the worker claims and where it lives.
+
+For each acceptance criterion, choose complete vs minimal context: read
+the full proof file once, then grep the section you need. Do NOT re-run
+the verify suites to fill gaps — the worker already attached raw outputs
+under `.proof/task-194/`. The proof path carries no truncation or size cap; read
+the full file when a criterion needs the full chain of evidence.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Work efficiently: batch independent file reads/greps into a single step, and do NOT re-read a file or re-run a search you have already done — each extra tool call is a full model round-trip.
+- **REPORT FORMAT: ONE fenced JSON block, then optionally a markdown rendering.** Your first non-blank line MUST be a single ```json ... ``` fence containing a JSON object with at minimum a `verdict` key. After the fence you MAY also emit the legacy `### Quality Assessment / ### Verdict` sections as a human-readable rendering of the same JSON — the JSON block is the source of truth, the rendering is for the board UI.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.** This task may have been attempted by multiple agents or models previously. Comments are separated by "--- CURRENT ATTEMPT ---" when prior attempts exist. Use earlier history for understanding context only — do NOT penalize the current agent for failures, quota issues, or code quality problems from previous agents/models. Your verdict must reflect solely the current agent's work.
+
+## TASK UNDER REVIEW
+Title: Failure-policy auto-requeue for transient classes (W4.10)
+Status: DONE
+Agent: claude ((historical))
+Duration: N/Ams | Tokens: N/A
+
+## [CTX:description] Task Description
+Fable roadmap task Failure-policy auto-requeue for transient classes (W4.10). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+
+## [CTX:execution_result] Execution Output
+Merge task 194: Failure-policy auto-requeue for transient classes (W4.10)
+
+Task-Id: 194
+Spec-Id: sp_fable_w4
+
+
+ .proof/task-194/backend_tests.txt                  | 1063 ++++++++++++++++++++
+ .proof/task-194/failure_policy_tests.txt           |  399 ++++++++
+ .proof/task-194/odin_tests.txt                     |   22 +
+ .proof/task-194/proof.md                           |  206 ++++
+ .proof/task-194/replay_policy.py                   |  254 +++++
+ .proof/task-194/replay_table.txt                   |   23 +
+ .proof/task-194/self_audit.txt                     |    1 +
+ .proof/task-194/verify_sh.txt                      |   12 +
+ taskit/taskit-backend/config/settings.py           |    8 +
+ taskit/taskit-backend/tasks/dag_executor.py        |  160 ++-
+ taskit/taskit-backend/tasks/failure_policy.py      |  370 +++++++
+ taskit/taskit-backend/tests/test_failure_policy.py |  767 ++++++++++++++
+ .../tests/test_infra_auto_redispatch.py            |   16 +-
+ 13 files changed, 3247 insertions(+), 54 deletions(-)
+
+
+## [CTX:comments] Comments & Proof
+--- CURRENT ATTEMPT ---
+Proof of work (committed at .proof/task-194/proof.md):
+
+# Task 194 — Per-class failure policy at FAILED transition (W4.4)
+
+## Problem (root cause)
+
+The failure-class tagger labels failures, but a human still decides
+requeue/hold — pure toil for transient classes. Live example: a zai
+TLS stream error killed a task; the operator requeued it by hand
+minutes later. Root problem: classification exists, policy doesn't.
+
+The tagger produced `failure_class` on every FAILED transition but
+nothing acted on it. Only `stale_execution` + `agent_execution_failure`
+matching the legacy "no ODIN-STATUS" signature auto-retried, via the
+type-based classifier in `dag_executor._is_infra_failure`. Every other
+transient class (network/TLS/stream errors, truncation, silent hang,
+lock race) was left to a human, and the human was right back where
+they started: deciding what to do with a `truncation` task.
+
+The fix is at the policy layer: a per-class table (auto_requeue /
+reassign / human) consumed by the dispatcher at the FAILED transition
+point — the same point where `tag_failure_class` already stamps the
+classification.
+
+## Changes
+
+### `taskit/taskit-backend/tasks/failure_policy.py` (new)
+
+- **`FailurePolicy` dataclass** — `action`, `max_retries`,
+  `backoff_seconds`, `description`. Frozen so the table is immutable.
+- **`DEFAULT_POLICY_TABLE`** — every value in
+  `failure_tagger.FAILURE_CLASSES` has an entry. Three action
+  partitions:
+  - `auto_requeue`: `stale_execution`, `truncation`, `silent_hang`,
+    `transport_error`, `lock_race` (bounded retries + optional
+    backoff; same assignee + model preserved).
+  - `reassign`: `quota_exhaustion` (the actual reassign lives at
+    reflection time in `views._maybe_reassign_on_quota_failure` —
+    unchanged).
+  - `human`: `env_missing`, `timeout`, `worktree_isolation`,
+    `disk_exhaustion`, `crash`, `cancelled`, `model_unavailable`,
+    `unknown`. Never auto-retry, never auto-reassign; surface for a
+    human with an audit comment.
+- **`resolve_policy(metadata, overrides=None)`** — looks up the policy
+  from `metadata['failure_class']`. Missing key → unknown → human
+  (the safe default; auto-retrying an unclassified failure is worse
+  than paging the operator). Unrecognised class → human. When
+  `overrides` is None, reads from
+  `settings.DAG_EXECUTOR_FAILURE_POLICY_OVERRIDES` so the production
+  contract (callers don't pass settings) matches the test contract.
+- **`apply_failure_policy(task, overrides=None)`** — the dispatcher.
+  - `AUTO_REQUEUE` → delegates to `_maybe_auto_redispatch_infra_failure(task, policy=policy)`.
+    The policy's `backoff_seconds` stamps `metadata.next_retry_after`.
+  - `REASSIGN` → posts a status_update comment naming the class +
+    action + "reassign on reflection (or backoff if provider has
+    headroom)". The actual reassign is unchanged.
+  - `HUMAN` → posts a status_update comment naming the class +
+    action + "surface for human review — no automatic retry". Leaves
+    the task FAILED.
+
+### `taskit/taskit-backend/tasks/dag_executor.py` (extended)
+
+- **`_maybe_auto_redispatch_infra_failure(task, policy=None)`** —
+  extended to take an optional policy. When `policy` is supplied, the
+  function uses `policy.max_retries` (instead of the hardcoded
+  `INFRA_AUTO_REDISPATCH_CAP`), `policy.description` (audit comment
+  wording), and `metadata.failure_class` (class label). When `policy`
+  is None, behaviour is unchanged — preserves backward compat for the
+  24 existing infra-redispatch tests.
+- **FAILED transition hook** — both FAILED sites now call
+  `apply_failure_policy(task)` first; if that returns False
+  (HUMAN, REASSIGN, or no policy match), the legacy
+  `_maybe_auto_redispatch_infra_failure(task)` is the fallback. This
+  guarantees the policy table is the source of truth but a stale
+  pre-W4.4 task (no `failure_class`) still auto-retries.
+- **Cap-reached idempotency** — the policy path sets
+  `metadata.policy_cap_reached` (in addition to the legacy
+  `auto_redispatch_cap_reached` alias) so both the new and old audit
+  queries see the cap event.
+- **Strategy trigger** — the auto-requeue path fires
+  `strategy.trigger(locked_task)` so the task actually re-runs (not
+  just flipped to IN_PROGRESS).
+
+### `taskit/taskit-backend/config/settings.py`
+
+- New settings knob `DAG_EXECUTOR_FAILURE_POLICY_OVERRIDES = {}` —
+  per-class dict of field overrides (`max_retries`,
+  `backoff_seconds`). Operators tune retry bounds per host without
+  code changes. Unknown keys are silently ignored so a typo doesn't
+  crash the dispatcher.
+
+### `taskit/taskit-backend/tests/test_failure_policy.py` (new, 28 tests)
+
+Acceptance coverage:
+
+- **PolicyTableDefaults** (T1–T5) — table covers every failure class,
+  three actions partition the taxonomy exactly, unknown is human,
+  every auto_requeue has max_retries ≥ 1, backoff is non-negative.
+- **PolicyResolution** (R1–R4) — reads `failure_class` from metadata,
+  missing → human, unrecognised → human, settings overrides work.
+- **PolicyDispatchAutoRequeue** (A1–A7) — `transport_error` (zai TLS,
+  the live scenario), `truncation`, `silent_hang`, `lock_race` all
+  auto-requeue; backoff stamps `next_retry_after`; counter + history
+  increment; comment names class + attempt + next action.
+- **PolicyDispatchReassign** (Q1–Q2) — `quota_exhaustion` posts a
+  comment naming "reassign on reflection" and does NOT flip the
+  status (the reflection-time path owns the reassign).
+- **PolicyDispatchHuman** (H1–H6) — `unknown`, `env_missing`,
+  `timeout`, `worktree_isolation`, `crash` all stay FAILED with no
+  `auto_redispatch_count`; `env_missing` posts a comment naming the
+  class + human action so the operator can see WHY nothing fired.
+- **RetryBound** (B1–B3) — cap is respected (3rd transient failure
+  after 2 auto-retries stays FAILED with cap-reached flag),
+  cap-reached is idempotent (no comment spam), per-class counters are
+  isolated (truncation has its own budget independent of
+  transport_error's).
+- **HookAtFailedTransition** (F1) — the hook is a no-op for non-FAILED
+  tasks (defense in depth).
+
+### `taskit/taskit-backend/tests/test_infra_auto_redispatch.py` (updated)
+
+- Three legacy assertions updated to reflect the new class label:
+  the auto-redispatch comment now uses `metadata.failure_class`
+  (e.g. `truncation`) rather than the legacy type-based label
+  (`agent_execution_failure:no_odin_status`). The history entry's
+  `class` field uses the same policy-table label. The
+  `policy_action` field on each history entry discriminates
+  `auto_requeue` (policy-driven) from `infra_legacy` (type-based
+  fallback) so the audit trail is unambiguous about which path fired.
+
+## Acceptance criteria — MET
+
+1. **Replayed historical failures route per policy** — MET.
+   `.proof/task-194/replay_table.txt` shows 18/18 fixtures routed
+   exactly as the brief mandates: 5 transient infra classes →
+   `auto_requeue`, 2 quota classes → `reassign`, 11 real/unknown →
+   `human`. Live scenario (F36 zai TLS) routes to `auto_requeue`.
+2. **A transient failure auto-requeues with a comment trail** — MET.
+   `PolicyDispatchAutoRequeue::test_transport_error_failure_auto_requeues`
+   exercises the live scenario (TLS stream error) end-to-end:
+   `apply_failure_policy` flips FAILED → IN_PROGRESS, preserves
+   assignee + model, posts a status_update comment naming the class
+   (`transport_error`) + attempt (`1/2`) + retrying-with-same-
+   assignee intent, fires the execution strategy.
+3. **Suites green** — MET. 794 backend tests pass (full suite);
+   1445 odin tests pass with the pre-existing unrelated
+   `test_mcp_config_staged_outside_guest_tmpfs` deselected (proven
+   red on the clean checkout before this change — the failure is
+   in `tests/mock/test_microsandbox_harness.py` and is about a
+   pytest tmpdir path, unrelated to the policy layer).
+4. **Policy table in config with sane defaults** — MET.
+   `DEFAULT_POLICY_TABLE` is the single source of truth; operators
+   override per-class via `DAG_EXECUTOR_FAILURE_POLICY_OVERRIDES`
+   without code changes.
+5. **Ev
+
+## [CTX:dependencies] Dependent Tasks
+No blocking dependencies.
+
+## [CTX:metadata] Task Metadata
+spec=sp_fable_w4/w5 task_id=194 status=DONE
+
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers. The JSON block
+is the source of truth for the parser; the markdown is a convenience
+rendering the parser will ignore if both are present.
+
+### Required JSON contract
+
+Your first non-blank line MUST be a fenced JSON block:
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification, the same one you'd put after ### Verdict.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason. Then defects (file:line).",
+  "slop_detection": "Specific AI slop found, or 'None.'",
+  "improvements": "Bullet list of up to 5 actionable items (what, where, why). 'None.' if clean.",
+  "agent_optimization": "Description clarity / model tier / token efficiency / prompt improvement.",
+  "quota_failure": "QUOTA_FAILURE: <agent_name> if the current attempt hit a quota/rate limit; otherwise 'None.'.",
+  "fix_list": ["targeted", "fix", "items", "for", "rework"]
+}
+```
+
+Rules:
+- `verdict` MUST be exactly `PASS`, `NEEDS_WORK`, or `FAIL` (uppercase). A
+  bare word with no review content (just "PASS" alone, or a verdict
+  keyword buried in CLI noise) is treated as a reviewer failure — the
+  system will NOT honor it. The JSON object must be the FIRST thing you
+  emit, complete and parseable, or your review will not be processed.
+  Do NOT skip the structured JSON just because the verdict is obvious;
+  emit the JSON with full sections, even if the verdict is PASS with
+  nothing else to flag.
+- `summary` is the one-sentence justification. It appears on the board
+  as the verdict summary. The "Evidence rules" below apply to it.
+- `fix_list` is REQUIRED for `NEEDS_WORK`: name the exact artifact or
+  change needed so the rework is scoped, not a blind redo. Empty list
+  `[]` is fine for `PASS` and `FAIL`.
+- `quality_assessment`, `slop_detection`, `improvements`,
+  `agent_optimization`, `quota_failure` are strings; default to
+  `"None."` when there's nothing to report.
+- Do NOT emit anything before the opening ```json fence. No
+  preamble, no narration, no permission requests, no conversational
+  text. The parser uses the JSON block as the first content and
+  anything before it is treated as noise.
+
+### Verdict rubric (applies to `verdict` in the JSON)
+
+Choose from what the evidence PROVES. Each rework round costs a full VM
+boot, environment rebuild, and tokens — so FAIL and NEEDS_WORK must be
+earned by substance, never spent on process trivia or invented rules.
+
+- PASS — every acceptance criterion is verifiably met and the work is
+  correct, safe, and builds/runs. Minor style or proof-formatting nits
+  do NOT block a PASS; put them in `improvements`.
+- NEEDS_WORK — the work is substantially correct but has a fixable
+  gap: a missing or truncated proof artifact, an unmet non-critical
+  criterion, or a process slip that does not make the code wrong. Pair
+  EVERY NEEDS_WORK with a TARGETED fix list (the `fix_list` field in
+  the JSON, or a list of items under "### Actionable Improvements" in
+  the rendering — name the exact artifact or change needed) so the
+  rework is scoped, not a blind redo.
+- FAIL — reserved for work that is WRONG, UNSAFE, or UNVERIFIABLE: it breaks the build or a downstream integration, corrupts state, crashes the orchestrator, contradicts a stated acceptance criterion, or supplies no evidence that the core behavior works. Also use FAIL for quota/resource exhaustion (justification must mention "quota" or "rate limit") so the system can reassign to a different agent.
+
+Evidence rules — apply these BEFORE choosing a verdict:
+- CITE OR DROP. Any claimed rule/policy/convention violation MUST quote the exact rule text and name the file it lives in (e.g. CLAUDE.md: "Never run ANY git stash command"). If you cannot quote and locate the rule, it does not exist for this review — you may NOT lower the verdict for it; raise it in `improvements` at most. A cited rule only counts if its stated scope actually covers this situation (a rule scoped to "shared repos / concurrent sessions" is not violated by an action inside the task's own isolated worktree). If a rule violation affects the verdict, include that exact citation in the report text.
+- A truncated, malformed, or missing proof artifact is a REQUEST, not a verdict. Name the specific artifact you need and ask for it (NEEDS_WORK at most). It only drives FAIL when it leaves the CORE behavior genuinely unverifiable AND no other evidence (code you can read, build output, comments) establishes correctness.
+- Judge the SUBSTANCE of the best available evidence. Tasks may span
+  several attempts; earlier attempts' partial numbers or
+  contradictions with history are NOT defects of the current work.
+- Formatting/completeness of proof comments is NOT a verdict criterion
+  when the underlying acceptance criteria are verifiably met; mention
+  formatting issues in `improvements` instead.
+- Comments authored by a human operator (non-agent email) are
+  authoritative context — do not contradict them.
+- Do not demand artifacts the environment cannot produce (e.g. an
+  ODIN-STATUS block when the run was concluded by an operator).
+
+### Optional markdown rendering (after the JSON block)
+
+After the JSON fence you MAY emit the legacy sections as a human-readable rendering of the same content. The parser uses the JSON as the source of truth and ignores the rendering, so emitting it is purely for the board UI. The rendering is OPTIONAL — the JSON block is sufficient on its own. The legacy section names, in order, are:
+
+- `### Quality Assessment`
+- `### Slop Detection`
+- `### Actionable Improvements`
+- `### Agent Optimization`
+- `### Quota / Resource Failure`
+- `### Verdict`

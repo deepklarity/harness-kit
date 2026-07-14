@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from rest_framework import serializers
 from django.utils import timezone
@@ -13,20 +14,80 @@ from .scheduling import ScheduleValidationError, parse_local_datetime
 
 WEEKDAY_KEYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
+_FROZEN_STATUSES = {TaskStatus.DONE, TaskStatus.TESTING}
+
+
+def _completed_at_from_history(obj, status_history):
+    """Timestamp the task last transitioned into DONE/TESTING, or None."""
+    if obj.status not in _FROZEN_STATUSES:
+        return None
+    for entry in reversed(status_history):
+        if entry.new_value in _FROZEN_STATUSES:
+            return entry.changed_at.isoformat()
+    return None
+
+
+def _time_in_statuses_from_history(obj, status_history):
+    """Ms spent in each status, given ascending-ordered status history rows."""
+    result = {}
+    prev_status = None
+    prev_time = obj.created_at
+    for entry in status_history:
+        if prev_status and prev_time:
+            ms = (entry.changed_at - prev_time).total_seconds() * 1000
+            result[prev_status] = result.get(prev_status, 0) + ms
+        prev_status = entry.new_value
+        prev_time = entry.changed_at
+    # Account for time in current status — freeze for DONE/TESTING
+    if prev_status and prev_time:
+        ms = 0 if obj.status in _FROZEN_STATUSES else (timezone.now() - prev_time).total_seconds() * 1000
+        result[prev_status] = result.get(prev_status, 0) + ms
+    # Subtract question-pause time from EXECUTING
+    if "EXECUTING" in result:
+        metadata = obj.metadata or {}
+        pause_ms = metadata.get("executing_paused_ms", 0)
+        paused_at = metadata.get("question_paused_at")
+        if paused_at:
+            paused_start = datetime.fromisoformat(paused_at)
+            if not paused_start.tzinfo:
+                paused_start = paused_start.replace(tzinfo=timezone.utc)
+            pause_ms += (timezone.now() - paused_start).total_seconds() * 1000
+        result["EXECUTING"] = max(0, result["EXECUTING"] - pause_ms)
+    return result
+
 
 def _visible_scheduled_tasks(qs):
+    # Mirrors views._exclude_hidden_scheduled_tasks: only future
+    # occurrences hide; executed scheduled runs are visible history.
     return qs.exclude(
         schedule_id__isnull=False,
         schedule__status__in=[ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED],
-        status__in=[
-            TaskStatus.BACKLOG,
-            TaskStatus.TODO,
-            TaskStatus.REVIEW,
-            TaskStatus.TESTING,
-            TaskStatus.DONE,
-            TaskStatus.FAILED,
-        ],
+        status__in=[TaskStatus.BACKLOG, TaskStatus.TODO],
     )
+
+
+class StrictUnknownFieldsMixin:
+    """Reject any incoming field name that this serializer did not declare.
+
+    DRF's default is to silently drop unknown keys — task #114 hit this when
+    ``spec`` and ``assignee`` were silently dropped from POSTs to /tasks/,
+    leaving the task with no spec/assignee and dispatch unable to route it.
+    This mixin makes the API strict by default: unknown fields surface as
+    a 400 response listing the rejected names so the client can fix the
+    payload. Approved by F43/F44 dispatch guardrails.
+    """
+
+    def to_internal_value(self, data):
+        if hasattr(data, "keys"):
+            declared = set(self.fields.keys())
+            incoming = set(data.keys())
+            unknown = sorted(incoming - declared)
+            if unknown:
+                raise serializers.ValidationError({
+                    "detail": f"Unknown field(s): {', '.join(unknown)}.",
+                    "unknown_fields": unknown,
+                })
+        return super().to_internal_value(data)
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -73,6 +134,8 @@ class TaskSerializer(serializers.ModelSerializer):
     board_escalation_enabled = serializers.SerializerMethodField()
     schedule_summary = serializers.SerializerMethodField()
     completed_at = serializers.SerializerMethodField()
+    needs_human = serializers.SerializerMethodField()
+    needs_human_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -86,6 +149,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "estimated_cost_usd", "reflection_cost_usd", "usage", "time_in_statuses",
             "reference_images",
             "schedule_summary", "completed_at",
+            "needs_human", "needs_human_reason",
         ]
         read_only_fields = ["id", "created_at", "last_updated_at", "kanban_position"]
 
@@ -133,6 +197,15 @@ class TaskSerializer(serializers.ModelSerializer):
             orphan_attachments, many=True, context=self.context
         ).data
 
+    def _status_history(self, obj):
+        """Ordered (ascending) status-change history for this task.
+
+        Queries obj.history directly. Subclasses that prefetch history
+        (e.g. TaskKanbanCardSerializer) override this to read the prefetch
+        cache instead, avoiding a per-task query.
+        """
+        return list(obj.history.filter(field_name="status").order_by("changed_at"))
+
     def get_completed_at(self, obj):
         """Return timestamp when task entered DONE/TESTING (for lifespan freeze).
 
@@ -141,16 +214,7 @@ class TaskSerializer(serializers.ModelSerializer):
         When a task is dragged back from DONE/TESTING, this returns None
         so lifespan resumes growing.
         """
-        frozen_statuses = {TaskStatus.DONE, TaskStatus.TESTING}
-        if obj.status not in frozen_statuses:
-            return None
-        entry = obj.history.filter(
-            field_name="status",
-            new_value__in=[TaskStatus.DONE, TaskStatus.TESTING],
-        ).order_by("-changed_at").first()
-        if entry:
-            return entry.changed_at.isoformat()
-        return None
+        return _completed_at_from_history(obj, self._status_history(obj))
 
     def get_time_in_statuses(self, obj):
         """Compute ms spent in each status from mutation history.
@@ -160,37 +224,7 @@ class TaskSerializer(serializers.ModelSerializer):
         Subtracts question-pause time from EXECUTING when an agent is
         waiting for a human answer.
         """
-        from django.utils import timezone
-        frozen_statuses = {TaskStatus.DONE, TaskStatus.TESTING}
-        history = obj.history.filter(field_name="status").order_by("changed_at")
-        result = {}
-        prev_status = None
-        prev_time = obj.created_at
-        for entry in history:
-            if prev_status and prev_time:
-                ms = (entry.changed_at - prev_time).total_seconds() * 1000
-                result[prev_status] = result.get(prev_status, 0) + ms
-            prev_status = entry.new_value
-            prev_time = entry.changed_at
-        # Account for time in current status — freeze for DONE/TESTING
-        if prev_status and prev_time:
-            if obj.status in frozen_statuses:
-                ms = 0
-            else:
-                ms = (timezone.now() - prev_time).total_seconds() * 1000
-            result[prev_status] = result.get(prev_status, 0) + ms
-        # Subtract question-pause time from EXECUTING
-        if "EXECUTING" in result:
-            metadata = obj.metadata or {}
-            pause_ms = metadata.get("executing_paused_ms", 0)
-            paused_at = metadata.get("question_paused_at")
-            if paused_at:
-                paused_start = datetime.fromisoformat(paused_at)
-                if not paused_start.tzinfo:
-                    paused_start = paused_start.replace(tzinfo=timezone.utc)
-                pause_ms += (timezone.now() - paused_start).total_seconds() * 1000
-            result["EXECUTING"] = max(0, result["EXECUTING"] - pause_ms)
-        return result
+        return _time_in_statuses_from_history(obj, self._status_history(obj))
 
     def get_schedule_summary(self, obj):
         schedule = getattr(obj, "schedule", None)
@@ -206,7 +240,42 @@ class TaskSerializer(serializers.ModelSerializer):
             "current_run_id": obj.current_schedule_run_id,
         }
 
-class CreateTaskSerializer(serializers.Serializer):
+    def _needs_human_reason(self, obj):
+        """Short reason a task needs a human, or "" when it doesn't.
+
+        Priority order (first match wins) keeps the card indicator singular
+        and unambiguous:
+
+          1. merge_status == "needs_human" — merge conflict / stall escalated
+          2. has_pending_question        — an unanswered question comment
+          3. latest reflection ERROR      — reviewer failed, needs triage
+          4. dispatch_blocked_reason set  — dispatch guardrail held the task
+
+        The metadata signals are already on the row (no extra query). The
+        reflection check walks the prefetched ``reflections`` (default
+        ordering is ``-created_at``) so it only flags the *latest* verdict —
+        a superseding PASS/NEEDS_WORK means the task was re-reviewed.
+        """
+        metadata = obj.metadata or {}
+        if metadata.get("merge_status") == "needs_human":
+            return "Merge needs human"
+        if metadata.get("has_pending_question") is True:
+            return "Question pending"
+        for reflection in obj.reflections.all():
+            if (reflection.verdict or "").upper() == "ERROR":
+                return "Review errored"
+            break
+        if metadata.get("dispatch_blocked_reason"):
+            return "Dispatch blocked"
+        return ""
+
+    def get_needs_human(self, obj):
+        return bool(self._needs_human_reason(obj))
+
+    def get_needs_human_reason(self, obj):
+        return self._needs_human_reason(obj)
+
+class CreateTaskSerializer(StrictUnknownFieldsMixin, serializers.Serializer):
     board_id = serializers.IntegerField()
     title = serializers.CharField(max_length=255)
     description = serializers.CharField(required=False, default="")
@@ -238,13 +307,27 @@ class CreateTaskSerializer(serializers.Serializer):
         return data
 
 
-class UpdateTaskSerializer(serializers.Serializer):
+class ReworkTaskSerializer(StrictUnknownFieldsMixin, serializers.Serializer):
+    instruction = serializers.CharField()
+    created_by = serializers.EmailField(required=False)
+    created_by_user_id = serializers.IntegerField(required=False)
+
+    def validate(self, data):
+        if not data.get("created_by") and not data.get("created_by_user_id"):
+            raise serializers.ValidationError(
+                "Either created_by (email) or created_by_user_id is required."
+            )
+        return data
+
+
+class UpdateTaskSerializer(StrictUnknownFieldsMixin, serializers.Serializer):
     title = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False)
     dev_eta_seconds = serializers.IntegerField(required=False, allow_null=True)
     priority = serializers.ChoiceField(choices=TaskPriority.choices, required=False)
     status = serializers.ChoiceField(choices=TaskStatus.choices, required=False)
     assignee_id = serializers.IntegerField(required=False, allow_null=True)
+    spec_id = serializers.IntegerField(required=False, allow_null=True)
     label_ids = serializers.ListField(
         child=serializers.IntegerField(), required=False, allow_empty=True
     )
@@ -272,17 +355,33 @@ class AddLabelsSerializer(serializers.Serializer):
     updated_by = serializers.EmailField()
 
 
+class SetClaudeTokenSerializer(serializers.Serializer):
+    """Input validator for POST /boards/<id>/claude-token/ (write-only)."""
+    token = serializers.CharField(required=True, allow_blank=False, trim_whitespace=True)
+
+
 class BoardSerializer(serializers.ModelSerializer):
     member_ids = serializers.SerializerMethodField()
     agents = serializers.SerializerMethodField()
+    claude_token_configured = serializers.SerializerMethodField()
 
     class Meta:
         model = Board
-        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "skip_reflection", "skip_proof", "auto_start_planned_tasks", "reflection_model", "model_escalation_priority", "escalation_enabled", "failure_max_retries", "created_at", "updated_at", "member_ids", "agents"]
+        fields = ["id", "name", "description", "is_trial", "working_dir", "timezone", "odin_initialized", "skip_reflection", "skip_proof", "auto_start_planned_tasks", "reflection_model", "reflection_review_strategy", "model_escalation_priority", "reviewer_order", "escalation_enabled", "failure_max_retries", "routing_policy", "allow_project_root_execution", "created_at", "updated_at", "member_ids", "agents", "claude_token_configured"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_member_ids(self, obj):
         return list(obj.memberships.values_list("user_id", flat=True))
+
+    def get_claude_token_configured(self, obj):
+        """Whether a .claude-token file exists in the board's working_dir.
+        Never exposes the token value — only its presence."""
+        if not obj.working_dir:
+            return False
+        try:
+            return (Path(obj.working_dir) / ".claude-token").is_file()
+        except OSError:
+            return False
 
     def get_agents(self, obj):
         memberships = obj.memberships.filter(user__role="AGENT").select_related("user")
@@ -317,7 +416,7 @@ class BoardSerializer(serializers.ModelSerializer):
         return agents
 
 
-class CreateBoardSerializer(serializers.ModelSerializer):
+class CreateBoardSerializer(StrictUnknownFieldsMixin, serializers.ModelSerializer):
     auto_init = serializers.BooleanField(default=True, required=False)
     disabled_agents = serializers.ListField(
         child=serializers.CharField(), required=False, default=list,
@@ -348,10 +447,26 @@ class CreateBoardSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        mode = attrs.get("directory_mode", "existing")
+        # `directory_mode` has a default of "existing", so attrs.get() always
+        # returns a value. Check the user's initial payload instead — if they
+        # didn't send any directory fields at all, the board is allowed to
+        # have a null working_dir (the model is nullable).
+        initial = self.initial_data if hasattr(self, "initial_data") else {}
+        user_supplied_any_directory_field = any(
+            key in initial for key in ("directory_mode", "working_dir",
+                                       "parent_directory", "directory_name")
+        )
+        if not user_supplied_any_directory_field:
+            return attrs
+
+        mode = attrs.get("directory_mode")
         working_dir = attrs.get("working_dir")
         parent_directory = attrs.get("parent_directory")
         directory_name = attrs.get("directory_name")
+
+        # Implicit mode from the fields the caller actually supplied.
+        if not mode:
+            mode = "existing" if working_dir else "create"
 
         if mode == "existing":
             if not working_dir:
@@ -407,13 +522,14 @@ class SpecSerializer(serializers.ModelSerializer):
         queryset=Board.objects.all(), source="board",
     )
     cost_summary = serializers.SerializerMethodField()
+    merge_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = Spec
         fields = [
             "id", "odin_id", "title", "source", "content", "abandoned",
             "board_id", "metadata", "created_at", "tasks",
-            "comments", "cost_summary", "status", "planner_config",
+            "comments", "cost_summary", "merge_summary", "status", "planner_config",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -425,6 +541,10 @@ class SpecSerializer(serializers.ModelSerializer):
         from .pricing import compute_spec_cost_summary
         return compute_spec_cost_summary(obj.tasks.all())
 
+    def get_merge_summary(self, obj):
+        from .pricing import compute_spec_merge_summary
+        return compute_spec_merge_summary(obj.tasks.all())
+
 
 class SpecListSerializer(serializers.ModelSerializer):
     board_id = serializers.PrimaryKeyRelatedField(
@@ -432,19 +552,24 @@ class SpecListSerializer(serializers.ModelSerializer):
     )
     task_count = serializers.IntegerField(read_only=True)
     cost_summary = serializers.SerializerMethodField()
+    merge_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = Spec
         fields = [
             "id", "odin_id", "title", "source", "content", "abandoned",
             "board_id", "metadata", "created_at", "task_count", "cost_summary",
-            "status", "planner_config",
+            "merge_summary", "status", "planner_config",
         ]
         read_only_fields = ["id", "created_at"]
 
     def get_cost_summary(self, obj):
         from .pricing import compute_spec_cost_summary
         return compute_spec_cost_summary(obj.tasks.all())
+
+    def get_merge_summary(self, obj):
+        from .pricing import compute_spec_merge_summary
+        return compute_spec_merge_summary(obj.tasks.all())
 
 
 class CreateSpecSerializer(serializers.ModelSerializer):
@@ -564,6 +689,41 @@ class TaskListSerializer(TaskSerializer):
         fields = TaskSerializer.Meta.fields + ["comment_count"]
 
 
+# Fields TaskCard never renders (see taskit-frontend TaskCard.tsx) — each one
+# costs an extra per-task query (comment scan for trace parsing, reflection
+# cost sum, board FK, attachments) when computed via TaskSerializer's
+# SerializerMethodFields. The task detail modal fetches these itself, so the
+# Kanban board — which lists a full page of tasks per lane — excludes them.
+_KANBAN_CARD_EXCLUDED_FIELDS = {
+    "estimated_cost_usd", "reflection_cost_usd", "usage", "reference_images",
+    "board_skip_reflection", "board_skip_proof", "board_escalation_enabled",
+    "schedule_summary", "spec_odin_id",
+}
+
+
+class TaskKanbanCardSerializer(TaskListSerializer):
+    """Lightweight task serializer for Kanban lane cards.
+
+    time_in_statuses/completed_at still read obj.history, but rely on it
+    being prefetched (see the `kanban` view's queryset) so no per-task
+    query is issued for either field.
+    """
+
+    class Meta(TaskListSerializer.Meta):
+        fields = [f for f in TaskListSerializer.Meta.fields if f not in _KANBAN_CARD_EXCLUDED_FIELDS]
+
+    def _status_history(self, obj):
+        # obj.history.all() hits the prefetch cache (no query) as long as
+        # the queryset prefetched `history`; falls back to a live query
+        # (via the base class) if this serializer is ever used unprefetched.
+        if not hasattr(obj, "_prefetched_objects_cache") or "history" not in obj._prefetched_objects_cache:
+            return super()._status_history(obj)
+        return sorted(
+            (h for h in obj.history.all() if h.field_name == "status"),
+            key=lambda h: h.changed_at,
+        )
+
+
 class TaskSearchResultSerializer(serializers.Serializer):
     task_id = serializers.IntegerField()
     title = serializers.CharField()
@@ -597,14 +757,37 @@ class TaskWithHistorySerializer(TaskSerializer):
 
 
 class TaskDetailSerializer(TaskWithHistorySerializer):
-    """Single task detail: history + comments + spec_title + estimated cost."""
+    """Single task detail: history + comments + spec_title + twins + quote."""
     spec_title = serializers.SerializerMethodField()
+    twins = serializers.SerializerMethodField()
+    estimate = serializers.SerializerMethodField()
+    actual = serializers.SerializerMethodField()
 
     class Meta(TaskWithHistorySerializer.Meta):
-        fields = TaskWithHistorySerializer.Meta.fields + ["spec_title"]
+        fields = TaskWithHistorySerializer.Meta.fields + [
+            "spec_title", "twins", "estimate", "actual",
+        ]
 
     def get_spec_title(self, obj):
         return obj.spec.title if obj.spec_id else None
+
+    def get_twins(self, obj):
+        from .similarity import find_twins
+        return find_twins(obj)
+
+    def get_estimate(self, obj):
+        # The dispatch-time quote, stamped on metadata by
+        # estimation.stamp_estimate. Exposed as structured data so the
+        # UI never has to parse the dispatch comment markdown.
+        metadata = obj.metadata or {}
+        return metadata.get("estimate")
+
+    def get_actual(self, obj):
+        # The completion-time actual cost, stamped by
+        # estimation.stamp_actual. Paired with `estimate` for the
+        # quote-vs-actual trail.
+        metadata = obj.metadata or {}
+        return metadata.get("actual")
 
 
 class SpecDiagnosticSerializer(serializers.ModelSerializer):
@@ -613,13 +796,14 @@ class SpecDiagnosticSerializer(serializers.ModelSerializer):
     comments = SpecCommentSerializer(many=True, read_only=True)
     board_name = serializers.CharField(source="board.name", read_only=True)
     cost_summary = serializers.SerializerMethodField()
+    merge_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = Spec
         fields = [
             "id", "odin_id", "title", "source", "content", "abandoned",
             "board_id", "board_name", "metadata", "created_at", "tasks",
-            "comments", "cost_summary",
+            "comments", "cost_summary", "merge_summary",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -627,13 +811,25 @@ class SpecDiagnosticSerializer(serializers.ModelSerializer):
         from .pricing import compute_spec_cost_summary
         return compute_spec_cost_summary(obj.tasks.all())
 
+    def get_merge_summary(self, obj):
+        from .pricing import compute_spec_merge_summary
+        return compute_spec_merge_summary(obj.tasks.all())
 
-REFLECTION_ALLOWED_AGENTS = {"claude", "gemini", "codex"}
+
+# Derived from agent_models.json (via get_active_agents) rather than
+# hardcoded, so retiring/curating a provider there automatically removes it
+# from valid reflection reviewers here too — no second list to go stale.
+def _reflection_allowed_agents():
+    from .pricing import get_active_agents
+    return get_active_agents()
+
+
+REFLECTION_ALLOWED_AGENTS = _reflection_allowed_agents()
 
 
 class ReflectionRequestSerializer(serializers.Serializer):
     reviewer_agent = serializers.CharField(default="claude")
-    reviewer_model = serializers.CharField(default="claude-opus-4-6")
+    reviewer_model = serializers.CharField(default="claude-opus-4-8")
     custom_prompt = serializers.CharField(required=False, allow_blank=True, default="")
     context_selections = serializers.ListField(
         child=serializers.CharField(),

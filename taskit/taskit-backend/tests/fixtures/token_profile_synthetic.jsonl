@@ -1,0 +1,28 @@
+"""Synthetic opencode JSONL trace — used by test_token_profile.
+
+Schema mirrors a real opencode/harness trace: each line is JSON, tool
+events carry ``type=tool``, ``tool=<name>``, ``callID``, and ``state`` with
+``status``, ``input``, and ``output``. Non-tool lines (``type`` other than
+"tool" — session, loop, stream events) must be ignored.
+"""
+{"type":"session","id":"s1","message":"creating"}
+{"type":"loop","session.id":"s1","step":0}
+{"type":"stream","provider":"minimax-coding-plan","model":"MiniMax-M3"}
+{"type":"tool","tool":"read","callID":"c1","state":{"status":"completed","input":{"filePath":"/tmp/CLAUDE.md"},"output":"<huge CLAUDE body — 4200 chars>"}}
+{"type":"tool","tool":"bash","callID":"c2","state":{"status":"completed","input":{"command":"ls /tmp/work"},"output":"a\nb\nc"}}
+{"type":"tool","tool":"glob","callID":"c3","state":{"status":"completed","input":{"pattern":"**/*.py"},"output":["a.py","b.py"]}}
+{"type":"tool","tool":"grep","callID":"c4","state":{"status":"completed","input":{"pattern":"class"},"output":"a.py:1:class Foo"}}
+{"type":"tool","tool":"bash","callID":"c5","state":{"status":"completed","input":{"command":"python3 -m pytest tests -q"},"output":"3 passed"}}
+{"type":"tool","tool":"bash","callID":"c6","state":{"status":"completed","input":{"command":"git commit -m 'fix'"},"output":"ok"}}
+{"type":"tool","tool":"bash","callID":"c7","state":{"status":"completed","input":{"command":"cat foo.txt"},"output":"hello"}}
+{"type":"tool","tool":"write","callID":"c8","state":{"status":"completed","input":{"filePath":"/tmp/new.py","content":"x=1\n"},"output":"wrote"}}
+{"type":"tool","tool":"edit","callID":"c9","state":{"status":"completed","input":{"filePath":"/tmp/new.py","oldText":"x=1","newText":"x=2"},"output":"edited"}}
+{"type":"tool","tool":"todowrite","callID":"c10","state":{"status":"completed","input":{"todos":[{"content":"a"}]},"output":""}}
+{"type":"tool","tool":"task","callID":"c11","state":{"status":"completed","input":{"prompt":"Find the auth code in this repo"},"output":"[long search result]"}}
+{"type":"tool","tool":"task","callID":"c12","state":{"status":"completed","input":{"prompt":"Edit the helper to handle null"},"output":"[long edit log]"}}
+{"type":"tool","tool":"task","callID":"c13","state":{"status":"completed","input":{"prompt":"Verify the suite passes"},"output":"3 passed"}}
+{"type":"tool","tool":"task","callID":"c14","state":{"status":"completed","input":{"prompt":"Build something interesting"},"output":"unknown"}}
+{"type":"tool","tool":"webfetch","callID":"c15","state":{"status":"completed","input":{"url":"https://example.com"},"output":"<html>"}}
+{"type":"tool","tool":"unknowntool","callID":"c16","state":{"status":"completed","input":{"stuff":"x"},"output":""}}
+{"type":"tool","tool":"bash","callID":"c17","state":{"status":"running","input":{"command":"ls"},"output":""}}
+{"type":"final","message":"closing"}

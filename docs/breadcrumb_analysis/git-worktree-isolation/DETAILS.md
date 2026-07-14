@@ -110,7 +110,7 @@ Lazy auto-init flow:
 
 ## 4. Spec Branch + Spec Worktree Creation
 
-**File**: `odin/src/odin/orchestrator.py` :: `plan_spec()` (approx line 411)
+**File**: `odin/src/odin/orchestrator.py` :: `plan()` (approx line 411)
 **Called by**: `odin plan` → `_plan_decompose_impl()`
 
 ```python

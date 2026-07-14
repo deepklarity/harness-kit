@@ -1,0 +1,6 @@
+{
+  "_fixture_note": "PARSER-BASELINE SYNTHETIC fixture. NOT a real captured review. Exercises the FAIL verdict path. Excluded from the recommendation evidence.",
+  "verdict": "FAIL",
+  "fixture_category": "parser_baseline_synthetic",
+  "shape": "json_contract"
+}

@@ -23,9 +23,10 @@ Each CLI has a different mechanism for granting MCP tool permissions:
 |-----|-----------|-------|
 | **Claude Code** | `--allowedTools` CLI flag | Harness injects in `build_execute_command()` |
 | **Gemini** | `"trust": true` | `.gemini/settings.json` config file |
-| **Qwen** | `"trust": true` | `.qwen/settings.json` config file |
 | **Kilo Code** | `"alwaysAllow": [...]` | `.kilocode/mcp.json` config file |
 | **OpenCode** | `"permission": {"tool": "allow"}` | `opencode.json` config file |
+
+> Qwen was retired in task #102 — no longer a config writer.
 
 **Important**: Claude Code does NOT support `alwaysAllow` in `.mcp.json`. Its config file only defines the server (command + env). The orchestrator passes `mcp_allowed_tools` (prefixed as `mcp__taskit__<tool>`) in the context dict, and the Claude harness converts them to `--allowedTools` on the command line.
 
@@ -41,7 +42,7 @@ Each CLI has a different mechanism for granting MCP tool permissions:
 | `test_claude_tool_names_cover_all_server_tools` | Prefixed tool list drifts from server tools |
 | `test_kilocode_alwaysAllow_contains_all_server_tools` | Kilo Code missing a tool |
 | `test_opencode_permission_contains_all_server_tools` | OpenCode missing tool → blocked in --auto mode |
-| `test_approval_mechanism_present[claude/gemini/qwen/minimax]` | Agent missing its approval mechanism |
+| `test_approval_mechanism_present[claude/gemini/minimax]` | Agent missing its approval mechanism |
 | `test_every_formatter_has_config_path` | Formatter added without file path mapping |
 | `test_every_config_path_has_formatter` | File path added without formatter |
 | `test_all_formatters_produce_valid_output` | Formatter returns empty or unparseable content |

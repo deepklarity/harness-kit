@@ -1,0 +1,477 @@
+[
+{
+"id": "96",
+"title": "Ignition smoke test (14.1)",
+"description": ""
+},
+{
+"id": "97",
+"title": "Repo-wide CI pipeline (01.1)",
+"description": ""
+},
+{
+"id": "99",
+"title": "Single-source DAG logic (01.3)",
+"description": ""
+},
+{
+"id": "100",
+"title": "TEST_PLAN subprocess-edge gaps (01.4)",
+"description": ""
+},
+{
+"id": "101",
+"title": "Loop registry seed doc (09.1)",
+"description": ""
+},
+{
+"id": "102",
+"title": "Remove qwen support from the codebase (user directive)",
+"description": ""
+},
+{
+"id": "103",
+"title": "Wire Antigravity (agy) as the gemini-successor harness",
+"description": ""
+},
+{
+"id": "110",
+"title": "Fix agy permission-bypass flags (real-CLI defect from #103 proof)",
+"description": ""
+},
+{
+"id": "111",
+"title": "Bake agy into the sandbox image so agy work runs confined",
+"description": ""
+},
+{
+"id": "112",
+"title": "Executions resolve the agent default model when none is selected",
+"description": ""
+},
+{
+"id": "113",
+"title": "Merge-conflict status message names the conflicting files",
+"description": ""
+},
+{
+"id": "114",
+"title": "Worktree gitignore injection covers ALL generated agent-config paths (F24 root fix)",
+"description": ""
+},
+{
+"id": "115",
+"title": "Config-driven merge agent: auto-resolve task->spec conflicts or escalate with a question",
+"description": ""
+},
+{
+"id": "116",
+"title": "Trace Explorer Timeline never renders blank (opencode timeline build + fallback)",
+"description": ""
+},
+{
+"id": "117",
+"title": "Notifications endpoints resolve the dev-mode user (no more 400 spam)",
+"description": ""
+},
+{
+"id": "118",
+"title": "Dispatch guardrails: no silent skips or project-root fallback; strict API writes",
+"description": ""
+},
+{
+"id": "119",
+"title": "Rework keeps agent/model continuity; no dead-provider routing; traces rotate per attempt",
+"description": ""
+},
+{
+"id": "120",
+"title": "Reconcile stale backend test suite with active lineup (18 pre-existing failures)",
+"description": "Reconcile the stale backend test suite with the current active lineup (pre-existing failures)\n\n18 backend tests fail on a clean checkout, all predating 2026-07-05's routing fixes. Two clusters:\n1. Lineup-pinned tests broken since #104's agent_models.json refresh (pricing/cost tests expect\n   e.g. claude-sonnet-4-5 which is no longer in the lineup).\n2. Board-create (400 vs 201) and dag_executor transition tests failing for reasons to be RCA'd.\n\n## The failing set (baseline, clean HEAD 2026-07-05)\nERROR: test_all_models_match_expected_pricing (tests.test_cost_estimation.TestAllHarnessModelPricing.test_all_models_match_expected_pricing)\nERROR: test_board_is_trial_default (tests.test_crud.TestBoardCRUD.test_board_is_trial_default)\nERROR: test_full_odin_flow (tests.test_flows.TestOdinIntegrationFlow.test_full_odin_flow)\nERROR: test_no_model_has_null_pricing (tests.test_cost_estimation.TestAllHarnessModelPricing.test_no_model_has_null_pricing)\nFAIL: test_all_models_present_in_pricing_table (tests.test_cost_estimation.TestAllHarnessModelPricing.test_all_models_present_in_pricing_table)\nFAIL: test_all_models_produce_numeric_cost (tests.test_cost_estimation.TestAllHarnessModelPricing.test_all_models_produce_numeric_cost)\nFAIL: test_create_board (tests.test_crud.TestBoardCRUD.test_create_board)\nFAIL: test_create_board_in_existing_directory (tests.test_crud.TestBoardCRUD.test_create_board_in_existing_directory)\nFAIL: test_failure_fallback_classifies_backend_auth_failure_from_log (tests.test_dag_executor.ExecuteSingleTaskTests.test_failure_fallback_classifies_backend_auth_failure_from_log)\nFAIL: test_failure_fallback_posts_diagnostic_comment (tests.test_dag_executor.ExecuteSingleTaskTests.test_failure_fallback_posts_diagnostic_comment)\nFAIL: test_failure_fallback_strips_ansi_from_debug_excerpt (tests.test_dag_executor.ExecuteSingleTaskTests.test_failure_fallback_strips_ansi_from_debug_excerpt)\nFAIL: test_failure_transitions_to_failed (tests.test_dag_executor.ExecuteSingleTaskTests.test_failure_transitions_to_failed)\nFAIL: test_full_lifecycle_todo_to_done (tests.test_flows.TestTaskLifecycle.test_full_lifecycle_todo_to_done)\nFAIL: test_respects_odin_status_update (tests.test_dag_executor.ExecuteSingleTaskTests.test_respects_odin_status_update)\nFAIL: test_review_counts_as_satisfied (tests.test_dag_executor.CheckDepsTests.test_review_counts_as_satisfied)\nFAIL: test_success_transitions_to_review (tests.test_dag_executor.ExecuteSingleTaskTests.test_success_transitions_to_review)\nFAIL: test_three_deps_complete_in_different_orders (tests.test_dag_executor.CheckDepsTests.test_three_deps_complete_in_different_orders)\nFAIL: test_timeout_transitions_to_failed (tests.test_dag_executor.ExecuteSingleTaskTests.test_timeout_transitions_to_failed)\n\n\n## Requirements\n- RCA each cluster: stale expectation vs real regression. Fix tests that pin retired lineup data\n  to derive expectations from data/agent_models.json (single source — see pricing.get_active_agents\n  / get_agent_default_model). Any REAL regression found gets its own report before fixing.\n- Suite must pass clean: tests.test_crud, test_forced_provider, test_cost_estimation,\n  test_dag_executor, test_flows.\n- DO NOT reintroduce retired providers (qwen #102, gemini F12) into tests as active fixtures;\n  retired names may appear only as negative-case fixtures.\n\nOrigin: found while verifying the F45 routing fixes (commit 2875029). DO NOT DISPATCH before F40\nbranch reconciliation."
+},
+{
+"id": "128",
+"title": "Backend test-suite drift reconciliation (W2.2)",
+"description": ""
+},
+{
+"id": "129",
+"title": "Odin test-suite drift reconciliation (W2.3)",
+"description": ""
+},
+{
+"id": "130",
+"title": "Lint config: ruff for python projects (W2.4a)",
+"description": ""
+},
+{
+"id": "131",
+"title": "Lint config: prettier + eslint for frontend (W2.4b)",
+"description": ""
+},
+{
+"id": "132",
+"title": "Pre-commit hook wiring (W2.4c)",
+"description": ""
+},
+{
+"id": "133",
+"title": "Bake python test deps into the odin-agents image recipe (W2.6)",
+"description": ""
+},
+{
+"id": "135",
+"title": "seedmodels prune + agent seed single-source (W2.8)",
+"description": ""
+},
+{
+"id": "136",
+"title": "UI: surface dispatch_blocked_reason + reflection error visibility (W2.9)",
+"description": ""
+},
+{
+"id": "137",
+"title": "Auto-redispatch infra-classed failures (W2.10)",
+"description": "Every infra failure today (stale_execution recovery kills, disk-full silent\ndeaths, provider truncation) required the OPERATOR to notice and PATCH the task\nback to IN_PROGRESS by hand. The failure taxonomy already distinguishes these\nfrom real work failures — the system must retry them itself.\n\n## Scope\n1. In taskit-backend's dag_executor, after a task lands FAILED, when\n   metadata.last_failure_type is an INFRA class (stale_execution, plus\n   agent_execution_failure whose reason is the \"did not emit ODIN-STATUS /\n   truncated / terminated silently\" signature), auto-redispatch: same assignee,\n   same model (reuse the existing rework-continuity path from #119), capped at\n   2 auto-retries per task (metadata counter), with a status_update comment\n   naming the failure class and attempt number.\n2. Real failures (agent reported FAILED in ODIN-STATUS, reflection FAIL) are\n   NEVER auto-retried — those need judgment.\n3. Tests: infra-classed failure → one auto-redispatch with continuity; cap\n   respected; explicit agent-reported FAILED untouched.\n\n## Acceptance\n- Backend tests green including the new ones (attach output).\n- Metadata trail shows attempt counter + failure class per auto-retry.\n\n## Working protocol\n- odin runs you on an isolated task branch inside a worktree — do NOT create or\n  switch branches; edit and git commit in your working directory.\n- Attach proof for every acceptance criterion as task comments.\n- Never use git stash. Never edit files outside your worktree."
+},
+{
+"id": "138",
+"title": "Executor prunes task worktree on DONE (W2.11)",
+"description": "Task worktrees (each ~0.1-1GB with node_modules/venvs) accumulate until spec\nfinalization; today they filled the disk to 100% and took the whole loop down\n(backend API bounced, three running tasks died). The operator pruned by hand.\n\n## Scope\n1. When a task transitions to DONE, the backend removes its worktree\n   (`git worktree remove --force`) and clears metadata.worktree_path — the task\n   branch preserves all work. Failures to remove must not block the transition\n   (log + comment instead).\n2. REVIEW/TESTING/FAILED worktrees are kept (inspection/rework need them).\n3. Tests: DONE transition removes the worktree and keeps the branch; removal\n   error does not block the transition.\n\n## Acceptance\n- Backend tests green including the new ones (attach output).\n\n## Working protocol\n- odin runs you on an isolated task branch inside a worktree — do NOT create or\n  switch branches; edit and git commit in your working directory.\n- Attach proof for every acceptance criterion as task comments.\n- Never use git stash. Never edit files outside your worktree."
+},
+{
+"id": "149",
+"title": "Local verification gate: one command, four suites (W3.1)",
+"description": ""
+},
+{
+"id": "152",
+"title": "Per-task XDG isolation for opencode-family agents (W3.4)",
+"description": ""
+},
+{
+"id": "153",
+"title": "Failure-class tagger v1: deterministic failure labeling (W3.5)",
+"description": ""
+},
+{
+"id": "155",
+"title": "Kill per-run venv/pip setup: baked test env complete + discoverable (W3.7)",
+"description": ""
+},
+{
+"id": "157",
+"title": "Trace-driven efficiency audit (W3.9) — operator-resolved conflicts with task 155 (both prompt-assembly additions kept: baked-env hint + orientation block)",
+"description": ""
+},
+{
+"id": "158",
+"title": "Auto-commit bulk/venv guard: never sweep junk even with stale gitignore (W3.10)",
+"description": ""
+},
+{
+"id": "160",
+"title": "Concurrency cap enforced on rework re-entry (W3.12)",
+"description": ""
+},
+{
+"id": "161",
+"title": "Restart-safe execution recovery: adopt live pids, never duplicate (W3.13)",
+"description": ""
+},
+{
+"id": "162",
+"title": "agy MCP wiring: proof comments from the last confined provider (W3.14)",
+"description": ""
+},
+{
+"id": "163",
+"title": "Autonomy metrics from data, not hand counts (W3.15)",
+"description": ""
+},
+{
+"id": "168",
+"title": "Codebase breadcrumbs + documentation de-slop sweep (W3.20)",
+"description": ""
+},
+{
+"id": "169",
+"title": "Fix providers page: harness_usage_status integration + graceful degrade (W3.21)",
+"description": ""
+},
+{
+"id": "171",
+"title": "Root-cause the silent post-PASS merge stall (W3.23)",
+"description": ""
+},
+{
+"id": "175",
+"title": "Services survive their launcher: self-detach + supervise (W3.27)",
+"description": ""
+},
+{
+"id": "176",
+"title": "Measure real VM memory to unlock concurrency 4+ (W3.28)",
+"description": ""
+},
+{
+"id": "177",
+"title": "Breadcrumb staleness checker (W3.29) — operator-resolved .proof collision (kept spec side; task side deleted shared proof file)",
+"description": ""
+},
+{
+"id": "182",
+"title": "Fix visual proof in confined runs: chromium SIGTRAP + best-architecture screenshots (W3.34)",
+"description": ""
+},
+{
+"id": "183",
+"title": "Precision efficiency fine-comb (W3.35) — proof-path collision resolved by preserving 183's proof as .proof/proof-task-183.md (backlog 0h)",
+"description": ""
+},
+{
+"id": "184",
+"title": "Card-level needs-human indicator on the board (W3.36)",
+"description": ""
+},
+{
+"id": "185",
+"title": "Per-task proof paths: .proof/task-<id>/ (W4.1)",
+"description": ""
+},
+{
+"id": "186",
+"title": "Auto-promotion v1.5: RECOMMEND PROMOTE auto-advances TESTING→DONE (W4.2)",
+"description": ""
+},
+{
+"id": "187",
+"title": "Wave-planning automation: draft dispatchable briefs from BACKLOG (W4.3)",
+"description": ""
+},
+{
+"id": "188",
+"title": "Data-driven agent routing (W4.4)",
+"description": ""
+},
+{
+"id": "191",
+"title": "Weak-model reviewer re-evaluation over the JSON contract (W4.7)",
+"description": ""
+},
+{
+"id": "192",
+"title": "Terminal CANCELED status for stale/duplicate tasks (W4.8)",
+"description": ""
+},
+{
+"id": "193",
+"title": "needs_human merge reconciliation (W4.9)",
+"description": ""
+},
+{
+"id": "194",
+"title": "Failure-policy auto-requeue for transient classes (W4.10)",
+"description": ""
+},
+{
+"id": "195",
+"title": "Frontend deps in task worktrees: honest verify gate (W4.11)",
+"description": ""
+},
+{
+"id": "196",
+"title": "Merge watchdog: verify before crying wolf (W4.12)",
+"description": ""
+},
+{
+"id": "197",
+"title": "Promote gate: resolve <id> placeholders in brief artifact paths (W5.1)",
+"description": ""
+},
+{
+"id": "198",
+"title": "Promote gate: run verify.sh via sh, survive lost exec bits (W5.2)",
+"description": ""
+},
+{
+"id": "199",
+"title": "Pre-merge gate: catch conflicting Django migration leaves (W5.3)",
+"description": ""
+},
+{
+"id": "200",
+"title": "Provision frontend deps in task worktrees (W5.4)",
+"description": ""
+},
+{
+"id": "202",
+"title": "Memory: quote before dispatch — estimate from twins, track actuals (W5.6)",
+"description": ""
+},
+{
+"id": "203",
+"title": "One memory budget for all sandbox spawns (W5.7)",
+"description": ""
+},
+{
+"id": "204",
+"title": "Reviewer model re-eval: run the harness at N>=5, recommend or hold (W5.8)",
+"description": ""
+},
+{
+"id": "205",
+"title": "Merge-flow: review pass + clean merge = DONE; retire promote-check (W5.9)",
+"description": ""
+},
+{
+"id": "206",
+"title": "Merge agent: explain both sides of a conflict on the board (W5.10)",
+"description": ""
+},
+{
+"id": "207",
+"title": "Merge agent: human reply resumes and finishes the merge (W5.11)",
+"description": ""
+},
+{
+"id": "208",
+"title": "Post-merge spec-branch suite run — the one honest safety net (W5.12)",
+"description": ""
+},
+{
+"id": "209",
+"title": "Merge ledger: every merge tracked like a reflection — trigger, cost, duration, per-spec rollup (W5.13)",
+"description": ""
+},
+{
+"id": "210",
+"title": "Run records + write fencing: every execution owned and every write token-checked (W5.14)",
+"description": ""
+},
+{
+"id": "211",
+"title": "One reconciler loop: expired lease => kill sandbox + requeue task (W5.15)",
+"description": ""
+},
+{
+"id": "212",
+"title": "Audit presets: inventory what exists, design the audit-preset contract (W5.16)",
+"description": ""
+},
+{
+"id": "213",
+"title": "odin doctor: one command that says what works, what's missing, and how to fix it (W5.17)",
+"description": ""
+},
+{
+"id": "214",
+"title": "Dependency gate: REVIEW must not satisfy depends_on (W5.18)",
+"description": ""
+},
+{
+"id": "215",
+"title": "Sandbox disk hygiene: prune dead VM disks on exit + reconciler sweep (W5.19)",
+"description": ""
+},
+{
+"id": "217",
+"title": "Audit presets v1: build the contract, ship three presets (W5.21)",
+"description": ""
+},
+{
+"id": "218",
+"title": "wave story page (W5.22)",
+"description": ""
+},
+{
+"id": "221",
+"title": "Reflection dispatch owned by the executor: scan, retry, escalate, own queue (W6.4)",
+"description": ""
+},
+{
+"id": "222",
+"title": "Errors compound: automatic error ledger with context (W6.5)",
+"description": ""
+},
+{
+"id": "223",
+"title": "Memory: mistakes that file themselves (W6.1)",
+"description": ""
+},
+{
+"id": "224",
+"title": "Ten-minute quickstart: install, doctor, one sample spec end to end (W6.2)",
+"description": ""
+},
+{
+"id": "225",
+"title": "Trust: failure fingerprints — triage answered from history (W6.3)",
+"description": ""
+},
+{
+"id": "226",
+"title": "autonomy_metrics understands the TESTING shelf — make the L2 counter honest (W6.6)",
+"description": ""
+},
+{
+"id": "227",
+"title": "Getting oriented: warm starts — the right breadcrumbs and patterns ride into every prompt (W6.7)",
+"description": ""
+},
+{
+"id": "228",
+"title": "Routing: the agent league table — measured performance, visible to everyone (W6.8)",
+"description": ""
+},
+{
+"id": "229",
+"title": "Watching: the board tells its own story — shift changelog generated from the ledger (W6.9)",
+"description": ""
+},
+{
+"id": "230",
+"title": "Getting oriented: the token profiler — finding vs doing vs checking, measured (W6.10)",
+"description": ""
+},
+{
+"id": "231",
+"title": "One flag for waiting-on-human: every human-answerable merge failure joins the reply-resume flow (W6.11)",
+"description": ""
+},
+{
+"id": "232",
+"title": "doctor: WARN on stale .claude-token fallback + resume-queue routing check (W6.12)",
+"description": ""
+},
+{
+"id": "233",
+"title": "Twins + quote visible in the task modal — Similar tasks section (W6.13)",
+"description": ""
+},
+{
+"id": "234",
+"title": "Assignment WHY: the task shows why THIS agent, from routing history — zero planner cost (W6.14)",
+"description": ""
+},
+{
+"id": "235",
+"title": "Reconciler liveness = progress, not process existence (W6.15)",
+"description": ""
+},
+{
+"id": "236",
+"title": "Fix: task retry fails on stale leftover worktree (W7.1)",
+"description": ""
+},
+{
+"id": "238",
+"title": "Fix: late error-ledger doc entries never imported into ErrorEvent (W7.3)",
+"description": ""
+},
+{
+"id": "239",
+"title": "Measure the orientation surfaces: warm starts and twins, judged by the profiler (W7.4)",
+"description": ""
+}
+]

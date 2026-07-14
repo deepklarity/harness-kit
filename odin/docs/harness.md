@@ -11,7 +11,6 @@ The default binary for each harness can be overridden with `cli_command` in `.od
 | claude    | `claude`    | `claude -p "PROMPT" --output-format stream-json --verbose`             |
 | gemini    | `gemini`    | `gemini -p "PROMPT" --output-format stream-json --yolo`                |
 | codex     | `codex`     | `codex exec --skip-git-repo-check --full-auto "PROMPT"`               |
-| qwen      | `qwen`      | `qwen -p "PROMPT" --output-format stream-json --yolo`                  |
 | minimax   | `kilo`      | `kilo run --format json --auto "PROMPT"`                               |
 | glm       | `opencode`  | `opencode run --format json "PROMPT"`                                  |
 
@@ -84,27 +83,6 @@ brew upgrade codex
 
 ---
 
-### Qwen Code (Alibaba)
-
-**Install:**
-```bash
-npm install -g @qwen-code/qwen-code@latest
-
-# or via script
-curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen.sh | bash
-```
-
-**Upgrade:**
-```bash
-npm install -g @qwen-code/qwen-code@latest
-```
-
-**Auth:** Run `qwen` then `/auth` — choose Qwen OAuth (2,000 free daily API calls) or API key.
-
-**Prerequisites:** Node.js 20+.
-
----
-
 ### Kilo Code / MiniMax
 
 **Install:**
@@ -145,7 +123,7 @@ opencode upgrade
 
 Each CLI discovers MCP servers from a project-local config file. **Each CLI has its own config location and format** — there is no universal standard.
 
-`odin init` generates all 6 config files automatically. `odin mcp_config [task_id]` regenerates them (optionally scoped to a specific task).
+`odin init` generates all 5 config files automatically. `odin mcp_config [task_id]` regenerates them (optionally scoped to a specific task).
 
 ### Config File Reference
 
@@ -153,14 +131,13 @@ Each CLI discovers MCP servers from a project-local config file. **Each CLI has 
 |-----|---------------------------|--------|---------------|---------------------|
 | Claude Code | `.mcp.json` | JSON | `mcpServers` | Yes |
 | Gemini CLI | `.gemini/settings.json` | JSON | `mcpServers` | No |
-| Qwen CLI | `.qwen/settings.json` | JSON | `mcpServers` | No |
 | Codex CLI | `.codex/config.toml` | TOML | `[mcp_servers.<name>]` | No |
 | Kilo Code | `.kilocode/mcp.json` | JSON | `mcpServers` | No |
 | OpenCode | `opencode.json` | JSON | `mcp` (different structure) | No |
 
 ### Format Examples
 
-**Claude / Gemini / Qwen / Kilo** (same JSON structure, different file paths):
+**Claude / Gemini / Kilo** (same JSON structure, different file paths):
 ```json
 {
   "mcpServers": {
@@ -214,7 +191,7 @@ The config includes task-scoped env vars (`TASKIT_TASK_ID`, `TASKIT_AUTH_TOKEN`,
 Quick check that all CLIs are on PATH:
 
 ```bash
-for cmd in claude gemini codex qwen kilo opencode; do
+for cmd in claude gemini codex kilo opencode; do
   printf "%-10s " "$cmd"
   command -v $cmd >/dev/null 2>&1 && echo "✓ $(command -v $cmd)" || echo "✗ not found"
 done

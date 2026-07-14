@@ -1,0 +1,39 @@
+I have enough evidence to render a verdict. The code matches the claims, all 57 promote-check tests pass (including 10 new `TestEnvMissingSuite` tests), the full odin suite passes (1455 passed, 1 pre-existing unrelated fail), and the before/after promote-check report demonstrates the fake HOLD is replaced with a named environment gap.
+
+One minor inconsistency: `verify_sh_frontend.txt:18` shows `=== EXIT 0 ===` while `proof.md:149` says `=== EXIT 1 ===`. The script unambiguously exits 1 for ENV_MISSING (`overall=1` at verify.sh:199, `exit "$overall"` at verify.sh:217), so the raw artifact's exit capture was wrong — but this is a proof-capture nit, not a code defect.
+
+```json
+{
+  "verdict": "PASS",
+  "summary": "verify.sh emits a distinct ENV_MISSING category and promote-check names it as an environment gap (never a fake FAILED/critical HOLD); 10 new tests cover the behavior, full suite passes (1 pre-existing unrelated fail).",
+  "quality_assessment": "Acceptance: 'Promote reports that are true' — MET. verify.sh classifies toolchain-missing as ENV_MISSING (empty summary + 'not found' pattern, verify.sh:131); promote-check names the gap 'environment missing: suite X could not run (toolchain not installed; provision and retry)' (promote_check.py:380-383), never 'FAILED: (critical)'. Acceptance: 'A fake HOLD must become impossible' — MET. env_missing branch precedes critical/known-red branches (promote_check.py:370-384); real FAIL still emits (critical) gap (test_real_failure_still_uses_critical_gap passing). Known-red env-missing still named (never silently tolerated) — MET. TDD discipline — MET (10 new TestEnvMissingSuite tests, regression guard present). Test evidence — MET: 57 promote_check tests pass, odin full 1455 passed / 4 skipped / 1 unrelated pre-existing fail (sandbox artifact, not touched by this task).",
+  "slop_detection": "Minor proof-capture nit: verify_sh_frontend.txt:18 reads '=== EXIT 0 ===' but proof.md:149 and the actual verify.sh logic (exit $overall where ENV_MISSING sets overall=1) give EXIT 1. Inconsistency in the captured artifact only; code is correct.",
+  "improvements": "- verify_sh_frontend.txt exit-code capture is inconsistent with proof.md (one says EXIT 0, other says EXIT 1) — re-capture cleanly to remove ambiguity.\n- Consider an explicit test that ENV_MISSING still makes the verify.sh gate exit non-zero (current tests cover promote-check's interpretation, not the shell exit code).",
+  "agent_optimization": "Description clarity: good. Model tier: appropriate (sonnet-tier mechanical work with clear spec). Token efficiency: solid — proof file is well-organized and the raw artifacts are full, no re-runs needed.",
+  "quota_failure": "None.",
+  "fix_list": []
+}
+```
+
+### Quality Assessment
+- **Acceptance: "Promote reports that are true"** — MET. `verify.sh:131` classifies toolchain-missing as `ENV_MISSING` (empty summary + "not found" pattern); `promote_check.py:380-383` names the gap as `environment missing: suite frontend could not run (toolchain not installed; provision and retry)`, never the old `suite frontend FAILED: (critical)`.
+- **Acceptance: "A fake HOLD must become impossible"** — MET. `env_missing` branch (`promote_check.py:370-384`) precedes critical/known-red branches; real `FAIL` still produces `(critical)` (proven by passing `test_real_failure_still_uses_critical_gap`).
+- **Known-red env-missing still named** — MET. The branch ordering ensures KNOWN_RED suites (snapshots) report an env gap, never silently tolerated.
+- **TDD discipline** — MET. 10 new `TestEnvMissingSuite` tests at `test_promote_check.py:1481`, including regression guard.
+- **Test evidence** — MET. 57/57 promote_check tests pass; odin full suite 1455 passed, 4 skipped, 1 pre-existing fail (`test_mcp_config_staged_outside_guest_tmpfs` — `/tmp/pytest-of-root/` sandbox artifact, unrelated to this task).
+
+### Slop Detection
+- Minor: `verify_sh_frontend.txt:18` shows `=== EXIT 0 ===` while `proof.md:149` says `=== EXIT 1 ===`. Script logic unambiguously exits 1 for ENV_MISSING (`verify.sh:199`, `verify.sh:217`), so the raw artifact's exit-code capture was wrong — capture nit only, not a code defect.
+
+### Actionable Improvements
+- Re-capture `verify_sh_frontend.txt` so the exit code matches reality (EXIT 1).
+- Add a test asserting `verify.sh` exits non-zero on ENV_MISSING (current tests cover promote-check's interpretation, not the shell exit code).
+
+### Agent Optimization
+Description clear; model tier appropriate (sonnet-tier mechanical work with established patterns); token efficiency good — proof file well-organized, raw artifacts full.
+
+### Quota / Resource Failure
+None.
+
+### Verdict
+**PASS** — Both acceptance criteria verifiably met with code + tests + before/after evidence; the fake HOLD is structurally impossible given the branch ordering. The EXIT 0/1 inconsistency is a capture nit documented in improvements, not a blocker.

@@ -21,7 +21,7 @@
 | Task cancelled but still running | Check PID: `ps -p <pid>` | PID stored in `task.metadata["active_execution"]["pid"]` |
 | Odin updated status but DAG also tried | `taskit_detail.log` | `status already changed to` — this is normal, DAG defers |
 | Task goes EXECUTING→REVIEW instantly, reflection says "no implementation" | `spec_<spec_id>_task_<task_id>.log` | `Waiting — unmet deps` — odin's dep check disagreed with TaskIt's. Check both `COMPLETED_STATUSES` definitions match |
-| Dependency blocked but upstream looks done | Both `dependencies.py` files use `COMPLETED_STATUSES = {DONE, TESTING}` | Check upstream task status — REVIEW doesn't count as complete (still under reflection) |
+| Dependency blocked but upstream looks done | Both `dependencies.py` files use `COMPLETED_STATUSES = {DONE, TESTING}` (fable task 214 — REVIEW excluded) | Check upstream task status — only a dep in TESTING/DONE unblocks dependents. A dep in REVIEW is *not* complete (branch pre-merge) |
 
 ## Quick commands
 
@@ -63,7 +63,7 @@ which odin || echo "odin not found on PATH"
 | `ODIN_EXECUTION_STRATEGY` | Which execution path (local/celery_dag/disabled) | `""` (disabled) |
 | `ODIN_CLI_PATH` | Path to odin binary for subprocess calls | `odin` |
 | `ODIN_WORKING_DIR` | Fallback working directory if task/spec metadata don't specify | None |
-| `DAG_EXECUTOR_MAX_CONCURRENCY` | Max simultaneous EXECUTING tasks | `3` |
+| `DAG_EXECUTOR_MAX_CONCURRENCY` | Max simultaneous EXECUTING tasks | `10` |
 | `DAG_EXECUTOR_POLL_INTERVAL` | Seconds between poll_and_execute runs | `5` |
 
 ## Common breakpoints

@@ -94,3 +94,23 @@ class TestExtractAgentTextCodex:
         _, success, summary = Orchestrator._parse_envelope(agent_text)
         assert success is True
         assert summary == "Fixed the bug."
+
+
+def test_stream_detection_survives_leading_banner_lines():
+    """Regression (reflections 278/280/289): `codex` prints
+    'Reading additional input from stdin...' before its JSONL when the
+    prompt arrives via stdin. The old first-line heuristic declared the
+    whole output 'not JSON' and returned raw framing, so the verdict
+    parser found nothing and every codex reflection errored."""
+    from odin.harnesses.base import extract_text_from_stream
+
+    raw = (
+        "Reading additional input from stdin...\n"
+        '{"type":"thread.started","thread_id":"t1"}\n'
+        '{"type":"item.completed","item":{"id":"i0","type":"agent_message",'
+        '"text":"Quality Assessment\\nSolid work.\\nVerdict\\nPASS"}}\n'
+    )
+    out = extract_text_from_stream(raw)
+    assert '"type"' not in out
+    assert "Quality Assessment" in out
+    assert "PASS" in out

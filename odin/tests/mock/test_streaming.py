@@ -21,7 +21,6 @@ from odin.harnesses.base import BaseHarness
 from odin.harnesses.claude import ClaudeHarness
 from odin.harnesses.gemini import GeminiHarness
 from odin.harnesses.codex import CodexHarness
-from odin.harnesses.qwen import QwenHarness
 from odin.models import AgentConfig, CostTier, ModelRoute, OdinConfig, TaskResult
 
 from tests.conftest import make_fake_process as _make_fake_process
@@ -45,7 +44,6 @@ class TestHarnessStreaming:
         (ClaudeHarness, "claude"),
         (GeminiHarness, "gemini"),
         (CodexHarness, "codex"),
-        (QwenHarness, "qwen"),
     ])
     async def test_streaming_yields_chunks_incrementally(self, harness_cls, name):
         """Each chunk should arrive BEFORE the process finishes.
@@ -84,7 +82,6 @@ class TestHarnessStreaming:
         (ClaudeHarness, "claude"),
         (GeminiHarness, "gemini"),
         (CodexHarness, "codex"),
-        (QwenHarness, "qwen"),
     ])
     async def test_streaming_chunk_order_preserved(self, harness_cls, name):
         """Chunks must arrive in the same order the subprocess emits them."""
@@ -108,7 +105,6 @@ class TestHarnessStreaming:
         (ClaudeHarness, "claude"),
         (GeminiHarness, "gemini"),
         (CodexHarness, "codex"),
-        (QwenHarness, "qwen"),
     ])
     async def test_streaming_callback_called_per_chunk(self, harness_cls, name):
         """When used with a callback, each chunk triggers the callback immediately."""
@@ -300,7 +296,8 @@ class TestDecomposeStreaming:
         def stream_cb(chunk: str) -> None:
             callback_log.append((chunk, time.monotonic()))
 
-        with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+        with patch("odin.orchestrator.shutil.which", return_value="/fake/fake-claude"), \
+             patch("asyncio.create_subprocess_exec", return_value=fake_proc):
             await orch._decompose(
                 "Test prompt with plan_path instructions", "/tmp",
                 spec_id="sp_test_001",
@@ -337,7 +334,8 @@ class TestDecomposeStreaming:
             agent="Claude Code",
         )
 
-        with patch.object(
+        with patch("odin.orchestrator.shutil.which", return_value="/fake/fake-claude"), \
+             patch.object(
             ClaudeHarness, "execute", return_value=mock_result
         ) as mock_exec, patch.object(
             ClaudeHarness, "execute_streaming"
@@ -370,7 +368,8 @@ class TestDecomposeStreaming:
         def stream_cb(chunk: str) -> None:
             chunks_received.append(chunk)
 
-        with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+        with patch("odin.orchestrator.shutil.which", return_value="/fake/fake-claude"), \
+             patch("asyncio.create_subprocess_exec", return_value=fake_proc):
             await orch._decompose(
                 "Test prompt", "/tmp", spec_id="sp_test_003",
                 stream_callback=stream_cb,
@@ -463,21 +462,23 @@ class TestPlanStreaming:
         # Mock _decompose to stream AND write plan to disk
         original_decompose = orch._decompose
 
-        async def mock_decompose(prompt, wd, spec_id=None, stream_callback=None):
+        async def mock_decompose(prompt, wd, spec_id=None, stream_callback=None, plan_path=None):
             # Write plan to disk (simulating what the agent does)
-            plan_path.write_text(plan_json)
+            Path(plan_path).write_text(plan_json)
             # Still stream chunks through the callback
             if stream_callback:
                 for line in streaming_lines:
                     stream_callback(line.decode())
 
         with patch.object(orch, "_decompose", side_effect=mock_decompose), \
-             patch.object(orch, "_fetch_quota", return_value=None):
+             patch.object(orch, "_fetch_quota", return_value=None), \
+             patch.object(orch, "_is_available_cached", new_callable=AsyncMock, return_value=True):
             spec_id, tasks = await orch.plan(
                 spec_text,
                 working_dir=str(tmp_path),
                 mode="auto",
                 stream_callback=stream_cb,
+                gate=False,
             )
 
         # Streaming happened
@@ -552,14 +553,16 @@ class TestPlanStreaming:
         )
 
         # Mock _decompose to write plan to disk (simulating agent)
-        async def mock_decompose(prompt, wd, spec_id=None, stream_callback=None):
-            plan_path.write_text(plan_json)
+        async def mock_decompose(prompt, wd, spec_id=None, stream_callback=None, plan_path=None):
+            Path(plan_path).write_text(plan_json)
 
         with patch.object(orch, "_decompose", side_effect=mock_decompose), \
-             patch.object(orch, "_fetch_quota", return_value=None):
+             patch.object(orch, "_fetch_quota", return_value=None), \
+             patch.object(orch, "_is_available_cached", new_callable=AsyncMock, return_value=True):
             spec_id, tasks = await orch.plan(
                 spec_text,
                 working_dir=str(tmp_path),
+                gate=False,
             )
 
         assert len(tasks) >= 1
@@ -666,7 +669,10 @@ class TestStreamingTimingBehavior:
         fake_proc.stderr = None
 
         with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
-            result = await harness.execute("test", {"working_dir": "/tmp"})
+            result = await harness.execute("test", {
+                "working_dir": "/tmp",
+                "validate_status": False,
+            })
 
         # All output comes as a single string
         assert result.success

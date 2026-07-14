@@ -16,4 +16,7 @@ urlpatterns = [
     path("dashboard/", views.dashboard),
     path("user-settings/ide/", views.user_ide_settings),
     path("user-settings/ide/options/", views.user_ide_options),
+    path("errors/<int:event_id>/disposition/", views.error_event_disposition),
+    path("executor/capacity/", views.executor_capacity),
+    path("executor/max-concurrency/", views.executor_max_concurrency),
 ] + router.urls

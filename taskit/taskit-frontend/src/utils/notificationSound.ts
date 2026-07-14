@@ -1,10 +1,4 @@
-type NotificationType =
-    | 'task_assigned'
-    | 'comment_added'
-    | 'status_changed'
-    | 'planning_complete'
-    | 'question_asked'
-    | 'spec_finished';
+import type { NotificationType } from '@/types';
 
 const SOUND_MAP: Record<NotificationType, string> = {
     question_asked: '/sounds/abstract-sound3.wav',
@@ -13,6 +7,8 @@ const SOUND_MAP: Record<NotificationType, string> = {
     task_assigned: '/sounds/abstract-sound3.wav',
     comment_added: '/sounds/abstract-sound3.wav',
     status_changed: '/sounds/abstract-sound3.wav',
+    task_failed: '/sounds/abstract-sound3.wav',
+    task_failed_reminder: '/sounds/abstract-sound3.wav',
 };
 
 function playFallbackBeep(): void {

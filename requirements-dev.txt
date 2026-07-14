@@ -1,0 +1,30 @@
+# requirements-dev.txt — dev/CI dependencies for harness-kit.
+#
+# Install with:
+#   pip install -r requirements-dev.txt
+#
+# Scope: tools the kit uses during development, CI, and the periodic
+# audit presets (security-audit, hygiene-audit, static-autolint). These
+# are NOT runtime dependencies — they should not appear in
+# odin/pyproject.toml, taskit/taskit-backend/requirements.txt, or
+# harness_usage_status/pyproject.toml.
+#
+# Why a single root-level file (and not per-project dev extras)?
+# The audit presets run from the repo root (cwd: <repo-root>), so the
+# tools they call (bandit, pip-audit) must be installable in one place.
+# Per-project [project.optional-dependencies] dev sections would force
+# every audit runner to know which Python env to source.
+
+# Python AST-aware security linter. The security-audit preset scans
+# odin/, taskit/taskit-backend/, harness_usage_status/ via
+# `bandit -r ... -f json`. Without this, the preset's evidence script
+# records evidence_missing and runs the harness sweep instead — not
+# fatal, but the report is thinner.
+bandit>=1.7
+
+# Scans installed Python packages against the OSV / PyPA advisory
+# database. The security-audit preset reads `python3 -m pip list` and
+# is wired for a future `pip-audit --format=json` integration. Listed
+# here so the next dev who runs the audit can `pip install -r` and
+# get the richer evidence stream immediately.
+pip-audit>=2.6

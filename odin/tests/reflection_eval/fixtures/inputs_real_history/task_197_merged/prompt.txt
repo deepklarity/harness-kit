@@ -1,0 +1,244 @@
+You are auditing a task executed by an AI agent.
+
+
+## CTX — proof artifact (`.proof/task-197/proof.md`)
+
+The worker writes the canonical, complete proof file to `.proof/task-197/proof.md`
+in the worktree (read-only worktree mount; `cat`, `grep`, `head` freely).
+Raw suite outputs sit beside it as `.proof/task-197/<name>.txt` — full output, no
+cap. Read **`.proof/task-197/proof.md` first** — it is the primary, authoritative
+source for what the worker claims and where it lives.
+
+For each acceptance criterion, choose complete vs minimal context: read
+the full proof file once, then grep the section you need. Do NOT re-run
+the verify suites to fill gaps — the worker already attached raw outputs
+under `.proof/task-197/`. The proof path carries no truncation or size cap; read
+the full file when a criterion needs the full chain of evidence.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Work efficiently: batch independent file reads/greps into a single step, and do NOT re-read a file or re-run a search you have already done — each extra tool call is a full model round-trip.
+- **REPORT FORMAT: ONE fenced JSON block, then optionally a markdown rendering.** Your first non-blank line MUST be a single ```json ... ``` fence containing a JSON object with at minimum a `verdict` key. After the fence you MAY also emit the legacy `### Quality Assessment / ### Verdict` sections as a human-readable rendering of the same JSON — the JSON block is the source of truth, the rendering is for the board UI.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.** This task may have been attempted by multiple agents or models previously. Comments are separated by "--- CURRENT ATTEMPT ---" when prior attempts exist. Use earlier history for understanding context only — do NOT penalize the current agent for failures, quota issues, or code quality problems from previous agents/models. Your verdict must reflect solely the current agent's work.
+
+## TASK UNDER REVIEW
+Title: Promote gate: resolve <id> placeholders in brief artifact paths (W5.1)
+Status: DONE
+Agent: claude ((historical))
+Duration: N/Ams | Tokens: N/A
+
+## [CTX:description] Task Description
+Fable roadmap task Promote gate: resolve <id> placeholders in brief artifact paths (W5.1). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+
+## [CTX:execution_result] Execution Output
+Merge task 197: Promote gate: resolve <id> placeholders in brief artifact paths (W5.1)
+
+Task-Id: 197
+Spec-Id: sp_fable_w5
+
+
+ .proof/task-197/backend_tests.txt      | 1054 ++++++++++++++++++++++++++++++++
+ .proof/task-197/odin_tests.txt         |  116 ++++
+ .proof/task-197/promote_check_demo.txt |   24 +
+ .proof/task-197/proof.md               |   93 +++
+ odin/src/odin/promote_check.py         |   83 ++-
+ odin/tests/mock/test_promote_check.py  |  206 +++++++
+ 6 files changed, 1568 insertions(+), 8 deletions(-)
+
+
+## [CTX:comments] Comments & Proof
+--- CURRENT ATTEMPT ---
+Proof of work (committed at .proof/task-197/proof.md):
+
+# Task 197: Promote gate — resolve `<id>` placeholders in brief artifact paths
+
+## Problem (the wave-4 false-gap)
+
+Every promote-check in wave 4 held on `artifact missing: .proof/task-<id>/`
+because the placeholder token from the brief's working protocol was parsed
+as a literal filesystem path. The real `.proof/task-<NNN>/` files existed
+but were never checked. Five green tasks waited hours on a human.
+
+## Root cause
+
+`extract_artifact_paths(brief)` in `odin/src/odin/promote_check.py`
+extracted backtick-quoted paths from the `## Verify` section without
+substituting task-id placeholder tokens (`<id>`, `<your-task-id>`,
+`<task-id>`). The gate then checked the literal placeholder path
+`.proof/task-<id>/` — which never exists — and held.
+
+## Fix
+
+### Files changed
+
+1. **`odin/src/odin/promote_check.py`** — the fix lives here:
+   - Added `_TASK_ID_PLACEHOLDERS` constant listing the three angle-bracket
+     tokens: `<id>`, `<your-task-id>`, `<task-id>`.
+   - Added `_substitute_task_id(path, task_id)` helper — plain string
+     replace of each token with `str(task_id)`.
+   - Refactored `extract_artifact_paths` into two layers:
+     - `_extract_raw_artifact_paths(brief)` — the original extraction
+       logic, no substitution, no filtering. Separated so callers that
+       need the raw list (to log what was dropped) can get it.
+     - `extract_artifact_paths(brief, task_id=None)` — calls the raw
+       extractor, substitutes placeholders when `task_id` is provided,
+       drops paths that still contain `<`/`>` after substitution. When
+       `task_id` is `None`, behavior is unchanged (backward compat).
+   - Added `dropped_artifacts: list[str]` field to `PromotionReport`.
+   - `build_promotion_report` now passes `task_id` to
+     `extract_artifact_paths` and collects dropped paths (raw paths that
+     still have angle brackets after substitution) into
+     `report.dropped_artifacts`.
+   - `render_report` shows dropped paths in a separate section
+     ("Dropped artifact paths (template residue, not checked)") —
+     informational, never a gap.
+   - `render_attachment` includes `dropped_artifacts` in the structured
+     payload.
+
+2. **`odin/tests/mock/test_promote_check.py`** — 10 new tests:
+   - `TestTaskIdSubstitution` (6 tests): unit tests for
+     `extract_artifact_paths` with `task_id` — substitutes `<id>`,
+     `<your-task-id>`, `<task-id>`; drops unsubstitutable angle-bracket
+     paths; backward compat without `task_id`; mixed
+     substituted+dropped.
+   - `TestPlaceholderArtifactGate` (4 tests): end-to-end tests through
+     `build_promotion_report` — brief with `.proof/task-<id>/` checks
+     the real path; leftover angle-bracket path never produces a HOLD
+     gap; dropped paths rendered in report body; full wave-4-style brief
+     promotes cleanly.
+
+### Why auto_promote.py was NOT changed
+
+`taskit-backend/tasks/auto_promote.py` does NOT duplicate the artifact
+parsing. It calls `odin promote-check <task_id>` via subprocess
+(`_run_odin_promote_check`, line 170) and parses the CLI's stdout for
+the recommendation. The fix in `promote_check.py` is automatically
+inherited by auto-promote through the subprocess code path — no
+duplicated logic to drift.
+
+## Acceptance criteria
+
+### 1. Re-running promote-check on a wave-4-style brief holds ONLY on real gaps
+
+Demonstrated in `.proof/task-197/promote_check_demo.txt`: a brief with
+`.proof/task-<id>/` in the Verify section, task id 203. After
+substitution the gate checks `.proof/task-203/` (exists → OK), and a
+leftover `<unknown-placeholder>/report.md` is dropped (logged, not a
+gap). Result: `RECOMMEND PROMOTE`, zero gaps.
+
+### 2. Backend + odin suites green
+
+- **Odin suite**: 1504 passed, 4 skipped, 1 pre-existing failure
+  (`test_mcp_config_staged_outside_guest_tmpfs` — fails without my
+  changes too; pytest's `tmp_path` is under `/tmp/`, unrelated to
+  promote_check). See `.proof/task-197/odin_tests.txt`.
+- **Backend suite**: 871 passed, 0 failed. See
+  `.proof/task-197/backend_tests.txt`.
+
+## Self-audit
+
+`scripts/self_audit_diff.sh` verdict: `duplicates=0 commented_blocks=0
+files=2 verdict=clean`.
+
+## Build verification
+
+`python3 -m py_compile odin/src/odin/promote_check.py` — no errors.
+
+
+## [CTX:dependencies] Dependent Tasks
+No blocking dependencies.
+
+## [CTX:metadata] Task Metadata
+spec=sp_fable_w4/w5 task_id=197 status=DONE
+
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers. The JSON block
+is the source of truth for the parser; the markdown is a convenience
+rendering the parser will ignore if both are present.
+
+### Required JSON contract
+
+Your first non-blank line MUST be a fenced JSON block:
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification, the same one you'd put after ### Verdict.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason. Then defects (file:line).",
+  "slop_detection": "Specific AI slop found, or 'None.'",
+  "improvements": "Bullet list of up to 5 actionable items (what, where, why). 'None.' if clean.",
+  "agent_optimization": "Description clarity / model tier / token efficiency / prompt improvement.",
+  "quota_failure": "QUOTA_FAILURE: <agent_name> if the current attempt hit a quota/rate limit; otherwise 'None.'.",
+  "fix_list": ["targeted", "fix", "items", "for", "rework"]
+}
+```
+
+Rules:
+- `verdict` MUST be exactly `PASS`, `NEEDS_WORK`, or `FAIL` (uppercase). A
+  bare word with no review content (just "PASS" alone, or a verdict
+  keyword buried in CLI noise) is treated as a reviewer failure — the
+  system will NOT honor it. The JSON object must be the FIRST thing you
+  emit, complete and parseable, or your review will not be processed.
+  Do NOT skip the structured JSON just because the verdict is obvious;
+  emit the JSON with full sections, even if the verdict is PASS with
+  nothing else to flag.
+- `summary` is the one-sentence justification. It appears on the board
+  as the verdict summary. The "Evidence rules" below apply to it.
+- `fix_list` is REQUIRED for `NEEDS_WORK`: name the exact artifact or
+  change needed so the rework is scoped, not a blind redo. Empty list
+  `[]` is fine for `PASS` and `FAIL`.
+- `quality_assessment`, `slop_detection`, `improvements`,
+  `agent_optimization`, `quota_failure` are strings; default to
+  `"None."` when there's nothing to report.
+- Do NOT emit anything before the opening ```json fence. No
+  preamble, no narration, no permission requests, no conversational
+  text. The parser uses the JSON block as the first content and
+  anything before it is treated as noise.
+
+### Verdict rubric (applies to `verdict` in the JSON)
+
+Choose from what the evidence PROVES. Each rework round costs a full VM
+boot, environment rebuild, and tokens — so FAIL and NEEDS_WORK must be
+earned by substance, never spent on process trivia or invented rules.
+
+- PASS — every acceptance criterion is verifiably met and the work is
+  correct, safe, and builds/runs. Minor style or proof-formatting nits
+  do NOT block a PASS; put them in `improvements`.
+- NEEDS_WORK — the work is substantially correct but has a fixable
+  gap: a missing or truncated proof artifact, an unmet non-critical
+  criterion, or a process slip that does not make the code wrong. Pair
+  EVERY NEEDS_WORK with a TARGETED fix list (the `fix_list` field in
+  the JSON, or a list of items under "### Actionable Improvements" in
+  the rendering — name the exact artifact or change needed) so the
+  rework is scoped, not a blind redo.
+- FAIL — reserved for work that is WRONG, UNSAFE, or UNVERIFIABLE: it breaks the build or a downstream integration, corrupts state, crashes the orchestrator, contradicts a stated acceptance criterion, or supplies no evidence that the core behavior works. Also use FAIL for quota/resource exhaustion (justification must mention "quota" or "rate limit") so the system can reassign to a different agent.
+
+Evidence rules — apply these BEFORE choosing a verdict:
+- CITE OR DROP. Any claimed rule/policy/convention violation MUST quote the exact rule text and name the file it lives in (e.g. CLAUDE.md: "Never run ANY git stash command"). If you cannot quote and locate the rule, it does not exist for this review — you may NOT lower the verdict for it; raise it in `improvements` at most. A cited rule only counts if its stated scope actually covers this situation (a rule scoped to "shared repos / concurrent sessions" is not violated by an action inside the task's own isolated worktree). If a rule violation affects the verdict, include that exact citation in the report text.
+- A truncated, malformed, or missing proof artifact is a REQUEST, not a verdict. Name the specific artifact you need and ask for it (NEEDS_WORK at most). It only drives FAIL when it leaves the CORE behavior genuinely unverifiable AND no other evidence (code you can read, build output, comments) establishes correctness.
+- Judge the SUBSTANCE of the best available evidence. Tasks may span
+  several attempts; earlier attempts' partial numbers or
+  contradictions with history are NOT defects of the current work.
+- Formatting/completeness of proof comments is NOT a verdict criterion
+  when the underlying acceptance criteria are verifiably met; mention
+  formatting issues in `improvements` instead.
+- Comments authored by a human operator (non-agent email) are
+  authoritative context — do not contradict them.
+- Do not demand artifacts the environment cannot produce (e.g. an
+  ODIN-STATUS block when the run was concluded by an operator).
+
+### Optional markdown rendering (after the JSON block)
+
+After the JSON fence you MAY emit the legacy sections as a human-readable rendering of the same content. The parser uses the JSON as the source of truth and ignores the rendering, so emitting it is purely for the board UI. The rendering is OPTIONAL — the JSON block is sufficient on its own. The legacy section names, in order, are:
+
+- `### Quality Assessment`
+- `### Slop Detection`
+- `### Actionable Improvements`
+- `### Agent Optimization`
+- `### Quota / Resource Failure`
+- `### Verdict`

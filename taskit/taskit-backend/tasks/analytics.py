@@ -3,22 +3,71 @@
 Single endpoint that returns all analytics data needed for the /analytics
 page. Uses the same cost computation chain as the serializers
 (compute_usage_from_trace → estimate_task_cost) but aggregates server-side.
+
+W3.17: also surfaces autonomy (operator touch rate, agent-authored merge
+rate), failure-class breakdown (from metadata.failure_class), rework-
+round distribution (from metadata.rework_count), and exec-duration
+percentiles. Reuses ``autonomy_metrics.compute_board_metrics`` so the
+autonomy numbers stay in lockstep with the diagnostic script.
 """
 
 import asyncio
 import logging
+import sys
 from collections import defaultdict
+from pathlib import Path
 
 from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .execution_processing import compute_usage_from_trace
-from .models import Board, ReflectionReport, Task
+from .models import Board, MergeAttempt, ReflectionReport, Task
 from .pricing import estimate_task_cost
 from .views import _apply_date_range, _parse_multi_values
 
 logger = logging.getLogger(__name__)
+
+# Lazy import: autonomy_metrics is a diagnostic script under testing_tools/
+# that calls setup_django() at module import. The script is a sibling of
+# the backend package, so we add its parent to sys.path once and import.
+_AUTONOMY_METRICS = None
+
+
+def _get_autonomy_metrics():
+    """Lazy singleton import of testing_tools.autonomy_metrics.
+
+    Avoids a hard import at module load (the script lives outside the
+    tasks package, so it must be on sys.path before we can ``import`` it).
+    """
+    global _AUTONOMY_METRICS
+    if _AUTONOMY_METRICS is not None:
+        return _AUTONOMY_METRICS
+    tools_dir = str(Path(__file__).resolve().parent.parent / "testing_tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    import autonomy_metrics  # noqa: WPS433 — lazy import by design
+    _AUTONOMY_METRICS = autonomy_metrics
+    return _AUTONOMY_METRICS
+
+
+def _extract_agent(email: str) -> str:
+    """Return the short agent name extracted from an email like 'plan+opus@odin.agent'.
+
+    Single source of truth for the bucket name — the cost_by_agent
+    chart and the per-agent rollup must agree on the same names.
+    Anything not matching the agent pattern becomes the literal
+    ``"human"`` or ``"unknown"`` bucket.
+    """
+    if not email:
+        return "unknown"
+    if email.endswith("@odin.agent"):
+        local = email.split("@")[0]
+        plus_idx = local.find("+")
+        return local[:plus_idx] if plus_idx != -1 else local
+    if email == "odin@harness.kit":
+        return "odin"
+    return "human"
 
 
 @api_view(["GET"])
@@ -115,6 +164,12 @@ def cost_summary(request):
             Board.objects.filter(id__in=board_ids_in_data).values_list("id", "name")
         )
 
+    # Autonomy + rework + failure-class + duration rollups — feed the
+    # "wave health" cards on the analytics page. Uses the diagnostic
+    # script's pure compute function so the on-page numbers and the
+    # CLI script agree to the digit.
+    autonomy = _compute_autonomy_rollup(tasks, board_ids)
+
     return Response({
         "summary_kpis": _compute_summary_kpis(cost_data, reflection_data),
         "time_series": _aggregate_time_series(cost_data, granularity),
@@ -124,6 +179,12 @@ def cost_summary(request):
         "efficiency_metrics": _compute_efficiency_metrics(cost_data, reflection_data),
         "model_comparison": _build_model_comparison(cost_data),
         "top_expensive_tasks": _get_top_expensive_tasks(cost_data, limit=10),
+        "autonomy": autonomy,
+        "failure_class_breakdown": _failure_class_breakdown(tasks),
+        "rework_breakdown": _rework_round_breakdown(tasks),
+        "per_agent_rollup": _per_agent_rollup(cost_data, tasks),
+        "merge_health": _merge_health_breakdown(task_ids),
+        "review_health": _review_health_breakdown(task_ids),
         "meta": {
             "task_count": len(tasks),
             "granularity": granularity,
@@ -167,6 +228,7 @@ def _build_task_cost_data(tasks):
             "cache_creation_tokens": cache_creation,
             "duration_ms": duration_ms,
             "created_at": task.created_at,
+            "last_updated_at": task.last_updated_at,
             "board_id": task.board_id,
             "assignee_email": assignee_email,
         })
@@ -215,25 +277,39 @@ def _compute_summary_kpis(cost_data, reflection_data):
 
 
 def _aggregate_time_series(cost_data, granularity):
-    """Group cost data into time buckets with per-model breakdown."""
+    """Group cost data into time buckets with per-model breakdown.
+
+    Also tallies a "landed" task_count per bucket — DONE tasks bucketed by
+    their last_updated_at (falling back to created_at), which is the closest
+    proxy we have to a completion date since Task has no dedicated done_at
+    field. This is a separate bucketing dimension from the cost total (which
+    stays keyed by created_at), so the two series are unioned by date key.
+    """
     buckets = defaultdict(lambda: defaultdict(float))
     bucket_totals = defaultdict(float)
+    landed_counts = defaultdict(int)
 
     for d in cost_data:
-        if not d["created_at"]:
-            continue
-        key = _time_bucket_key(d["created_at"], granularity)
-        cost = d["cost"] or 0
-        model = d["model"] or "unknown"
-        buckets[key][model] += cost
-        bucket_totals[key] += cost
+        if d["created_at"]:
+            key = _time_bucket_key(d["created_at"], granularity)
+            cost = d["cost"] or 0
+            model = d["model"] or "unknown"
+            buckets[key][model] += cost
+            bucket_totals[key] += cost
+        if d["status"] == "DONE":
+            landed_at = d.get("last_updated_at") or d["created_at"]
+            if landed_at:
+                landed_key = _time_bucket_key(landed_at, granularity)
+                landed_counts[landed_key] += 1
 
+    all_keys = sorted(set(bucket_totals.keys()) | set(landed_counts.keys()))
     result = []
-    for key in sorted(buckets.keys()):
+    for key in all_keys:
         result.append({
             "date": key,
-            "total": round(bucket_totals[key], 4),
-            "by_model": {m: round(v, 4) for m, v in sorted(buckets[key].items())},
+            "total": round(bucket_totals.get(key, 0.0), 4),
+            "by_model": {m: round(v, 4) for m, v in sorted(buckets.get(key, {}).items())},
+            "task_count": landed_counts.get(key, 0),
         })
     return result
 
@@ -313,24 +389,17 @@ def _aggregate_by_agent(cost_data):
     ]
 
 
-def _extract_agent(email):
-    """Extract agent name from email like 'plan+opus@odin.agent'."""
-    if not email:
-        return "unknown"
-    if email.endswith("@odin.agent"):
-        local = email.split("@")[0]
-        plus_idx = local.find("+")
-        return local[:plus_idx] if plus_idx != -1 else local
-    if email == "odin@harness.kit":
-        return "odin"
-    return "human"
-
-
 def _compute_efficiency_metrics(cost_data, reflection_data):
     """Compute efficiency-related metrics."""
+    # `input_tokens` from the trace parser is fresh (non-cached) input only —
+    # cache reads are reported separately and are additive to it, not a
+    # subset. The denominator must be total context tokens served
+    # (fresh + cached), otherwise the rate can exceed 100% (task 240 on
+    # board 5 showed 1262%, a bogus reading on the retrospective page).
     total_cache_read = sum(d["cache_read_tokens"] for d in cost_data)
     total_input = sum(d["input_tokens"] for d in cost_data)
-    cache_hit_rate = (total_cache_read / total_input * 100) if total_input > 0 else 0
+    total_context = total_cache_read + total_input
+    cache_hit_rate = (total_cache_read / total_context * 100) if total_context > 0 else 0
 
     failed = [d for d in cost_data if d["status"] == "FAILED"]
     failure_cost = sum(d["cost"] or 0 for d in failed)
@@ -432,3 +501,295 @@ def _get_top_expensive_tasks(cost_data, limit=10):
         }
         for d in with_cost[:limit]
     ]
+
+
+# ── W3.17 rollups ─────────────────────────────────────────────────
+
+
+def _compute_autonomy_rollup(tasks, board_ids):
+    """Return the autonomy scorecard for the filtered task set.
+
+    Reuses ``autonomy_metrics.compute_board_metrics`` so the numbers on
+    the analytics page and the CLI diagnostic agree to the digit. The
+    function expects either a Board or a Spec; we pass ``None`` for both
+    when board_ids is empty (whole-DB scope) and the first matching
+    Board otherwise. For multi-board queries the function falls back to
+    a direct rollup (the script's per-board assumption is documented in
+    its docstring — multi-board aggregation has to be a sum, not a
+    reuse of the script).
+    """
+    if not tasks:
+        return {
+            "total_done": 0,
+            "agent_authored": 0,
+            "autonomy_rate": 0.0,
+            "operator_touches_total": 0,
+            "tasks_with_capture_gaps": 0,
+            "exec_duration_seconds": {"min": 0, "max": 0, "p50": 0, "p90": 0},
+            "dispatch_to_done_seconds": {"min": 0, "max": 0, "p50": 0, "p90": 0},
+        }
+
+    if len(board_ids or []) != 1:
+        # Multi-board (or no board filter): the diagnostic script scopes
+        # to one board at a time, so reuse the helpers and aggregate by
+        # hand. Each Board gets its own compute_board_metrics call.
+        return _aggregate_autonomy_across_boards(board_ids)
+
+    # Single board — pass the Board to the script so the script's
+    # per-board branch runs unchanged.
+    try:
+        board = Board.objects.get(pk=board_ids[0])
+    except Board.DoesNotExist:
+        return _aggregate_autonomy_across_boards(None)
+    autonomy = _get_autonomy_metrics()
+    return autonomy.compute_board_metrics(board=board)
+
+
+def _aggregate_autonomy_across_boards(board_ids):
+    """Sum autonomy metrics across all matching boards (or whole DB).
+
+    Used when the analytics query spans multiple boards (or none). The
+    diagnostic script's ``compute_board_metrics`` is per-board, so we
+    loop and sum the relevant fields directly.
+    """
+    autonomy = _get_autonomy_metrics()
+    boards = list(Board.objects.all()) if not board_ids else list(
+        Board.objects.filter(pk__in=board_ids)
+    )
+    if not boards:
+        return {
+            "total_done": 0,
+            "agent_authored": 0,
+            "autonomy_rate": 0.0,
+            "operator_touches_total": 0,
+            "tasks_with_capture_gaps": 0,
+            "exec_duration_seconds": {"min": 0, "max": 0, "p50": 0, "p90": 0},
+            "dispatch_to_done_seconds": {"min": 0, "max": 0, "p50": 0, "p90": 0},
+        }
+
+    total_done = 0
+    agent_authored = 0
+    operator_touches = 0
+    capture_gaps = 0
+    exec_samples = []
+    d2d_samples = []
+
+    for board in boards:
+        m = autonomy.compute_board_metrics(board=board)
+        total_done += m["total_done"]
+        agent_authored += m["agent_authored"]
+        operator_touches += m["operator_touches_total"]
+        capture_gaps += m["cost"]["tasks_with_capture_gaps"]
+        for k in ("min", "max", "p50", "p90"):
+            v = m["exec_duration_seconds"][k]
+            if v:
+                exec_samples.append(v)
+            v2 = m["dispatch_to_done_seconds"][k]
+            if v2:
+                d2d_samples.append(v2)
+
+    return {
+        "total_done": total_done,
+        "agent_authored": agent_authored,
+        "autonomy_rate": (agent_authored / total_done) if total_done else 0.0,
+        "operator_touches_total": operator_touches,
+        "tasks_with_capture_gaps": capture_gaps,
+        "exec_duration_seconds": _percentile_dict(exec_samples),
+        "dispatch_to_done_seconds": _percentile_dict(d2d_samples),
+    }
+
+
+def _percentile_dict(samples):
+    """Min/max/p50/p90 from a list of samples (0-filled when empty)."""
+    if not samples:
+        return {"min": 0, "max": 0, "p50": 0, "p90": 0}
+    sorted_s = sorted(samples)
+    p50_idx = int((len(sorted_s) - 1) * 0.5)
+    p90_idx = int((len(sorted_s) - 1) * 0.9)
+    return {
+        "min": sorted_s[0],
+        "max": sorted_s[-1],
+        "p50": sorted_s[p50_idx],
+        "p90": sorted_s[p90_idx],
+    }
+
+
+def _failure_class_breakdown(tasks):
+    """Count FAILED tasks by metadata.failure_class.
+
+    Source: ``tag_failure_class`` (failure_tagger.py) writes the label
+    on every FAILED transition. Only tasks still in FAILED status are
+    counted — tasks that recovered (FAILED → IN_PROGRESS → DONE) carry
+    the cost in ``rework_breakdown`` instead, so the operator can see
+    the waste without confusing it for a still-failing cohort. Returns
+    a zeroed structure when nothing failed.
+    """
+    buckets: dict[str, int] = defaultdict(int)
+    for t in tasks:
+        if t.status != "FAILED":
+            continue
+        meta = t.metadata or {}
+        cls = meta.get("failure_class")
+        if cls:
+            buckets[cls] += 1
+    if not buckets:
+        return {"buckets": [], "total_failed": 0}
+    return {
+        "buckets": sorted(
+            (
+                {"class": k, "count": v}
+                for k, v in buckets.items()
+            ),
+            key=lambda x: -x["count"],
+        ),
+        "total_failed": sum(buckets.values()),
+    }
+
+
+def _rework_round_breakdown(tasks):
+    """Distribution of rework_count across the task set.
+
+    Source: ``task.metadata["rework_count"]`` bumped by
+    ``_record_rework_continuity`` (F45 continuity + infra auto-redispatch)
+    and ``_maybe_reassign_on_quota_failure`` (F159 quota reassign).
+    Buckets: 0 / 1 / 2 / 3+ — past 3 the long tail flattens on the page.
+    """
+    buckets = {"0": 0, "1": 0, "2": 0, "3+": 0}
+    for t in tasks:
+        meta = t.metadata or {}
+        n = int(meta.get("rework_count", 0) or 0)
+        if n == 0:
+            buckets["0"] += 1
+        elif n == 1:
+            buckets["1"] += 1
+        elif n == 2:
+            buckets["2"] += 1
+        else:
+            buckets["3+"] += 1
+    return [
+        {"rounds": k, "tasks": v} for k, v in buckets.items()
+    ]
+
+
+def _merge_health_breakdown(task_ids):
+    """Merge ladder health for the "is the merge ladder working" section.
+
+    Source: ``MergeAttempt`` (task #209) — one row per rung of the merge
+    ladder (static git merge -> merge agent -> human resume). Groups by
+    mode and outcome and reports dispatch-to-finish lag percentiles.
+    Returns a zeroed structure when the board has no merge attempts yet
+    (never omit the section or crash).
+    """
+    attempts = list(MergeAttempt.objects.filter(task_id__in=task_ids))
+    if not attempts:
+        return {"total_attempts": 0, "by_mode": [], "by_outcome": [], "lag_seconds": _percentile_dict([])}
+
+    by_mode: dict[str, int] = defaultdict(int)
+    by_outcome: dict[str, int] = defaultdict(int)
+    lag_samples = []
+    for a in attempts:
+        by_mode[a.mode] += 1
+        by_outcome[a.outcome] += 1
+        if a.started_at and a.finished_at:
+            lag_samples.append((a.finished_at - a.started_at).total_seconds())
+
+    return {
+        "total_attempts": len(attempts),
+        "by_mode": sorted(
+            ({"mode": k, "count": v} for k, v in by_mode.items()),
+            key=lambda x: -x["count"],
+        ),
+        "by_outcome": sorted(
+            ({"outcome": k, "count": v} for k, v in by_outcome.items()),
+            key=lambda x: -x["count"],
+        ),
+        "lag_seconds": _percentile_dict(lag_samples),
+    }
+
+
+def _review_health_breakdown(task_ids):
+    """Reflection verdict distribution for the "is review catching things"
+    section. Source: ``ReflectionReport.verdict``. Returns a zeroed
+    structure when the board has no reflection reports yet.
+    """
+    verdicts = list(
+        ReflectionReport.objects.filter(task_id__in=task_ids)
+        .exclude(verdict="")
+        .values_list("verdict", flat=True)
+    )
+    if not verdicts:
+        return {"total_reviews": 0, "by_verdict": []}
+
+    counts: dict[str, int] = defaultdict(int)
+    for v in verdicts:
+        counts[v] += 1
+    return {
+        "total_reviews": len(verdicts),
+        "by_verdict": sorted(
+            ({"verdict": k, "count": v} for k, v in counts.items()),
+            key=lambda x: -x["count"],
+        ),
+    }
+
+
+def _per_agent_rollup(cost_data, tasks):
+    """Per-agent rollup: cost, tokens, tasks, rework, agent-authored.
+
+    A single source for the "per-wave/per-agent" table on the page. The
+    cost side reuses the same task-cost records the cost_by_agent chart
+    already uses; rework and autonomy come from metadata + autonomy
+    classification so the operator can spot a high-cost agent that also
+    burns cycles on retries.
+    """
+    by_agent: dict[str, dict] = defaultdict(lambda: {
+        "cost": 0.0, "tokens": 0, "tasks": 0,
+        "rework_rounds": 0, "rework_tasks": 0, "agent_authored": 0,
+    })
+    # Index tasks by id for fast metadata + autonomy lookup.
+    task_by_id = {t.id: t for t in tasks}
+    autonomy = _get_autonomy_metrics()
+
+    for d in cost_data:
+        agent = _extract_agent(d["assignee_email"])
+        by_agent[agent]["cost"] += d["cost"] or 0
+        by_agent[agent]["tokens"] += d["total_tokens"]
+        by_agent[agent]["tasks"] += 1
+        task = task_by_id.get(d["task_id"])
+        if task is not None:
+            meta = task.metadata or {}
+            n = int(meta.get("rework_count", 0) or 0)
+            by_agent[agent]["rework_rounds"] += n
+            if n > 0:
+                by_agent[agent]["rework_tasks"] += 1
+
+    # Autonomy classification per task — only for DONE tasks (matches
+    # the script's contract). Classify is cheap enough at analytics time.
+    for task in tasks:
+        if task.status != "DONE":
+            continue
+        try:
+            cls = autonomy.classify_task(task)
+        except Exception:
+            logger.warning("autonomy classify failed for task %s", task.id, exc_info=True)
+            continue
+        agent = _extract_agent(getattr(task.assignee, "email", "") or "")
+        if cls["agent_authored"]:
+            by_agent[agent]["agent_authored"] += 1
+
+    return [
+        {
+            "agent": agent,
+            "cost": round(info["cost"], 4),
+            "tokens": info["tokens"],
+            "tasks": info["tasks"],
+            "rework_rounds": info["rework_rounds"],
+            "rework_tasks": info["rework_tasks"],
+            "agent_authored": info["agent_authored"],
+        }
+        for agent, info in sorted(by_agent.items(), key=lambda x: -x[1]["cost"])
+    ]
+
+
+# Module-level `_extract_agent` is defined near the top of this file —
+# single source of truth shared by the cost_by_agent chart and the
+# per-agent rollup.

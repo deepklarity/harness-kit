@@ -21,7 +21,6 @@ from odin.harnesses.base import (
 )
 from odin.harnesses.claude import ClaudeHarness
 from odin.harnesses.gemini import GeminiHarness
-from odin.harnesses.qwen import QwenHarness
 from odin.harnesses.minimax import MiniMaxHarness
 from odin.harnesses.glm import GLMHarness
 from odin.harnesses.codex import CodexHarness
@@ -51,13 +50,6 @@ class TestBuildCommandOutputFormat:
 
     def test_gemini_uses_stream_json(self):
         h = GeminiHarness(self._cfg())
-        cmd = h.build_execute_command("hello", {})
-        assert "--output-format" in cmd
-        idx = cmd.index("--output-format")
-        assert cmd[idx + 1] == "stream-json"
-
-    def test_qwen_uses_stream_json(self):
-        h = QwenHarness(self._cfg())
         cmd = h.build_execute_command("hello", {})
         assert "--output-format" in cmd
         idx = cmd.index("--output-format")
@@ -261,6 +253,7 @@ class TestExecuteWithTrace:
                 "working_dir": str(tmp_path),
                 "output_file": output_file,
                 "trace_file": trace_file,
+                "validate_status": False,
             })
 
         assert result.success
@@ -290,7 +283,10 @@ class TestExecuteWithTrace:
         fake_proc.stderr = MagicMock()
 
         with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
-            result = await harness.execute("test", {"working_dir": str(tmp_path)})
+            result = await harness.execute("test", {
+                "working_dir": str(tmp_path),
+                "validate_status": False,
+            })
 
         assert result.success
         assert result.output == "Hello Gemini"
@@ -309,7 +305,31 @@ class TestExecuteWithTrace:
             result = await harness.execute("test", {
                 "working_dir": str(tmp_path),
                 "output_file": output_file,
+                "validate_status": False,
             })
 
         assert result.success
         assert "Plain codex output" in result.output
+
+    @pytest.mark.asyncio
+    async def test_codex_execute_extracts_turn_completed_usage(self, tmp_path):
+        """Codex's own execute() must extract usage, not just the tmux fallback path."""
+        cfg = AgentConfig(cli_command="fake-codex", capabilities=["writing"])
+        harness = CodexHarness(cfg)
+
+        output_file = str(tmp_path / "task.out")
+        stream = "\n".join([
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "done"}}),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 500, "output_tokens": 200}}),
+        ]) + "\n"
+        fake_proc = make_fake_process([stream.encode()], delay=0.01)
+
+        with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+            result = await harness.execute("test", {
+                "working_dir": str(tmp_path),
+                "output_file": output_file,
+                "validate_status": False,
+            })
+
+        assert result.metadata.get("usage", {}).get("input_tokens") == 500
+        assert result.metadata.get("usage", {}).get("output_tokens") == 200

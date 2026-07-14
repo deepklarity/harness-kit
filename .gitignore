@@ -3,6 +3,13 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Agent OAuth token files (microsandbox claude auth — never commit)
+.claude-token
+
+# Per-task proof artifacts — evidence lives on the task board (uploaded as
+# comment attachments on reflection pass), not in shared git history.
+.proof/
+
 # C extensions
 *.so
 
@@ -218,6 +225,7 @@ taskit/taskit-backend/media/screenshots/
 # Dev script artifacts
 .celery/
 .dev-logs/
+.verify-logs/
 
 celery.pidbox.exchange
 celerybeat-schedule.db
@@ -226,3 +234,32 @@ tmp/
 
 
 
+
+# odin-worktree-agent-configs
+/.claude
+/.codex
+/.gemini
+/.gemini/settings.json
+/.qwen
+/.kilocode
+/.kilocode/mcp.json
+/.odin
+/.env
+/opencode.json
+/.gitignore
+/.mcp.json
+/.codex/config.toml
+/.proof
+/*.orig
+
+# scratch virtualenvs must never be committed (F50 — #118 sweep)
+.venv*/
+
+# runtime state
+.tmp-scratch/
+control/
+db.sqlite3-*
+
+# local-only: history and research funnel stay on the operator machine, in no remote
+docs/fable_roadmap/archive/
+docs/wiki/

@@ -1,0 +1,42 @@
+Let me verify the raw test output files match the proof claims.
+All claims verified against source and raw outputs:
+
+- **Code fix** (`promote_check.py:696`): `cmd = ["sh", str(verify_script)]` — correct, with a clear docstring (lines 688-694) explaining the cause-class contract.
+- **Two new tests** (`test_promote_check.py:660, 687`): one proves a 644 script runs without crashing; the other locks the `sh`-invocation contract via monkeypatched `subprocess.run`. Both present and well-scoped.
+- **Unit run** (`odin_unit_test_run.txt`): 59 passed, including all 4 `TestRunVerify` tests (2 original + 2 new).
+- **644 acceptance run** (`verify_sh_644_run.txt`): `sh scripts/verify.sh odin` against a 644 script produced `1 failed, 1496 passed, 4 skipped` — the pre-existing microsandbox failure, not a PermissionError crash. Core criterion MET.
+- **Full suite**: consistent with the 644 run; the single failure is pre-existing and unrelated (verified by stash per proof).
+
+```json
+{
+  "verdict": "PASS",
+  "summary": "One-line fix invokes verify.sh via `sh` so the gate survives a lost exec bit; two well-designed tests lock the contract and a 644-mode acceptance run confirms the crash is gone.",
+  "quality_assessment": "Acceptance criterion (gate runs green against a 644 checkout): MET — verify_sh_644_run.txt shows sh scripts/verify.sh odin producing 1496 passed/1 pre-existing fail instead of PermissionError. Odin suite green: MET — 1496 pass; the single failure is pre-existing microsandbox test, verified unrelated by stash test. Code change (promote_check.py:696) is minimal and correct, addressing the cause (direct exec requiring +x) not the symptom. Tests (test_promote_check.py:660,687) are well-scoped: one proves behavior end-to-end, one locks the argv contract against future regression. Red-gate reproduction in proof is honest (scoped class run quoting 4 passed after fix; full module run shows 59 passed in odin_unit_test_run.txt).",
+  "slop_detection": "None.",
+  "improvements": "- Proof's 'Green gate' section quotes '4 passed in 0.08s' (class-scoped) while the attached raw file shows 59 passed in 0.17s (full module) — both accurate but the framing could confuse a skimming reviewer; aligning the quoted count to the attached file would help.",
+  "agent_optimization": "Description clarity was sufficient; the task was a tight, well-scoped one-line fix and the agent executed it with proper TDD discipline (red gate, fix, green gate, full suite, acceptance run). No model-tier or token concerns.",
+  "quota_failure": "None.",
+  "fix_list": []
+}
+```
+
+### Quality Assessment
+- **Gate runs against 644 checkout**: MET — `verify_sh_644_run.txt` confirms `sh scripts/verify.sh odin` ran the suite (1496 passed, 1 pre-existing fail) instead of crashing on PermissionError.
+- **Odin suite green**: MET — 1496 pass; single failure is the pre-existing `test_mcp_config_staged_outside_guest_tmpfs`, verified unrelated via stash.
+- **Fix correctness**: `promote_check.py:696` changes `cmd` to `["sh", str(verify_script), *suites]`; docstring (688-694) documents the cause-class rationale. Minimal and targeted.
+- **Test quality**: `test_run_verify_works_when_script_not_executable` proves the behavior; `test_run_verify_invokes_via_sh_not_direct_exec` locks the argv contract so a future refactor can't silently regress.
+
+### Slop Detection
+None.
+
+### Actionable Improvements
+- Proof's "Green gate" quotes `4 passed in 0.08s` (class-scoped) while the attached `odin_unit_test_run.txt` shows `59 passed in 0.17s` (full module). Both are accurate but the mismatch in scope could confuse a skimming reviewer.
+
+### Agent Optimization
+Description was sufficient for a tight one-line fix; agent executed with proper TDD discipline (red → fix → green → full suite → acceptance run). No tier or token concerns.
+
+### Quota / Resource Failure
+None.
+
+### Verdict
+**PASS** — every acceptance criterion is verifiably met; the fix is correct, minimal, and well-tested.

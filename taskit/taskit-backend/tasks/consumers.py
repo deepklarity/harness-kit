@@ -26,10 +26,27 @@ _MAX_BUFFER = 1_048_576  # 1 MB cap per session
 _KICKOFF_MESSAGE = (
     "I need help planning this task. The full specification and instructions "
     "are in the system prompt.\n\n"
-    "Please analyze the spec and help me decompose it into sub-tasks. When "
+    "First, confirm what you received: state the spec's title and its main "
+    "deliverables in 2-3 lines, so I can verify the right spec loaded.\n\n"
+    "Then analyze the spec and help me decompose it into sub-tasks. When "
     "we're satisfied with the plan, write the final JSON to the file path "
     "specified in the system prompt."
 )
+
+
+def _send_kickoff(pty, settle_seconds: float = 0.5) -> None:
+    """Paste the kickoff message, then submit it with a separate Enter.
+
+    The two writes must NOT be combined: Claude Code treats one rapid burst
+    as a bracketed paste, so a \\r bundled with the message becomes literal
+    text sitting in the input box instead of a submit keypress. Same reason
+    the tmux path does paste-buffer followed by send-keys Enter.
+    """
+    import time
+
+    pty.write(_KICKOFF_MESSAGE.encode())
+    time.sleep(settle_seconds)
+    pty.write(b'\r')
 
 
 def _build_planning_command(spec_path: str, planner_config: dict | None) -> list[str]:
@@ -228,9 +245,11 @@ class PlanningConsumer(AsyncWebsocketConsumer):
                 pty = sess.get('pty')
                 if pty:
                     try:
-                        pty.write((_KICKOFF_MESSAGE + '\r').encode())
+                        _send_kickoff(pty)
                     except Exception:
-                        pass
+                        logger.warning(
+                            "[planning] kickoff send failed", exc_info=True
+                        )
 
             threading.Thread(target=_poll, daemon=True).start()
 
@@ -611,7 +630,7 @@ class SessionConsumer(AsyncWebsocketConsumer):
 
                 # Same path — check inode change (rerun replaced the file):
                 new_sig = self._file_signature(current_path)
-                if new_sig is not None and current_sig is not None and new_sig[0] != current_sig[0]:
+                if new_sig is not None and current_sig is not None and (new_sig[0] != current_sig[0] or new_sig[1] < offset):
                     await self._send_json({
                         "type": "reset",
                         "session_type": current_session_type,

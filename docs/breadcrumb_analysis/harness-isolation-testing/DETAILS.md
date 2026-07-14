@@ -148,9 +148,9 @@ Key difference: Codex has DUAL injection — both config file (`.codex/config.to
 
 ---
 
-## 7. Auto-Discovery Harnesses (Gemini, Qwen, MiniMax, GLM)
+## 7. Auto-Discovery Harnesses (Gemini, MiniMax, GLM)
 
-**Files**: `gemini.py`, `qwen.py`, `minimax.py`, `glm.py`
+**Files**: `odin/src/odin/harnesses/gemini.py`, `odin/src/odin/harnesses/minimax.py`, `odin/src/odin/harnesses/glm.py`
 
 These harnesses do NOT inject MCP via CLI flags. They rely on:
 1. Orchestrator writes config file to working_dir
@@ -162,7 +162,7 @@ The harnesses' `build_execute_command()` has no MCP-related logic. MCP visibilit
 
 ## 8. Token/Cost Extraction Pipeline
 
-**Files**: `claude.py :: _extract_token_usage()`, `cost_tracking.py :: CostTracker`
+**Files**: `odin/src/odin/harnesses/claude.py :: _extract_token_usage()`, `odin/src/odin/cost_tracking/tracker.py :: CostTracker`
 
 Pipeline:
 1. Harness runs subprocess → raw stream-json output
