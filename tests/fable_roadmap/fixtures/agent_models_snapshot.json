@@ -1,0 +1,9 @@
+{
+  "agents": {
+    "claude": {"default_model": "claude-sonnet-5", "retired": null},
+    "codex": {"default_model": "gpt-5.4", "retired": null},
+    "minimax": {"default_model": "minimax-coding-plan/MiniMax-M3", "retired": null},
+    "glm": {"default_model": "zai-coding-plan/glm-5.2", "retired": null},
+    "agy": {"default_model": "Gemini 3.5 Flash (High)", "retired": null}
+  }
+}

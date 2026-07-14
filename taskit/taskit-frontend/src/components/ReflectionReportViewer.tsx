@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ReflectionReport } from '../types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Sparkles, AlertTriangle, Loader2, XCircle, ExternalLink, Trash2, ChevronRight } from 'lucide-react';
+import { Sparkles, AlertTriangle, AlertOctagon, Loader2, XCircle, ExternalLink, Trash2, ChevronRight } from 'lucide-react';
 import { formatDate } from '../utils/transformer';
 import { VERDICT_STYLES } from './reflection/constants';
 import { ReportSection } from './reflection/ReportSection';
@@ -17,7 +17,8 @@ interface ReflectionReportViewerProps {
 
 export function ReflectionReportViewer({ reports, onCancel, onDelete, onViewDetail }: ReflectionReportViewerProps) {
     const hasActiveReflection = reports.some(r => r.status === 'PENDING' || r.status === 'RUNNING');
-    const [isOpen, setIsOpen] = useState(hasActiveReflection);
+    const hasErrorVerdict = reports.some(r => r.status === 'COMPLETED' && r.verdict === 'ERROR');
+    const [isOpen, setIsOpen] = useState(hasActiveReflection || hasErrorVerdict);
 
     if (reports.length === 0) return null;
 
@@ -128,6 +129,7 @@ function ReflectionCard({ report, onCancel, onDelete, onViewDetail }: {
     const verdictStyle = VERDICT_STYLES[report.verdict] || VERDICT_STYLES.NEEDS_WORK;
     const tokenUsage = report.token_usage as Record<string, number> | null;
     const cleanSummary = deduplicateSummary(report.verdict_summary);
+    const isErrorVerdict = report.verdict === 'ERROR';
     const requestedBy = report.requested_by && report.requested_by !== 'unknown@user'
         ? report.requested_by
         : null;
@@ -139,7 +141,10 @@ function ReflectionCard({ report, onCancel, onDelete, onViewDetail }: {
                 <Sparkles className="size-3.5 text-indigo-400" />
                 <span className="text-sm font-semibold">Reflection Report</span>
                 {report.verdict && (
-                    <Badge className={`${verdictStyle.bg} ${verdictStyle.text} ${verdictStyle.border} border text-[10px] font-bold px-1.5`}>
+                    <Badge
+                        data-verdict={report.verdict}
+                        className={`${verdictStyle.bg} ${verdictStyle.text} ${verdictStyle.border} border text-[10px] font-bold px-1.5`}
+                    >
                         {report.verdict}
                     </Badge>
                 )}
@@ -172,8 +177,32 @@ function ReflectionCard({ report, onCancel, onDelete, onViewDetail }: {
                 )}
             </div>
 
-            {/* Verdict summary — deduplicated */}
-            {cleanSummary && (
+            {/* ERROR verdict — prominent banner with the reviewer's raw error
+                head so the operator can see WHY the reviewer failed without
+                opening the detail page. ERROR is the reviewer's verdict, not
+                a judgment about the work (see reflection.py: ERROR is outside
+                the auto-advance set so the task stays in REVIEW for triage). */}
+            {isErrorVerdict && (
+                <div
+                    data-testid="reflection-error-banner"
+                    className="flex items-start gap-2 px-4 py-2.5 border-b border-rose-500/20 bg-rose-500/5"
+                >
+                    <AlertOctagon className="size-4 text-rose-400 shrink-0 mt-0.5" aria-hidden="true" />
+                    <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-rose-300 mb-0.5">
+                            Reviewer error
+                        </div>
+                        <p className="text-sm text-rose-100/90 whitespace-pre-wrap break-words font-mono">
+                            {cleanSummary || 'Reviewer produced no output.'}
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {/* Verdict summary — deduplicated. Skipped for ERROR verdicts because
+                the dedicated banner above already shows the error context in a
+                louder, monospaced block. */}
+            {cleanSummary && !isErrorVerdict && (
                 <div className="px-4 py-2 border-b border-indigo-500/10 bg-secondary/20">
                     <p className="text-sm text-foreground/80">
                         {cleanSummary}

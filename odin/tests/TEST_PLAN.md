@@ -2,7 +2,7 @@
 
 Checklist of what needs testing. Each item is tagged:
 - **`[simple]`** — Unit/pure-function test, no external deps, fast
-- **`[llm]`** — Requires real LLM CLI agents on PATH (codex, gemini, qwen, etc.)
+- **`[llm]`** — Requires real LLM CLI agents on PATH (codex, gemini, etc.)
 - **`[io]`** — Disk/file I/O but no LLM calls
 - **`[mock]`** — Needs mocked subprocess/HTTP, no real agents
 
@@ -12,16 +12,29 @@ Status: `[ ]` = not covered, `[x]` = covered, `[~]` = partial
 
 ## Harness System
 
-- [x] Harness availability — gemini/qwen/codex on PATH `[simple]`
-- [x] All 6 harnesses registered in HARNESS_REGISTRY `[simple]`
+- [x] Harness availability — gemini/codex on PATH `[simple]`
+- [x] All 5 harnesses registered in HARNESS_REGISTRY `[simple]`
 - [x] Single harness execute — gemini returns output `[llm]`
-- [x] Single harness execute — qwen returns output `[llm]`
-- [ ] Harness timeout handling — subprocess killed on timeout `[mock]`
-- [ ] Harness stderr/non-zero exit → TaskResult.success=False `[mock]`
-- [ ] API harness (minimax) execute with mocked HTTP `[mock]`
-- [ ] API harness (glm) execute with mocked HTTP `[mock]`
+- [x] Harness timeout handling — subprocess killed on timeout `[mock]` — `mock/test_harness_subprocess_errors.py::TestHarnessTimeoutKillsSubprocess`
+- [x] Harness stderr/non-zero exit → TaskResult.success=False `[mock]` — `mock/test_harness_subprocess_errors.py::TestHarnessNonZeroExit`
+- [x] API harness (minimax) execute with mocked HTTP `[mock]` — `mock/test_harness_subprocess_errors.py::TestApiHarnessHttpErrors`
+- [x] API harness (glm) execute with mocked HTTP `[mock]` — `mock/test_harness_subprocess_errors.py::TestApiHarnessHttpErrors`
 - [ ] `is_available()` returns False when CLI missing `[simple]`
 - [ ] `cli_command` config override respected by harness `[simple]`
+- [x] Microsandbox sandbox removed at run-end (success path) `[mock]` — `mock/test_microsandbox_cleanup.py::test_success_path_removes_sandbox`
+- [x] Microsandbox sandbox removed at run-end (non-zero exit) `[mock]` — `mock/test_microsandbox_cleanup.py::test_nonzero_exit_path_removes_sandbox`
+- [x] Microsandbox sandbox removed at run-end (host timeout) `[mock]` — `mock/test_microsandbox_cleanup.py::test_timeout_path_removes_sandbox`
+- [x] Microsandbox sandbox removed at run-end (exception) `[mock]` — `mock/test_microsandbox_cleanup.py::test_exception_path_removes_sandbox`
+- [x] Microsandbox cleanup uses finally (not scattered if/else) `[mock]` — `mock/test_microsandbox_cleanup.py::test_cleanup_runs_in_finally_not_only_on_success`
+- [x] Microsandbox temp dir removed alongside sandbox `[mock]` — `mock/test_microsandbox_cleanup.py::test_temp_dir_removed_alongside_sandbox`
+- [x] Microsandbox named sandboxes (odinbuild, snapshots) NEVER removed `[mock]` — `mock/test_microsandbox_cleanup.py::test_named_sandboxes_never_in_removal_set`
+- [x] Microsandbox orphan partition rejects non-prefix names `[simple]` — `mock/test_microsandbox_cleanup.py::TestEphemeralSandboxNameFilter`
+- [x] Microsandbox msb-list parse keeps ephemeral-only `[simple]` — `mock/test_microsandbox_cleanup.py::TestOrphanListingParser`
+- [x] Microsandbox startup sweep removes only ephemeral (odin-msb-*) `[mock]` — `mock/test_microsandbox_gc.py::TestStartupOrphanSweep`
+- [x] `odin gc` report shape (sandboxes/snapshots/worktrees/totals) `[simple]` — `mock/test_microsandbox_gc.py::TestGcReportShape`
+- [x] `odin gc --prune` removes only ephemeral sandboxes `[mock]` — `mock/test_microsandbox_gc.py::TestGcPrune`
+- [x] `odin gc` default is dry-run; CLI flag present `[simple]` — `mock/test_microsandbox_gc.py::TestGcCliContract`
+- [x] Microsandbox `_size_breakdown` separates node_modules from worktree rest `[simple]` — `mock/test_microsandbox_gc.py::TestSizeBreakdownEdgeCases`
 
 ## Task Management (taskit)
 
@@ -63,7 +76,41 @@ Status: `[ ]` = not covered, `[x]` = covered, `[~]` = partial
 - [x] Prompt wrapping — MCP section included when mcp_task_id is provided `[simple]` — `unit/test_dag.py::TestParseEnvelope::test_wrap_prompt_with_mcp_includes_mcp_section`
 - [x] Prompt wrapping — MCP section ordered between prompt and envelope `[simple]` — `unit/test_dag.py::TestParseEnvelope::test_wrap_prompt_mcp_section_between_prompt_and_envelope`
 - [x] Prompt wrapping — working_dir + MCP + envelope compose together `[simple]` — `unit/test_dag.py::TestParseEnvelope::test_wrap_prompt_with_working_dir_and_mcp`
+- [x] Prompt wrapping — pre-baked python env hint injected with working_dir (no venv/pip for suites) `[simple]` — `unit/test_dag.py::TestParseEnvelope::test_wrap_prompt_working_dir_includes_prebaked_python_env_hint`
+- [x] Prompt wrapping — no env hint when working_dir absent `[simple]` — `unit/test_dag.py::TestParseEnvelope::test_wrap_prompt_no_env_hint_without_working_dir`
+- [x] Prompt wrapping — pre-completion self-audit gate rides on every prompt (task-170 fix) `[simple]` — `unit/test_dag.py::TestSelfAuditGate`
+- [x] Project notes — reader resolves default + configured path, caps at 4k (newest kept), best-effort (never crashes) `[simple]` — `unit/test_project_notes.py::TestReadProjectNotes`
+- [x] Project notes — _wrap_prompt injects labeled section after brief, before MCP `[simple]` — `unit/test_dag.py::TestProjectNotesInjection`
+- [x] Reflection — guidance to check durable facts appended to PROJECT_NOTES.md `[simple]` — `unit/test_reflection.py::TestBuildReflectionPrompt::test_prompt_guides_durable_project_notes_capture`
+- [x] Warm start — task brief matches the right breadcrumb/pattern doc (TF-IDF cosine, same matcher as Memory twins) `[disk]` — `disk/test_warm_start.py::TestBriefMatching`
+- [x] Warm start — no-match brief yields no section (no filler) `[disk]` — `disk/test_warm_start.py::TestNoMatch`
+- [x] Warm start — suggested docs recorded into `task.metadata["warm_start_docs"]` for the read-rate audit `[disk]` — `disk/test_warm_start.py::TestMetadataRecording`
+- [x] Warm start — breadcrumb flow files' own H1/H2 headings + summary indexed (not just _INDEX rows) `[disk]` — `disk/test_warm_start_corpus.py::TestBreadcrumbFlowHeadings`
+- [x] Warm start — docs/wiki category TOC one-liners indexed as matchable entries `[disk]` — `disk/test_warm_start_corpus.py::TestWikiToc`
+- [x] Warm start — patterns pick up H2 heading text `[disk]` — `disk/test_warm_start_corpus.py::TestPatternsH2`
+- [x] Warm start — configurable match floor (min_score override) for the offline replay `[disk]` — `disk/test_warm_start_corpus.py::TestFloorConfig`
+- [x] Warm start — coverage_curve replays briefs across floors, monotonic non-increasing `[disk]` — `disk/test_warm_start_replay.py::TestCoverageCurve`
+- [x] Warm start — score_all returns unfiltered per-entry scores (corpus parsed once) `[disk]` — `disk/test_warm_start_corpus.py::TestFloorConfig::test_all_scores_unfiltered`
+- [x] Prompt wrapping — gate names duplicate-definition + commented-out-dead-code defect classes `[simple]` — `unit/test_dag.py::TestSelfAuditGate::test_gate_names_both_defect_classes`
+- [x] Prompt wrapping — gate references scripts/self_audit_diff.sh assist `[simple]` — `unit/test_dag.py::TestSelfAuditGate::test_gate_references_mechanical_assist_script`
+- [x] Prompt wrapping — gate ordered before the ODIN-STATUS envelope `[simple]` — `unit/test_dag.py::TestSelfAuditGate::test_gate_ordered_after_task_and_before_envelope`
+- [x] self_audit_diff.sh — replays task-170 known-bad commit fe766f45, flags duplicate `_extract_agent` + commented dead code `[simple]` — `unit/test_self_audit_script.py::TestReplayTask170Bad`
+- [x] self_audit_diff.sh — cleanup commit e0a8e187 comes back clean (no false positives) `[simple]` — `unit/test_self_audit_script.py::TestReplayTask170Clean`
 - [ ] Reasoning metadata stored on tasks after plan `[llm]`
+
+### Clarification Gate (pre-planning)
+
+- [x] Clarification prompt includes spec text + output paths `[mock]` — `mock/test_clarification_gate.py::TestClarificationPrompt`
+- [x] Gate runs before decomposition in auto/quiet mode `[mock]` — `mock/test_clarification_gate.py::TestGateAutoMode::test_gate_runs_before_decomposition`
+- [x] gate=False skips clarification entirely `[mock]` — `mock/test_clarification_gate.py::TestGateAutoMode::test_gate_disabled_skips_clarification`
+- [x] Answers from gate_callback injected into decomposition prompt `[mock]` — `mock/test_clarification_gate.py::TestGateAutoMode::test_answers_appended_to_decomposition_prompt`
+- [x] Clarification JSON + HTML preview written to disk `[mock]` — `mock/test_clarification_gate.py::TestGateAutoMode::test_clarification_files_written`
+- [x] Orchestrator injects preview_path into clarification dict `[mock]` — `mock/test_clarification_gate.py::TestGateAutoMode::test_orchestrator_injects_preview_path`
+- [x] gate_callback returning None aborts cleanly `[mock]` — `mock/test_clarification_gate.py::TestGateAutoMode::test_gate_callback_returns_none_aborts`
+- [x] Interactive prompt includes gate section when gate=True `[mock]` — `mock/test_clarification_gate.py::TestInteractivePromptGate`
+- [x] CLI gate surfaces preview file path to the human `[mock]` — `mock/test_clarification_gate.py::TestGateInteraction::test_surfaces_preview_path`
+- [x] CLI gate requires human nod even when no questions `[mock]` — `mock/test_clarification_gate.py::TestGateInteraction::test_requires_nod_even_with_no_questions`
+- [x] CLI gate aborts on EOFError (non-interactive safe) `[mock]` — `mock/test_clarification_gate.py::TestGateInteraction::test_eof_on_confirm_aborts`
 
 ## Orchestrator — Execution
 
@@ -86,7 +133,9 @@ Status: `[ ]` = not covered, `[x]` = covered, `[~]` = partial
 
 - [x] _deps_satisfied — no deps always satisfied `[simple]` — `taskit-backend/tests/test_dag_executor.py`
 - [x] _deps_satisfied — all deps DONE `[simple]`
-- [x] _deps_satisfied — REVIEW counts as satisfied `[simple]`
+- [x] _deps_satisfied — REVIEW does NOT count as satisfied (merge-gate policy, fable task 214) `[simple]`
+- [x] _deps_satisfied — TESTING counts as satisfied (post-merge gate) `[simple]`
+- [x] _deps_satisfied — dep REVIEW → TESTING flips dependent from WAITING → READY `[simple]`
 - [x] _deps_satisfied — partial deps not satisfied `[simple]`
 - [x] _deps_satisfied — EXECUTING deps not satisfied `[simple]`
 - [x] _any_dep_failed — failed dep detected `[simple]`
@@ -238,6 +287,27 @@ Status: `[ ]` = not covered, `[x]` = covered, `[~]` = partial
 - [x] Base agent selection from config `[simple]` — `unit/test_config.py::TestDefaultConfig`
 - [x] Model parsing — list and dict formats `[simple]` — `unit/test_config.py::TestParseModels`
 - [x] Model routing parsing `[simple]` — `unit/test_config.py::TestParseModelRouting`
+
+## History-Driven Routing
+
+The orchestrator's tier-distribution phase used to be `random.choice`
+on viable candidates. It now asks `odin.agent_routing.suggest_routing`
+to rank by measured success rate + median cost (read from
+`/boards/{id}/agent-stats/`), with the static priority list as the
+override layer when history is thin or absent (Default First).
+
+- [x] Suggester ranks cheap-tier candidates by `success_rate` DESC, then `median_tokens` ASC `[simple]` — `unit/test_agent_routing.py::TestSuggestRoutingCheapestClearsThreshold`
+- [x] Suggester escalates across tiers when only an expensive agent clears the threshold `[simple]` — `unit/test_agent_routing.py::TestSuggestRoutingEscalation`
+- [x] Suggester returns `StaticFallback` when no candidate clears `success_threshold` `[simple]` — `unit/test_agent_routing.py::TestSuggestRoutingEscalation::test_no_qualifier_anywhere_returns_static`
+- [x] Suggester falls back to static when every candidate has fewer than `min_samples` `[simple]` — `unit/test_agent_routing.py::TestSuggestRoutingThinHistory`
+- [x] Suggester dis-qualifies sub-threshold agents but keeps them in the candidate list `[simple]` — `unit/test_agent_routing.py::TestSuggestRoutingThresholdDisqualification`
+- [x] Decision shapes expose the rule that fired for audit (`routing_reasoning` auditability) `[simple]` — `unit/test_agent_routing.py::TestDecisionShape`
+- [x] `_route_task` consults the suggester in Phase 2 (tier distribution) `[mock]` — `unit/test_route_task_suggester.py::TestRouteTaskHistoryDriven`
+- [x] `_route_task` preserves random.distribute behavior when history is thin `[mock]` — `unit/test_route_task_suggester.py::TestRouteTaskThinHistoryFallback`
+- [x] `_route_task` keeps respecting `suggested_agent` from the planner (Phase 1 wins) `[mock]` — `unit/test_route_task_suggester.py::TestRouteTaskSuggestionOverridesSuggester`
+- [x] `_route_task` degrades gracefully when the stats fetch raises `[mock]` — `unit/test_route_task_suggester.py::TestRouteTaskFetchesAgentStats::test_exception_in_fetch_does_not_break_routing`
+- [x] `TaskItBackend.fetch_agent_stats` parses rows + forwards `?spec=` `[mock]` — `mock/test_fetch_agent_stats.py`
+- [x] `TaskItBackend.fetch_agent_stats` degrades to empty rows on backend error `[mock]` — `mock/test_fetch_agent_stats.py::test_fetch_agent_stats_exception_returns_empty`
 - [x] Unknown config keys ignored `[io]` — `unit/test_config.py::TestYAMLLoading`
 - [x] Enabled agents filtering `[simple]` — `unit/test_config.py::TestOdinConfigMethods`
 
@@ -263,13 +333,13 @@ Status: `[ ]` = not covered, `[x]` = covered, `[~]` = partial
 
 ## Disk Write / Agent Capabilities
 
-- [x] Agents can write files to disk (codex/gemini/qwen) `[llm]`
+- [x] Agents can write files to disk (codex/gemini) `[llm]`
 
 ---
 
 ## Streaming (Plan Output)
 
-- [x] CLI harnesses yield chunks incrementally (claude/gemini/codex/qwen) `[mock]`
+- [x] CLI harnesses yield chunks incrementally (claude/gemini/codex) `[mock]`
 - [x] Streaming chunk order preserved `[mock]`
 - [x] Streaming callback called per chunk with incremental timing `[mock]`
 - [x] Streaming handles CLI not found gracefully `[mock]`
@@ -325,7 +395,6 @@ Status: `[ ]` = not covered, `[x]` = covered, `[~]` = partial
 
 - [x] Claude harness adds --mcp-config flag when context has mcp_config `[simple]` — `unit/test_mcp_harness_integration.py::TestClaudeHarnessMcpConfig`
 - [x] Gemini harness adds --mcp-config flag `[simple]` — `unit/test_mcp_harness_integration.py::TestGeminiHarnessMcpConfig`
-- [x] Qwen harness adds --mcp-config flag `[simple]` — `unit/test_mcp_harness_integration.py::TestQwenHarnessMcpConfig`
 - [x] Codex harness ignores MCP config (no support) `[simple]` — `unit/test_mcp_harness_integration.py::TestCodexHarnessNoMcp`
 - [x] Orchestrator generates valid MCP config JSON `[simple]` — `unit/test_mcp_harness_integration.py::TestMcpConfigGeneration`
 - [x] MCP config has correct env vars (URL, token, task_id, author) `[simple]` — `unit/test_mcp_harness_integration.py::TestMcpConfigGeneration`
@@ -431,6 +500,29 @@ Status: `[ ]` = not covered, `[x]` = covered, `[~]` = partial
 - [x] List reflections filter by verdict `[simple]` — `taskit-backend/tests/test_reflection.py::TestReflectionListAll::test_list_reflections_filter_by_verdict`
 - [x] Assembled prompt stored in report `[simple]` — `taskit-backend/tests/test_reflection.py::TestReflectionReportUpdate::test_assembled_prompt_stored_in_report`
 - [x] Serializer includes task_title `[simple]` — `taskit-backend/tests/test_reflection.py::TestReflectionListAll::test_serializer_includes_task_title`
+
+## Provenance Trailers (Task-Id / Spec-Id)
+
+- [x] Auto-commit message carries Task-Id/Spec-Id trailers `[io]` — `disk/test_worktree_disk.py::TestProvenanceTrailers::test_auto_commit_message_has_trailers`
+- [x] Merge commit message carries Task-Id/Spec-Id trailers `[io]` — `disk/test_worktree_disk.py::TestProvenanceTrailers::test_merge_commit_message_has_trailers`
+- [x] Trailers extractable via `git log --format=%(trailers:key=…)` `[io]` — `disk/test_worktree_disk.py::TestProvenanceTrailers::test_trailers_extractable_by_key`
+- [x] Merge without title still carries trailers `[io]` — `disk/test_worktree_disk.py::TestProvenanceTrailers::test_trailers_present_without_title`
+- [x] `why.py file:LINE` resolves blame → trailer → task/spec `[io]` — `disk/test_why.py::TestWhySingleLine`
+- [x] `why.py file:START-END` resolves a range `[io]` — `disk/test_why.py::TestWhyRange`
+- [x] `why.py file` shows whole-file provenance summary `[io]` — `disk/test_why.py::TestWhyFileSummary`
+- [x] `why.py` degrades gracefully on trailerless commits `[io]` — `disk/test_why.py::test_line_without_trailers`
+- [x] `why.py` error handling (missing file/line, no arg) `[io]` — `disk/test_why.py::TestWhyErrors`
+
+## `odin doctor` — environment sanity checks
+
+- [x] Service probes: backend/frontend port, celery default + merges queue `[mock]` — `unit/test_doctor.py::TestServiceProbes`
+- [x] Agent CLI probes: installed vs authenticated per provider `[mock]` — `unit/test_doctor.py::TestAgentProbes`
+- [x] Sandbox probes: msb binary, image, throwaway VM boot, --fast skip `[mock]` — `unit/test_doctor.py::TestSandboxProbes`
+- [x] Host probes: free memory vs VM budget, disk headroom `[mock]` — `unit/test_doctor.py::TestHostProbes`
+- [x] Capability matrix derived from code defaults `[pure]` — `unit/test_doctor.py::TestFeatureMatrix`
+- [x] Exit code non-zero only when zero agents available `[mock]` — `unit/test_doctor.py::TestExitCode`
+- [x] JSON + text output formats `[mock]` — `unit/test_doctor.py::TestOutputFormats`
+- [x] Missing provider degrades matrix honestly (no error) `[mock]` — `unit/test_doctor.py::TestMissingProviderDegrades`
 
 ## Priority Order for Remaining Tests
 

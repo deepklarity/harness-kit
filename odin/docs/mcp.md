@@ -15,7 +15,7 @@ With MCP, agents can:
 
 ```
 odin orchestrator
-  └─► agent CLI (claude/gemini/qwen) in tmux session
+  └─► agent CLI (claude/gemini/codex) in tmux session
         └─► taskit-mcp (child process, stdio transport)
               └─► TaskIt backend (REST API)
                     └─► human (dashboard, sees comments in real time)
@@ -81,10 +81,13 @@ Currently `timeout=0` means poll indefinitely.
 |-----|-------------|--------|-----------|
 | Claude Code | `.odin/logs/mcp_<task_id>.json` | JSON | `--mcp-config` flag |
 | Gemini CLI | `<working_dir>/.gemini/settings.json` | JSON | Auto-discovery |
-| Qwen CLI | `<working_dir>/.qwen/settings.json` | JSON | Auto-discovery |
 | Codex | `<working_dir>/.codex/config.toml` | TOML | Auto-discovery |
 | Kilo Code | `<working_dir>/.kilocode/mcp.json` | JSON | Auto-discovery |
 | OpenCode | `<working_dir>/opencode.json` | JSON | Auto-discovery |
+
+> Qwen was retired in task #102 and is no longer a config writer.
+> Worktree ``.gitignore`` still excludes ``.qwen/`` defensively so any
+> stray artifacts from before retirement can't leak into a commit.
 
 ### Environment Variables
 
@@ -188,10 +191,11 @@ Chrome DevTools MCP uses the same per-CLI config generation as other MCP servers
 |-----|-------------------|-----------------|
 | Claude Code | `--allowedTools` CLI flag | `.odin/logs/mcp_<task_id>.json` |
 | Gemini | `"trust": true` | `.gemini/settings.json` |
-| Qwen | `"trust": true` | `.qwen/settings.json` |
 | Codex | `-c` flag injection | `.codex/config.toml` |
 | Kilo Code | `"alwaysAllow": [...]` | `.kilocode/mcp.json` |
 | OpenCode | `"permission": {"tool": "allow"}` | `opencode.json` |
+
+> Qwen was retired in task #102 — no longer a config writer.
 
 ### Implementation
 

@@ -60,7 +60,7 @@ function formatFullDate(dateStr: string): string {
     });
 }
 
-export function TimelineView({ tasks, allTasks, members, onTaskClick, onDelete: _onDelete }: TimelineViewProps) {
+export function TimelineView({ tasks, allTasks: _allTasks, members: _members, onTaskClick, onDelete: _onDelete }: TimelineViewProps) {
     // ─── ALL hooks must be called unconditionally, before any returns ───
     const [hoveredMutation, setHoveredMutation] = useState<{
         mutation: TaskMutation; taskName: string; trackColor: string; x: number; y: number;

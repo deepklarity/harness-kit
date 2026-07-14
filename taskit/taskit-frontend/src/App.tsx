@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Routes, Route, useNavigate, useLocation, useParams, Navigate, useSearchParams } from 'react-router-dom';
-import type { Board, Label, Member, ReflectionReport, Spec, Task, ViewMode } from './types';
+import type { Board, Label, Member, Spec, Task, ViewMode } from './types';
 import { useService } from './contexts/ServiceContext';
 import { useAuth } from './contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -11,8 +11,6 @@ import { TaskDetailModal } from './components/TaskDetailModal';
 import { CreateBoardModal } from './components/CreateBoardModal';
 import { CreateTaskModal } from './components/CreateTaskModal';
 import { CreateSpecModal } from './components/CreateSpecModal';
-import { KPICards } from './components/KPICards';
-import { DashboardCharts } from './components/DashboardCharts';
 import { SettingsView } from './components/SettingsView';
 import { SpecDetailView } from './components/SpecDetailView';
 import { SpecDebugView } from './components/SpecDebugView';
@@ -29,7 +27,7 @@ import { BoardPage, SchedulingPage, SpecsPage } from './components/pages';
 import { NotificationsPage } from './components/NotificationsPage';
 import { ProvidersPage } from './components/pages/ProvidersPage';
 import { CommandPalette } from './components/CommandPalette';
-import { AnalyticsPage } from './components/analytics';
+import { StatsPage } from './components/analytics';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { useTaskCardAutoRefresh } from '@/hooks/useTaskCardAutoRefresh';
 
@@ -43,7 +41,6 @@ function pathToViewMode(pathname: string): ViewMode {
     if (pathname === '/settings') return 'settings';
     if (pathname === '/notifications') return 'notifications';
     if (pathname === '/providers') return 'providers';
-    if (pathname === '/analytics') return 'analytics';
     return 'board';
 }
 
@@ -115,10 +112,6 @@ function App() {
     });
     const showCreateTask = createModal === 'task';
     const showCreateSpec = createModal === 'spec';
-    const [overviewTasks, setOverviewTasks] = useState<Task[]>([]);
-    const [overviewReflections, setOverviewReflections] = useState<ReflectionReport[]>([]);
-    const [overviewLoading, setOverviewLoading] = useState(false);
-    const [overviewError, setOverviewError] = useState<string | null>(null);
     const [dependencyTasksByBoardId, setDependencyTasksByBoardId] = useState<Record<string, Task[]>>({});
     const [dependencyTasksLoadingByBoardId, setDependencyTasksLoadingByBoardId] = useState<Record<string, boolean>>({});
     const [processModalOpen, setProcessModalOpen] = useState(false);
@@ -215,56 +208,6 @@ function App() {
         }
     }, [loadingShell, boards.length, shellError]);
 
-    const loadOverviewData = useCallback(async () => {
-        setOverviewLoading(true);
-        setOverviewError(null);
-        try {
-            const fetchTasks = async () => {
-                const pageSize = 200;
-                let page = 1;
-                let allTasks: Task[] = [];
-                let total = 0;
-
-                while (page <= 1000) {
-                    const resp = await service.fetchTimelinePage({
-                        board: boardFilter,
-                        page,
-                        page_size: pageSize,
-                        sort: '-created_at',
-                    });
-                    allTasks = allTasks.concat(resp.results);
-                    total = resp.count;
-                    if (!resp.next || allTasks.length >= total) break;
-                    page += 1;
-                }
-                return allTasks;
-            };
-
-            const fetchReflections = async () => {
-                try {
-                    return await service.fetchAllReflections(boardFilter ? { board: boardFilter } : undefined);
-                } catch {
-                    return [];
-                }
-            };
-
-            const [allTasks, allReflections] = await Promise.all([fetchTasks(), fetchReflections()]);
-            setOverviewTasks(allTasks);
-            setOverviewReflections(allReflections);
-        } catch (err) {
-            setOverviewError(err instanceof Error ? err.message : 'Failed to load overview data');
-        } finally {
-            setOverviewLoading(false);
-        }
-    }, [service, boardFilter]);
-
-    useEffect(() => {
-        if (authLoading) return;
-        if (authEnabled && !authUser) return;
-        if (viewMode !== 'overview') return;
-        loadOverviewData();
-    }, [authLoading, authEnabled, authUser, viewMode, loadOverviewData, refreshKey]);
-
     const currentBoard = useMemo(
         () => selectedBoard !== ALL_BOARDS_ID ? boards.find(b => b.id === selectedBoard) || null : null,
         [boards, selectedBoard],
@@ -323,49 +266,6 @@ function App() {
         setRefreshKey(k => k + 1);
     }, [refreshDependencyTasksForBoard, selectedTask?.boardId]);
 
-
-    /*
-    const contextStats = useMemo((): DashboardStats => {
-        const tasks = overviewTasks;
-        const completedTasks = tasks.filter(t => t.currentStatus === 'DONE');
-        const avgTimeToCompletionMs = completedTasks.length > 0
-            ? completedTasks.reduce((sum, task) => sum + task.workTimeMs, 0) / completedTasks.length
-            : 0;
-        const totalMutations = tasks.reduce((sum, task) => sum + task.mutations.length, 0);
-
-        const mutationsByMember = new Map<string, number>();
-        tasks.forEach(task => {
-            task.mutations.forEach(mutation => {
-                mutationsByMember.set(mutation.actor, (mutationsByMember.get(mutation.actor) ?? 0) + 1);
-            });
-        });
-        const mostActiveMember = [...mutationsByMember.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
-            || members[0]?.fullName
-            || '';
-
-        let mostActiveBoard = currentBoard?.name || boards[0]?.name || '';
-        if (selectedBoard === ALL_BOARDS_ID) {
-            const boardCounts = new Map<string, number>();
-            tasks.forEach(task => boardCounts.set(task.boardId, (boardCounts.get(task.boardId) ?? 0) + 1));
-            const topBoardId = [...boardCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-            const topBoard = boards.find(board => board.id === topBoardId);
-            mostActiveBoard = topBoard?.name || mostActiveBoard;
-        }
-
-        return {
-            totalTasks: tasks.length,
-            totalMembers: members.length,
-            totalBoards: selectedBoard === ALL_BOARDS_ID ? boards.length : 1,
-            completedTasks: completedTasks.length,
-            inProgressTasks: tasks.filter(t => t.currentStatus === 'IN_PROGRESS').length,
-            todoTasks: tasks.filter(t => t.currentStatus === 'TODO' || t.currentStatus === 'BACKLOG').length,
-            avgTimeToCompletionMs,
-            totalMutations,
-            mostActiveBoard,
-            mostActiveMember,
-        };
-    }, [overviewTasks, members, boards, currentBoard, selectedBoard]);
-    */
 
     useEffect(() => {
         if (!selectedTask?.boardId) return;
@@ -756,15 +656,7 @@ function App() {
                         <Route path="/stats" element={
                             <>
                                 <SectionHeader title="Stats" />
-                                <KPICards tasks={overviewTasks} reflections={overviewReflections} />
-                                {overviewError && (
-                                    <div className="text-sm text-destructive mb-4">{overviewError}</div>
-                                )}
-                                {overviewLoading && overviewTasks.length === 0 ? (
-                                    <div className="text-sm text-muted-foreground py-8">Loading overview charts...</div>
-                                ) : (
-                                    <DashboardCharts tasks={overviewTasks} members={members} reflections={overviewReflections} />
-                                )}
+                                <StatsPage boards={boards} onTaskClick={handleTaskSelect} />
                             </>
                         } />
                         <Route path="/board" element={
@@ -792,9 +684,13 @@ function App() {
                         <Route path="/kanban" element={<Navigate to="/board?view=kanban" replace />} />
                         <Route path="/timeline" element={<Navigate to="/board?view=timeline" replace />} />
                         <Route path="/members" element={<Navigate to="/settings" replace />} />
+                        {/* League folded into Stats — content now lives under the Cost & Agents zone. */}
+                        <Route path="/league" element={<Navigate to="/stats" replace />} />
                         <Route path="/scheduling" element={
                             <SchedulingPage selectedBoard={boardFilter} refreshKey={refreshKey} onTaskClick={(taskId) => handleTaskSelect(taskId)} />
                         } />
+                        {/* Factory folded into Stats — operational pulse now lives in the NOW zone. */}
+                        <Route path="/factory" element={<Navigate to="/stats" replace />} />
                         <Route path="/specs" element={
                             <>
                                 <SectionHeader title="Specs" />
@@ -818,12 +714,8 @@ function App() {
                         } />
                         <Route path="/notifications" element={<NotificationsPage />} />
                         <Route path="/providers" element={<ProvidersPage />} />
-                        <Route path="/analytics" element={
-                            <>
-                                <SectionHeader title="Analytics" />
-                                <AnalyticsPage boards={boards} onTaskClick={handleTaskSelect} />
-                            </>
-                        } />
+                        {/* Backwards-compat: /analytics merged into /stats in W3.17. */}
+                        <Route path="/analytics" element={<Navigate to="/stats" replace />} />
                         <Route path="/settings" element={
                             <SettingsView
                                 members={members}
@@ -854,6 +746,7 @@ function App() {
                         availableLabels={labels}
                         detailLoading={taskDetailLoading}
                         onRefresh={refreshTaskDetail}
+                        board={boards.find(b => b.id === selectedTask.boardId) || null}
                     />
                 )}
 

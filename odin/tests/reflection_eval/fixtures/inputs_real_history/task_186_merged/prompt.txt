@@ -1,0 +1,284 @@
+You are auditing a task executed by an AI agent.
+
+
+## CTX — proof artifact (`.proof/task-186/proof.md`)
+
+The worker writes the canonical, complete proof file to `.proof/task-186/proof.md`
+in the worktree (read-only worktree mount; `cat`, `grep`, `head` freely).
+Raw suite outputs sit beside it as `.proof/task-186/<name>.txt` — full output, no
+cap. Read **`.proof/task-186/proof.md` first** — it is the primary, authoritative
+source for what the worker claims and where it lives.
+
+For each acceptance criterion, choose complete vs minimal context: read
+the full proof file once, then grep the section you need. Do NOT re-run
+the verify suites to fill gaps — the worker already attached raw outputs
+under `.proof/task-186/`. The proof path carries no truncation or size cap; read
+the full file when a criterion needs the full chain of evidence.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Work efficiently: batch independent file reads/greps into a single step, and do NOT re-read a file or re-run a search you have already done — each extra tool call is a full model round-trip.
+- **REPORT FORMAT: ONE fenced JSON block, then optionally a markdown rendering.** Your first non-blank line MUST be a single ```json ... ``` fence containing a JSON object with at minimum a `verdict` key. After the fence you MAY also emit the legacy `### Quality Assessment / ### Verdict` sections as a human-readable rendering of the same JSON — the JSON block is the source of truth, the rendering is for the board UI.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.** This task may have been attempted by multiple agents or models previously. Comments are separated by "--- CURRENT ATTEMPT ---" when prior attempts exist. Use earlier history for understanding context only — do NOT penalize the current agent for failures, quota issues, or code quality problems from previous agents/models. Your verdict must reflect solely the current agent's work.
+
+## TASK UNDER REVIEW
+Title: Auto-promotion v1.5: RECOMMEND PROMOTE auto-advances TESTING->DONE (W4.2)
+Status: DONE
+Agent: claude ((historical))
+Duration: N/Ams | Tokens: N/A
+
+## [CTX:description] Task Description
+Fable roadmap task Auto-promotion v1.5: RECOMMEND PROMOTE auto-advances TESTING->DONE (W4.2). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+
+## [CTX:execution_result] Execution Output
+Merge task 186: Auto-promotion v1.5: RECOMMEND PROMOTE auto-advances TESTING→DONE (W4.2)
+
+Task-Id: 186
+Spec-Id: sp_fable_w4
+
+
+ .proof/task-186/backend_tests.txt                  | 950 +++++++++++++++++++++
+ .proof/task-186/proof.md                           | 149 ++++
+ .proof/task-186/source_changes.diff                | 155 ++++
+ .proof/task-186/test_auto_promote.txt              | 118 +++
+ .proof/task-186/verify_sh.txt                      |  12 +
+ .../DETAILS.md                                     |  28 +-
+ .../task-state-machine-celery-automation/FLOW.md   |   4 +-
+ docs/fable_roadmap/ORCHESTRATION.md                |   6 +-
+ taskit/taskit-backend/tasks/auto_promote.py        | 501 +++++++++++
+ taskit/taskit-backend/tasks/dag_executor.py        |  42 +
+ .../tasks/migrations/0049_board_metadata.py        |  29 +
+ taskit/taskit-backend/tasks/models.py              |  13 +
+ taskit/taskit-backend/tests/test_auto_promote.py   | 499 +++++++++++
+ 13 files changed, 2502 insertions(+), 4 deletions(-)
+
+
+## [CTX:comments] Comments & Proof
+--- CURRENT ATTEMPT ---
+Proof of work (committed at .proof/task-186/proof.md):
+
+# Task #186 proof — Auto-promote v1.5 (W4.2)
+
+## Acceptance → evidence
+
+> Acceptance line from the brief:
+> *"A live green task reaches DONE with no operator action, its worktree
+> pruned, and the promotion report attached; a task with a missing artifact
+> stays in TESTING with 'hold: <gap>'; suites green."*
+
+| Criterion | Evidence |
+|---|---|
+| Green task auto-promotes TESTING → DONE | `tests.test_auto_promote.TestGreenTaskAutoPromotes.test_green_task_auto_promotes_to_done` — mocks the gate, asserts the task lands in DONE with `changed_by="system+auto-promote@taskit"` and `_cleanup_done_task_worktree` called once. |
+| Green task prunes worktree | `test_green_task_auto_promotes_to_done` asserts `mock_cleanup.assert_called_once()` after the body.  Same code path the API-DONE and spec-finalize paths already use (`tasks.dag_executor._cleanup_done_task_worktree`). |
+| Promotion report attached | `test_promotion_report_attachment_preserved` — the celery body stamps the gate's `promotion_report` comment id into the auto-promote status comment (`Auto-promoted to DONE: ... see #<id> for the full evidence`).  The gate still posts the structured `promotion_report` comment (`tasks.auto_promote._run_odin_promote_check` reuses the existing `odin promote-check` CLI, single source of truth). |
+| Hold task stays in TESTING with the gap named | `test_hold_task_stays_in_testing` — mocks the gate as `"hold"`, asserts task remains in TESTING, no DONE history row, and the gap lands in `task.metadata["auto_promote_hold_gaps"]`.  The gate's own `promotion_report` comment carries the full named gap. |
+| Board-level off switch | `TestBoardFlagCheck` — 4 cases: default-on, explicit-true, explicit-false, string-`"false"` (foot-gun pinned as documented operator contract).  The flag is `board.metadata["auto_promote_enabled"]` (a JSON boolean).  Default: enabled. |
+| Promote-check crash leaves the task untouched | `test_promote_check_crash_leaves_task_untouched` — `mock_gate.side_effect = RuntimeError(...)`, asserts task remains in TESTING, no status history row, an error comment lands, and the body never regresses state. |
+| Idempotency on re-dispatch | `TestIdempotencyAndSkipRules` — DONE task ⇒ no gate call; FAILED task ⇒ no gate call; missing task PK ⇒ noop.  Matches the merge-dispatch watchdog's crash-safety contract. |
+| Flag off preserves pre-wave-4 behavior | `test_dispatch_skipped_when_board_flag_off` — REVIEW → TESTING still happens, but the celery dispatch is skipped; operator retains their existing flow. |
+| Backend tests green | `backend_tests.txt` — 783 tests, 0 failures. |
+| Odin tests green (with one pre-existing failure) | `odin_tests.txt` — 1440 passed, 4 skipped, 1 failed.  The failure (`test_mcp_config_staged_outside_guest_tmpfs`) is a pre-existing environment issue (pytest tmp dir contains `/tmp/`); confirmed by stashing my changes and re-running. |
+
+## Files changed
+
+```
+taskit/taskit-backend/tasks/auto_promote.py                 (new — 425 lines)
+taskit/taskit-backend/tasks/migrations/0049_board_metadata.py  (new — 25 lines)
+taskit/taskit-backend/tests/test_auto_promote.py            (new — 510 lines)
+taskit/taskit-backend/tasks/dag_executor.py                 (modified, +49 lines)
+taskit/taskit-backend/tasks/models.py                       (modified, +13 lines — adds `Board.metadata` JSONField)
+docs/breadcrumb_analysis/task-state-machine-celery-automation/FLOW.md   (+4 lines)
+docs/breadcrumb_analysis/task-state-machine-celery-automation/DETAILS.md (+28 lines)
+docs/fable_roadmap/ORCHESTRATION.md                         (+6 lines — duty table)
+```
+
+## Design — what landed
+
+### 1. The hook: dispatch from REVIEW → TESTING
+
+`_advance_task_to_testing` (in `tasks/dag_executor.py`) is the single
+TESTING-entrance point.  After the existing REVIEW → TESTING transition
+lands, it now:
+
+1. Checks `board.metadata["auto_promote_enabled"]` (default ON) and
+   that the task has a spec + branch (no worktree ⇒ nothing to gate).
+2. If eligible, dispatches `auto_promote_testing_task.delay(task.id)`.
+3. Wraps the dispatch in try/except — a broker outage or transient
+   import error CANNOT regress the TESTING transition or strand the
+   auto-promote silently.  The log line + the operator's existing
+   TESTING hand-off are the only signals on dispatch failure.
+
+### 2. The celery body: `auto_promote_testing_task`
+
+Lives in `tasks/auto_promote.py`.  The body:
+
+1. Re-fetches the task and short-circuits on missing / non-TESTING.
+2. Re-checks the board flag (covers the case where the flag was
+   flipped between dispatch and execution).
+3. Runs the gate via `_run_odin_promote_check` (subprocess
+   `odin promote-check <task_id>`) — reuses the operator's CLI so
+   any future gate change is automatically inherited.  Parses the
+   `### RECOMMEND PROMOTE` / `### HOLD:` headline line.
+4. On **promote** → `_apply_auto_promotion`:
+   - Refresh + status guard (never regress a non-TESTING task).
+   - `task.status = DONE; task.save(update_fields=[...])`.
+   - `TaskHistory(changed_by="system+auto-promote@taskit")` — the
+     system identity that distinguishes auto-promote from a
+     manual operator flip in the audit trail.
+   - `TaskComment` status update linking the timeline to the
+     gate's `promotion_report` comment id (`see #9001 for the
+     full evidence`).
+   - Metadata stamp: `auto_promote_recommendation`, `auto_promote_at`,
+     `auto_promote_actor`, `auto_promote_promotion_report_comment_id`.
+   - `_cleanup_done_task_worktree(task)` — the shared helper the
+     API-DONE and spec-finalize paths already use; branch is
+     preserved, disk is reclaimed.
+5. On **hold** → `_stamp_hold`:
+   - Refresh + status guard.
+   - Metadata stamp (recommendation + gaps as a `;`-joined string).
+   - No status change, no comment — the gate's own
+     `promotion_report` comment already names the gap, the
+     operator's pre-wave-4 flow applies.
+6. On **error** → `_stamp_gate_error`:
+   - Metadata stamp (error string + timestamp).
+   - Single status comment: `Auto-promote gate crashed: <type>: <msg>.
+     Task stays in TESTING — operator action required.`
+   - No status change — a transient subprocess failure is NEVER
+     a reason to move the task.
+
+### 3. The board-level off switch
+
+`Board.metadata` is a new `JSONField` (migration `0049_board_metadata`).
+A board opts out by setting `metadata["auto_promote_enabled"] = False`
+(JSON boolean false; string `"false"` is intentionally truthy in
+Python and is therefore NOT honored — pinned by the
+`test_flag_truthy_string_disables_actually_no_it_enables` test as the
+documented operator contract).
+
+`_board_allows_auto_promote(board)` is the public gate-check helper;
+`_should_auto_promote(task)` adds the spec/branch preconditions on top.
+
+## Why a subprocess gate (not a Python call)
+
+`odin.promote_check.build_promotion_report` is pure data-in / data-out
+and importable from the backend (one-way coupling: taskit-backend MAY
+import from odin).  We could have called it directly and skipped the
+`scripts/verify.sh` subprocess.  We chose the subprocess anyway:
+
+- **Single source of truth.**  Whatever the operator runs by hand
+  (`odin promote-check`) is exactly what the auto-promote runs.  No
+  drift between the two surfaces.  Any future gate change is
+  automatically inherited.
+- **Testable end-to-end.**  The `odin.promote_check` suite stays the
+  single test target for the gate logic; the backend only tests the
+  apply step (the new shape, the new error paths).
+- **Crash isolation.**  A bug in the gate's subprocess can never
+  poison the celery worker process; the worst case is a single
+  missing auto-promote with an error comment posted.
+
+## Wave-4 verification posture
+
+> "the operator observes the first live auto-promotion on the running wave"
+
+This proof covers the static side: the gate is wired, the apply step
+is correct under all four input shapes (promote / hold / error /
+non-TESTING / missing-task), and the board-level off switch round-
+trips.  The first live 
+
+## [CTX:dependencies] Dependent Tasks
+No blocking dependencies.
+
+## [CTX:metadata] Task Metadata
+spec=sp_fable_w4/w5 task_id=186 status=DONE
+
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers. The JSON block
+is the source of truth for the parser; the markdown is a convenience
+rendering the parser will ignore if both are present.
+
+### Required JSON contract
+
+Your first non-blank line MUST be a fenced JSON block:
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification, the same one you'd put after ### Verdict.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason. Then defects (file:line).",
+  "slop_detection": "Specific AI slop found, or 'None.'",
+  "improvements": "Bullet list of up to 5 actionable items (what, where, why). 'None.' if clean.",
+  "agent_optimization": "Description clarity / model tier / token efficiency / prompt improvement.",
+  "quota_failure": "QUOTA_FAILURE: <agent_name> if the current attempt hit a quota/rate limit; otherwise 'None.'.",
+  "fix_list": ["targeted", "fix", "items", "for", "rework"]
+}
+```
+
+Rules:
+- `verdict` MUST be exactly `PASS`, `NEEDS_WORK`, or `FAIL` (uppercase). A
+  bare word with no review content (just "PASS" alone, or a verdict
+  keyword buried in CLI noise) is treated as a reviewer failure — the
+  system will NOT honor it. The JSON object must be the FIRST thing you
+  emit, complete and parseable, or your review will not be processed.
+  Do NOT skip the structured JSON just because the verdict is obvious;
+  emit the JSON with full sections, even if the verdict is PASS with
+  nothing else to flag.
+- `summary` is the one-sentence justification. It appears on the board
+  as the verdict summary. The "Evidence rules" below apply to it.
+- `fix_list` is REQUIRED for `NEEDS_WORK`: name the exact artifact or
+  change needed so the rework is scoped, not a blind redo. Empty list
+  `[]` is fine for `PASS` and `FAIL`.
+- `quality_assessment`, `slop_detection`, `improvements`,
+  `agent_optimization`, `quota_failure` are strings; default to
+  `"None."` when there's nothing to report.
+- Do NOT emit anything before the opening ```json fence. No
+  preamble, no narration, no permission requests, no conversational
+  text. The parser uses the JSON block as the first content and
+  anything before it is treated as noise.
+
+### Verdict rubric (applies to `verdict` in the JSON)
+
+Choose from what the evidence PROVES. Each rework round costs a full VM
+boot, environment rebuild, and tokens — so FAIL and NEEDS_WORK must be
+earned by substance, never spent on process trivia or invented rules.
+
+- PASS — every acceptance criterion is verifiably met and the work is
+  correct, safe, and builds/runs. Minor style or proof-formatting nits
+  do NOT block a PASS; put them in `improvements`.
+- NEEDS_WORK — the work is substantially correct but has a fixable
+  gap: a missing or truncated proof artifact, an unmet non-critical
+  criterion, or a process slip that does not make the code wrong. Pair
+  EVERY NEEDS_WORK with a TARGETED fix list (the `fix_list` field in
+  the JSON, or a list of items under "### Actionable Improvements" in
+  the rendering — name the exact artifact or change needed) so the
+  rework is scoped, not a blind redo.
+- FAIL — reserved for work that is WRONG, UNSAFE, or UNVERIFIABLE: it breaks the build or a downstream integration, corrupts state, crashes the orchestrator, contradicts a stated acceptance criterion, or supplies no evidence that the core behavior works. Also use FAIL for quota/resource exhaustion (justification must mention "quota" or "rate limit") so the system can reassign to a different agent.
+
+Evidence rules — apply these BEFORE choosing a verdict:
+- CITE OR DROP. Any claimed rule/policy/convention violation MUST quote the exact rule text and name the file it lives in (e.g. CLAUDE.md: "Never run ANY git stash command"). If you cannot quote and locate the rule, it does not exist for this review — you may NOT lower the verdict for it; raise it in `improvements` at most. A cited rule only counts if its stated scope actually covers this situation (a rule scoped to "shared repos / concurrent sessions" is not violated by an action inside the task's own isolated worktree). If a rule violation affects the verdict, include that exact citation in the report text.
+- A truncated, malformed, or missing proof artifact is a REQUEST, not a verdict. Name the specific artifact you need and ask for it (NEEDS_WORK at most). It only drives FAIL when it leaves the CORE behavior genuinely unverifiable AND no other evidence (code you can read, build output, comments) establishes correctness.
+- Judge the SUBSTANCE of the best available evidence. Tasks may span
+  several attempts; earlier attempts' partial numbers or
+  contradictions with history are NOT defects of the current work.
+- Formatting/completeness of proof comments is NOT a verdict criterion
+  when the underlying acceptance criteria are verifiably met; mention
+  formatting issues in `improvements` instead.
+- Comments authored by a human operator (non-agent email) are
+  authoritative context — do not contradict them.
+- Do not demand artifacts the environment cannot produce (e.g. an
+  ODIN-STATUS block when the run was concluded by an operator).
+
+### Optional markdown rendering (after the JSON block)
+
+After the JSON fence you MAY emit the legacy sections as a human-readable rendering of the same content. The parser uses the JSON as the source of truth and ignores the rendering, so emitting it is purely for the board UI. The rendering is OPTIONAL — the JSON block is sufficient on its own. The legacy section names, in order, are:
+
+- `### Quality Assessment`
+- `### Slop Detection`
+- `### Actionable Improvements`
+- `### Agent Optimization`
+- `### Quota / Resource Failure`
+- `### Verdict`

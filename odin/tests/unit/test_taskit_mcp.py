@@ -187,7 +187,7 @@ class TestMakeClient:
     def test_defaults(self, reset_auth_cache):
         with patch.dict("os.environ", {}, clear=True):
             client = _make_client("99")
-            assert client.base_url == "http://localhost:8000"
+            assert client.base_url == "http://localhost:9100"
             assert client.task_id == "99"
             assert client.auth_token == ""
             assert client.author_email == "agent@odin.agent"
@@ -253,7 +253,7 @@ class TestResolveAuthToken:
                 _resolve_auth_token()
 
     def test_credentials_use_taskit_url_default(self):
-        """When TASKIT_URL not set, auth uses http://localhost:8000."""
+        """When TASKIT_URL not set, auth uses http://localhost:9100."""
         env = {
             "ODIN_ADMIN_USER": "admin@test.com",
             "ODIN_ADMIN_PASSWORD": "secret",
@@ -263,7 +263,7 @@ class TestResolveAuthToken:
         with patch.dict("os.environ", env, clear=True), \
              patch("odin.backends.taskit.TaskItAuth", return_value=mock_auth) as cls:
             _resolve_auth_token()
-            cls.assert_called_once_with("http://localhost:8000/auth/login/", "admin@test.com", "secret")
+            cls.assert_called_once_with("http://localhost:9100/auth/login/", "admin@test.com", "secret")
 
     def test_explicit_token_takes_priority_over_credentials(self):
         """TASKIT_AUTH_TOKEN wins even when ODIN_ADMIN_* are also set."""

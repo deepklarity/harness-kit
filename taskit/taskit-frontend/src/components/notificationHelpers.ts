@@ -6,6 +6,8 @@ import {
     CheckCircle,
     ArrowRightLeft,
     Bell,
+    AlertOctagon,
+    AlertTriangle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { NotificationType } from '@/types';
@@ -17,6 +19,8 @@ export const TYPE_ICONS: Record<string, LucideIcon> = {
     planning_complete: CheckCircle,
     question_asked: HelpCircle,
     spec_finished: CheckCheck,
+    task_failed: AlertOctagon,
+    task_failed_reminder: AlertTriangle,
 };
 
 export const DEFAULT_ICON = Bell;
@@ -28,4 +32,6 @@ export const TYPE_META: Record<NotificationType, { label: string; color: string 
     planning_complete: { label: 'Planning',  color: 'bg-emerald-500/15 text-emerald-400' },
     question_asked:    { label: 'Question',  color: 'bg-orange-500/15 text-orange-400' },
     spec_finished:     { label: 'Spec Done', color: 'bg-teal-500/15 text-teal-400' },
+    task_failed:       { label: 'Failed',    color: 'bg-red-500/15 text-red-400' },
+    task_failed_reminder: { label: 'Still failed', color: 'bg-red-600/15 text-red-300' },
 };

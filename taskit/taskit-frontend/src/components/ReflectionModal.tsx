@@ -32,13 +32,11 @@ function getDefaultModel(agent: Member | undefined): string {
 export function ReflectionModal({ taskId, taskIdShort, agents, onClose, onSubmit }: ReflectionModalProps) {
     const service = useService();
 
-    // Only these agents are supported as reflection reviewers.
-    const REFLECTION_ALLOWED_AGENTS = new Set(['claude', 'gemini', 'codex']);
+    // Any active agent with models available can serve as a reflection reviewer.
+    // The backend already scopes `agents` to active agent Users, so no separate
+    // whitelist is needed here.
     const reviewerAgents = useMemo(
-        () => agents.filter(
-            a => a.availableModels && a.availableModels.length > 0
-                && REFLECTION_ALLOWED_AGENTS.has(a.username.toLowerCase())
-        ),
+        () => agents.filter(a => a.availableModels && a.availableModels.length > 0),
         [agents],
     );
 

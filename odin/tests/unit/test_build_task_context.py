@@ -163,7 +163,25 @@ class TestBuildTaskContext:
             _comment("status_update", "odin@odin.agent", "odin",
                      "Effective input (with upstream context):\n\nSome wrapped prompt"),
         ]
-        # Noise filtered → no meaningful content → empty
+        # Noise filtered -> no meaningful content -> empty
+        assert orch._build_task_context("task-1") == ""
+
+    def test_noise_filtering_mcp_tool_diagnostics_skipped(self):
+        """Retry context excludes non-actionable MCP/tool diagnostics."""
+        orch = _make_orchestrator()
+        orch.task_mgr.get_comments.return_value = [
+            _comment(
+                "status_update",
+                "odin@odin.agent",
+                "odin",
+                "\n".join([
+                    "Ripgrep is not available. Falling back to GrepTool.",
+                    "Error executing tool mcpchrome-devtoolsnewpage: Error: MCP tool 'newpage' reported an error.",
+                    "Error executing tool mcpchrome-devtoolslistpages: Error: MCP tool 'listpages' reported an error.",
+                    "Error executing tool read_file: File path '/tmp/odin-workspace/opencode.json' is ignored by configured ignore patterns.",
+                ]),
+            ),
+        ]
         assert orch._build_task_context("task-1") == ""
 
     def test_debug_attachment_comments_skipped(self):

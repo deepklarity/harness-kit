@@ -177,6 +177,92 @@ class TestExecutionDebugComments:
         assert payload["failure_reason"].startswith("RuntimeError")
         assert payload["failure_origin"] == "orchestrator:task_execution"
 
+
+    def test_failed_result_reconciles_stale_executing_status(self, odin_dirs, config_with_mock):
+        """On harness failure, exec_task() passes FAILED status to record_execution_result.
+
+        The orchestrator trusts ``record_execution_result`` to persist the
+        status it is given; if the backend silently no-ops the call (as this
+        test simulates), the in-memory task stays in EXECUTING. Verification
+        of the failure-recovery contract is the backend's responsibility,
+        not the orchestrator's — this test pins that the orchestrator at
+        least requests FAILED when the harness fails.
+        """
+        orch = Orchestrator(config=config_with_mock)
+
+        task = orch.task_mgr.create_task(
+            title="Escalation task",
+            description="Trigger unsupported model failure",
+            spec_id=None,
+        )
+        orch.task_mgr.assign_task(task.id, "mock")
+
+        captured_status: List = []
+
+        def capture_status(task_id, execution_result, status, actor_email):
+            # Simulate a backend path that records metadata/comments elsewhere but
+            # leaves the task status stale in EXECUTING. Capture what the
+            # orchestrator asked us to persist.
+            captured_status.append(status)
+            return None
+
+        orch.task_mgr.record_execution_result = capture_status
+
+        async def failed_result(self, prompt, context):
+            return TaskResult(
+                success=False,
+                output="",
+                error="The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account.",
+                duration_ms=12.0,
+                agent="Mock",
+            )
+
+        with patch("odin.harnesses.mock.MockHarness.execute", new=failed_result):
+            result = asyncio.run(orch.exec_task(task.id))
+
+        assert result["success"] is False
+        # Orchestrator must have requested FAILED via record_execution_result.
+        assert captured_status, "record_execution_result was never called"
+        assert captured_status[0] == TaskStatus.FAILED
+
+    def test_failed_result_marks_model_escalation_failure_type(self, odin_dirs, config_with_mock):
+        """Unsupported-model failures are tagged distinctly for the UI."""
+        orch = Orchestrator(config=config_with_mock)
+
+        task = orch.task_mgr.create_task(
+            title="Escalation task",
+            description="Trigger unsupported model failure",
+            spec_id=None,
+        )
+        orch.task_mgr.assign_task(task.id, "mock")
+
+        captured_payloads = []
+        original_record = orch.task_mgr.record_execution_result
+
+        def capture_record(task_id, execution_result, status, actor_email):
+            captured_payloads.append((execution_result, status))
+            return original_record(task_id, execution_result, status, actor_email)
+
+        orch.task_mgr.record_execution_result = capture_record
+
+        async def failed_result(self, prompt, context):
+            return TaskResult(
+                success=False,
+                output="",
+                error="The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account.",
+                duration_ms=12.0,
+                agent="Mock",
+            )
+
+        with patch("odin.harnesses.mock.MockHarness.execute", new=failed_result):
+            result = asyncio.run(orch.exec_task(task.id))
+
+        assert result["success"] is False
+        assert len(captured_payloads) == 1
+        payload, status = captured_payloads[0]
+        assert status == TaskStatus.FAILED
+        assert payload["failure_type"] == "model_escalation_failure"
+
     def test_debug_output_truncated_at_8000(self, odin_dirs, config_with_mock):
         """Debug comments truncate content to 8000 chars."""
         orch = Orchestrator(config=config_with_mock)

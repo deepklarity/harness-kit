@@ -1,0 +1,6 @@
+{
+  "_fixture_note": "PARSER-BASELINE SYNTHETIC fixture. NOT a real captured review. Exercises the legacy markdown-headed review path (### Verdict section). The ground-truth NEEDS_WORK matches the expected reviewer verdict for a partial refactor with a backward-compat gap. Excluded from the recommendation evidence.",
+  "verdict": "NEEDS_WORK",
+  "fixture_category": "parser_baseline_synthetic",
+  "shape": "markdown_sections"
+}

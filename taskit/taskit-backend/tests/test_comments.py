@@ -4,7 +4,7 @@ Covers: POST/GET comments, validation, list exclusion, detail endpoint, actor id
 """
 
 from .base import APITestCase
-from tasks.models import Spec, TaskComment
+from tasks.models import ErrorEvent, Spec, TaskComment
 
 
 class TestCommentCRUD(APITestCase):
@@ -19,15 +19,15 @@ class TestCommentCRUD(APITestCase):
         resp = self.client.post(
             f"/tasks/{self.task.id}/comments/",
             {
-                "author_email": "minimax+MiniMax-M2.5@odin.agent",
-                "author_label": "minimax (MiniMax-M2.5)",
+                "author_email": "minimax+MiniMax-M3@odin.agent",
+                "author_label": "minimax (MiniMax-M3)",
                 "content": "Completed in 12.3s\n\nAssembled final HTML.",
             },
             format="json",
         )
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["author_email"], "minimax+MiniMax-M2.5@odin.agent")
-        self.assertEqual(resp.data["author_label"], "minimax (MiniMax-M2.5)")
+        self.assertEqual(resp.data["author_email"], "minimax+MiniMax-M3@odin.agent")
+        self.assertEqual(resp.data["author_label"], "minimax (MiniMax-M3)")
         self.assertEqual(resp.data["content"], "Completed in 12.3s\n\nAssembled final HTML.")
         self.assertEqual(resp.data["attachments"], [])
         self.assertIn("id", resp.data)
@@ -132,7 +132,7 @@ class TestCommentActorIdentity(APITestCase):
         """RFC 5321 plus-delimited local part is valid."""
         emails = [
             "claude+sonnet-4-5@odin.agent",
-            "minimax+MiniMax-M2.5@odin.agent",
+            "minimax+MiniMax-M3@odin.agent",
             "codex+codex-mini@odin.agent",
         ]
         for email in emails:
@@ -171,8 +171,8 @@ class TestTaskListExcludesComments(APITestCase):
     def test_task_list_excludes_comments(self):
         TaskComment.objects.create(
             task=self.task,
-            author_email="minimax+MiniMax-M2.5@odin.agent",
-            author_label="minimax (MiniMax-M2.5)",
+            author_email="minimax+MiniMax-M3@odin.agent",
+            author_label="minimax (MiniMax-M3)",
             content="Completed in 12.3s",
         )
         resp = self.client.get(f"/tasks/?board_id={self.board.id}")
@@ -313,3 +313,43 @@ class TestCommentAppendOnly(APITestCase):
         """DELETE on comments should not be allowed."""
         resp = self.client.delete(f"/tasks/{self.task.id}/comments/")
         self.assertIn(resp.status_code, [405, 400])
+
+
+class TestCommentAttributionGuard(APITestCase):
+    """A comment created with the unknown@user fallback records an ErrorEvent so
+    silent attribution loss is visible to the operator.
+
+    The guard lives on the TaskComment post_save signal so it catches every
+    creation path — the API POST, direct objects.create() (how the reflection
+    verdict comment is built), and any future caller. ``unknown@user`` can't
+    reach the API serializer (it fails email validation), so the realistic
+    path is a direct create; we exercise that here.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.board = self.make_board()
+        self.task = self.make_task(self.board)
+
+    def test_unknown_user_author_records_error_event(self):
+        before = ErrorEvent.objects.count()
+        TaskComment.objects.create(
+            task=self.task,
+            author_email="unknown@user",
+            content="Mystery author.",
+        )
+        after = ErrorEvent.objects.count()
+        self.assertEqual(after, before + 1, "an ErrorEvent should be recorded")
+        evt = ErrorEvent.objects.order_by("-id").first()
+        self.assertEqual(evt.source, "comment_attribution_loss")
+        self.assertEqual(evt.task_id, self.task.id)
+        self.assertIn("unknown@user", evt.symptom)
+
+    def test_normal_author_does_not_record_error_event(self):
+        before = ErrorEvent.objects.count()
+        TaskComment.objects.create(
+            task=self.task,
+            author_email="claude+sonnet@odin.agent",
+            content="Clean attribution.",
+        )
+        self.assertEqual(ErrorEvent.objects.count(), before)

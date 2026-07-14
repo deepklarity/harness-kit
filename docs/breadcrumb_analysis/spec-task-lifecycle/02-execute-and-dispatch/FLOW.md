@@ -35,7 +35,7 @@ views.py :: TaskViewSet.update()
 
 ```
 dag_executor.py :: poll_and_execute()  [Celery Beat, every 5s]
-  → counts EXECUTING tasks vs DAG_EXECUTOR_MAX_CONCURRENCY (default 3)
+  → counts EXECUTING tasks vs DAG_EXECUTOR_MAX_CONCURRENCY (default 10)
   → if no available slots: return
 
   → queries IN_PROGRESS tasks ordered by created_at (FIFO)
@@ -94,7 +94,8 @@ dag_executor.py :: execute_single_task(task_id, run_token)  [Celery task]
 
 IMPORTANT: odin has its OWN dependency check (odin/src/odin/dependencies.py)
 separate from TaskIt's (taskit/taskit-backend/tasks/dependencies.py).
-Both must use the same COMPLETED_STATUSES = {DONE, TESTING}.
+Both must use the same COMPLETED_STATUSES = {DONE, TESTING} (REVIEW
+excluded as of fable task 214 — the merge gate).
 If they diverge, TaskIt dispatches the task but odin skips it — producing
 zero output and a false REVIEW → reflection FAIL cascade.
 
@@ -110,7 +111,6 @@ cli.py :: exec_task(task_id)
     → injects reflection feedback (latest NEEDS_WORK reflection, if any)
     → injects self-context (prior summary + human notes — empty if no summary)
     → NOTE: most comment history (proof, status_update, execution output) is NOT forwarded
-      see docs/solutions/architecture/exec-task-context-injection-gap-20260227.md
 
     → _execute_task(task_id, agent_name, prompt, working_dir)
       → task.status = EXECUTING (redundant with DAG, but idempotent)

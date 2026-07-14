@@ -75,19 +75,42 @@ def _reflection_trace_path(log_dir: Path, report_id: int) -> Path:
     return jsonl
 
 
-def _task_trace_path(log_dir: Path, task_id: int) -> Path:
+def _task_trace_path(task: Task, log_dir: Path, task_id: int) -> Path:
     """Return the best available trace file for a task.
 
-    Prefers .trace.jsonl (non-tmux harness execution) but falls back to .out
-    (tmux execution), which contains the same raw stream-json stdout capture.
+    Resolution order:
+    1. ``task.metadata["trace_file"]`` — odin records the absolute path at
+       execution start; authoritative regardless of odin's launch cwd.
+    2. ``{working_dir}/.odin/logs/`` — runs launched from the board root.
+       Prefers .trace.jsonl (non-tmux harness execution), falls back to .out
+       (tmux execution), which contains the same raw stream-json capture.
+    3. ``{working_dir}/.odin/worktrees/{spec}/{task}/.odin/logs/`` — the
+       celery executor runs odin with cwd = the task worktree, so a relative
+       ``log_dir: .odin/logs`` resolves worktree-local (sandboxed and host
+       runs alike). Needed for tasks dispatched before odin recorded the
+       metadata path.
     """
+    meta_path = (task.metadata or {}).get("trace_file")
+    if meta_path:
+        p = Path(meta_path)
+        if p.exists():
+            return p
     jsonl = log_dir / f"task_{task_id}.trace.jsonl"
     if jsonl.exists():
         return jsonl
     out = log_dir / f"task_{task_id}.out"
     if out.exists():
         return out
-    # Neither exists yet — return the preferred path (may be created soon).
+    spec_odin_id = getattr(task.spec, "odin_id", None) if task.spec_id else None
+    working_dir = resolve_working_dir(task)
+    if working_dir and spec_odin_id:
+        wt = (
+            Path(working_dir) / ".odin" / "worktrees" / spec_odin_id
+            / str(task_id) / ".odin" / "logs" / f"task_{task_id}.trace.jsonl"
+        )
+        if wt.exists():
+            return wt
+    # Nothing exists yet — return the preferred path (may be created soon).
     return jsonl
 
 
@@ -125,7 +148,7 @@ def resolve_session(task: Task) -> Optional[SessionInfo]:
 
     # 2. Live task execution.
     if task.status in _TASK_EXECUTING_STATUSES:
-        path = _task_trace_path(log_dir, task.id)
+        path = _task_trace_path(task, log_dir, task.id)
         exists, size, mtime = _stat(path)
         return SessionInfo(
             session_type=SESSION_TYPE_TASK,
@@ -138,7 +161,7 @@ def resolve_session(task: Task) -> Optional[SessionInfo]:
         )
 
     # 3. Idle — pick the most recently modified on-disk trace.
-    task_path = _task_trace_path(log_dir, task.id)
+    task_path = _task_trace_path(task, log_dir, task.id)
     task_exists, task_size, task_mtime = _stat(task_path)
 
     # For the reflection fallback, use the latest ReflectionReport (any status)

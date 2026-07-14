@@ -1,0 +1,15 @@
+```json
+{
+  "verdict": "PASS",
+  "summary": "Button color tweak is correct and verifiable. Build is green and the attached screenshot shows the new primary-blue background.",
+  "quality_assessment": "MET: src/Button.tsx:21 uses --color-primary. MET: build passed. MET: visual proof attached.",
+  "slop_detection": "None.",
+  "improvements": "None.",
+  "agent_optimization": "Cheap model cleared the simple-criterion review cleanly.",
+  "quota_failure": "None.",
+  "fix_list": []
+}
+```
+
+### Verdict
+PASS — minimal change, fully verified.

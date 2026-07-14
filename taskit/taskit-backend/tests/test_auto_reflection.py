@@ -97,6 +97,35 @@ class TestAutoReflectionViaUpdate(APITestCase):
         )
         self.assertEqual(report.custom_prompt, "")
 
+    @patch("tasks.dag_executor.execute_reflection.delay")
+    def test_retired_reflection_model_pin_is_ignored(self, mock_delay):
+        """The retired board.reflection_model pin plays no role in selection."""
+        claude = User.objects.get(email="claude@odin.agent")
+        claude.available_models = list(claude.available_models) + [
+            {"name": "gemini-3-flash-preview", "is_default": False},
+        ]
+        claude.save(update_fields=["available_models"])
+        User.objects.create(
+            email="gemini@odin.agent",
+            name="Gemini",
+            role=UserRole.AGENT,
+            available_models=[
+                {"name": "gemini-3-flash-preview", "is_default": True},
+            ],
+        )
+        self.board.reflection_model = "gemini-3-flash-preview"
+        self.board.save(update_fields=["reflection_model"])
+
+        task = self.make_task(self.board, status=TaskStatus.IN_PROGRESS)
+        self._update_status(task.id, "REVIEW")
+
+        # The legacy reflection_model pin is retired: it must be ignored
+        # entirely, so the gemini override never routes the review — the
+        # deterministic walk/fallback picks from enabled agents instead.
+        report = ReflectionReport.objects.get(task=task)
+        self.assertNotEqual(report.reviewer_model, "gemini-3-flash-preview")
+        self.assertEqual(report.selection_reason, "default_strongest")
+
     # ── Duplicate prevention ──────────────────────────────────────
 
     @patch("tasks.dag_executor.execute_reflection.delay")
@@ -106,7 +135,7 @@ class TestAutoReflectionViaUpdate(APITestCase):
         ReflectionReport.objects.create(
             task=task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
             status=ReflectionStatus.PENDING,
         )
@@ -123,7 +152,7 @@ class TestAutoReflectionViaUpdate(APITestCase):
         ReflectionReport.objects.create(
             task=task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
             status=ReflectionStatus.RUNNING,
         )
@@ -140,7 +169,7 @@ class TestAutoReflectionViaUpdate(APITestCase):
         ReflectionReport.objects.create(
             task=task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
             status=ReflectionStatus.COMPLETED,
             verdict="PASS",
@@ -162,7 +191,7 @@ class TestAutoReflectionViaUpdate(APITestCase):
         ReflectionReport.objects.create(
             task=task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
             status=ReflectionStatus.FAILED,
             error_message="Timeout",
@@ -260,7 +289,7 @@ class TestAutoReflectionViaExecutionResult(APITestCase):
         ReflectionReport.objects.create(
             task=task,
             reviewer_agent="claude",
-            reviewer_model="claude-opus-4-6",
+            reviewer_model="claude-opus-4-8",
             requested_by="admin@test.com",
             status=ReflectionStatus.RUNNING,
         )

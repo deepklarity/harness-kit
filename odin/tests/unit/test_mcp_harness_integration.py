@@ -3,7 +3,7 @@
 Tests verify:
 - Orchestrator generates correct per-CLI MCP config files
 - Claude harness adds --mcp-config flag (only CLI that supports it)
-- Gemini/Qwen harnesses do NOT add --mcp-config (auto-discover from project files)
+- Gemini harness does NOT add --mcp-config (auto-discovers from project files)
 - Codex harness ignores MCP config (uses .codex/config.toml)
 - Config contains correct env vars (URL, auth token, task ID, author)
 - Per-CLI format correctness (JSON, TOML, OpenCode structure)
@@ -18,7 +18,6 @@ import pytest
 
 from odin.harnesses.claude import ClaudeHarness
 from odin.harnesses.gemini import GeminiHarness
-from odin.harnesses.qwen import QwenHarness
 from odin.harnesses.codex import CodexHarness
 from odin.mcps.taskit_mcp.config import claude_tool_names, tool_names
 from odin.models import AgentConfig, CostTier, OdinConfig, TaskItConfig
@@ -40,15 +39,6 @@ def agent_config():
 def gemini_config():
     return AgentConfig(
         cli_command="gemini",
-        capabilities=["coding"],
-        cost_tier=CostTier.LOW,
-    )
-
-
-@pytest.fixture
-def qwen_config():
-    return AgentConfig(
-        cli_command="qwen",
         capabilities=["coding"],
         cost_tier=CostTier.LOW,
     )
@@ -130,6 +120,26 @@ class TestClaudeHarnessMcpConfig:
         cmd = harness.build_interactive_command("/tmp/sysprompt.txt", context)
         assert "--allowedTools" in cmd
 
+    def test_max_turns_flag_added_when_set(self, agent_config):
+        """A step budget in context becomes --max-turns N on the CLI."""
+        harness = ClaudeHarness(agent_config)
+        cmd = harness.build_execute_command("task", {"max_turns": 40})
+        assert "--max-turns" in cmd
+        idx = cmd.index("--max-turns")
+        assert cmd[idx + 1] == "40"
+
+    def test_no_max_turns_flag_when_absent(self, agent_config):
+        """Unbounded by default — no --max-turns unless a budget is set."""
+        harness = ClaudeHarness(agent_config)
+        cmd = harness.build_execute_command("task", {})
+        assert "--max-turns" not in cmd
+
+    def test_no_max_turns_flag_when_zero_or_none(self, agent_config):
+        """0/None are treated as 'unbounded' (no flag), matching config default."""
+        harness = ClaudeHarness(agent_config)
+        assert "--max-turns" not in harness.build_execute_command("t", {"max_turns": 0})
+        assert "--max-turns" not in harness.build_execute_command("t", {"max_turns": None})
+
 
 class TestGeminiHarnessNoMcpFlag:
     """Gemini CLI has no --mcp-config flag — uses .gemini/settings.json."""
@@ -147,27 +157,6 @@ class TestGeminiHarnessNoMcpFlag:
 
     def test_interactive_no_mcp_flag(self, gemini_config):
         harness = GeminiHarness(gemini_config)
-        context = {"mcp_config": "/tmp/mcp.json"}
-        cmd = harness.build_interactive_command("/tmp/sysprompt.txt", context)
-        assert "--mcp-config" not in cmd
-
-
-class TestQwenHarnessNoMcpFlag:
-    """Qwen CLI has no --mcp-config flag — uses .qwen/settings.json."""
-
-    def test_no_mcp_flag_even_with_config(self, qwen_config):
-        harness = QwenHarness(qwen_config)
-        context = {"mcp_config": "/tmp/mcp_789.json"}
-        cmd = harness.build_execute_command("do something", context)
-        assert "--mcp-config" not in cmd
-
-    def test_no_mcp_flag_empty_context(self, qwen_config):
-        harness = QwenHarness(qwen_config)
-        cmd = harness.build_execute_command("do something", {})
-        assert "--mcp-config" not in cmd
-
-    def test_interactive_no_mcp_flag(self, qwen_config):
-        harness = QwenHarness(qwen_config)
         context = {"mcp_config": "/tmp/mcp.json"}
         cmd = harness.build_interactive_command("/tmp/sysprompt.txt", context)
         assert "--mcp-config" not in cmd
@@ -344,34 +333,6 @@ class TestMcpConfigGeneration:
         data = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
         assert data["mcpServers"]["taskit"]["trust"] is True
 
-    # ── Qwen (writes .qwen/settings.json, returns None) ──
-
-    def test_qwen_returns_none(self, tmp_path):
-        orch = self._make_orchestrator(tmp_path)
-        result = orch._generate_mcp_config(
-            "42", "qwen", tmp_path / "logs", working_dir=str(tmp_path),
-        )
-        assert result is None
-
-    def test_qwen_writes_settings_json(self, tmp_path):
-        orch = self._make_orchestrator(tmp_path)
-        orch._generate_mcp_config(
-            "42", "qwen", tmp_path / "logs", working_dir=str(tmp_path),
-        )
-        config_path = tmp_path / ".qwen" / "settings.json"
-        assert config_path.exists()
-        data = json.loads(config_path.read_text())
-        assert "mcpServers" in data
-        assert data["mcpServers"]["taskit"]["env"]["TASKIT_AUTHOR_EMAIL"] == "qwen@odin.agent"
-
-    def test_qwen_has_trust_true(self, tmp_path):
-        orch = self._make_orchestrator(tmp_path)
-        orch._generate_mcp_config(
-            "42", "qwen", tmp_path / "logs", working_dir=str(tmp_path),
-        )
-        data = json.loads((tmp_path / ".qwen" / "settings.json").read_text())
-        assert data["mcpServers"]["taskit"]["trust"] is True
-
     # ── Codex (writes .codex/config.toml, returns None) ──
 
     def test_codex_returns_none(self, tmp_path):
@@ -404,7 +365,7 @@ class TestMcpConfigGeneration:
         assert config_path.exists()
         data = json.loads(config_path.read_text())
         assert "mcp" in data
-        assert data["mcp"]["taskit"]["environment"]["TASKIT_AUTHOR_EMAIL"] == "minimax@odin.agent"
+        assert data["mcp"]["taskit"]["environment"]["TASKIT_URL"] == "http://localhost:8000"
 
     def test_minimax_opencode_format(self, tmp_path):
         """kilo CLI reads opencode.json with 'mcp' key and 'environment' (not 'env')."""
@@ -442,7 +403,7 @@ class TestMcpConfigGeneration:
         assert "mcp" in data
         assert data["mcp"]["taskit"]["type"] == "local"
         assert data["mcp"]["taskit"]["command"] == ["taskit-mcp"]
-        assert data["mcp"]["taskit"]["environment"]["TASKIT_AUTHOR_EMAIL"] == "glm@odin.agent"
+        assert data["mcp"]["taskit"]["environment"]["TASKIT_URL"] == "http://localhost:8000"
 
     def test_glm_has_permission_allow(self, tmp_path):
         """GLM also uses opencode format — needs same permission auto-approve."""
@@ -453,6 +414,34 @@ class TestMcpConfigGeneration:
         data = json.loads((tmp_path / "opencode.json").read_text())
         assert data["permission"]["taskit_add_comment"] == "allow"
         assert data["permission"]["taskit_add_attachment"] == "allow"
+
+    # ── Agy / Antigravity (gemini-cli successor — shares .gemini/settings.json) ──
+
+    def test_agy_writes_gemini_settings_json(self, tmp_path):
+        """agy (Google Antigravity) is gemini-cli's successor and writes its state
+        to ~/.gemini (microsandbox.py::_CREDENTIAL_PATHS comment), so it reads the
+        same project-local MCP config location: .gemini/settings.json. Without this
+        wiring agy has no taskit MCP config and cannot post proof comments."""
+        orch = self._make_orchestrator(tmp_path)
+        orch._generate_mcp_config(
+            "42", "agy", tmp_path / "logs", working_dir=str(tmp_path),
+        )
+        config_path = tmp_path / ".gemini" / "settings.json"
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert "mcpServers" in data
+        assert data["mcpServers"]["taskit"]["command"] == "taskit-mcp"
+        assert data["mcpServers"]["taskit"]["env"]["TASKIT_AUTHOR_EMAIL"] == "agy@odin.agent"
+
+    def test_agy_has_trust_true(self, tmp_path):
+        """agy uses the gemini-family config format, so trust:true must be present
+        to bypass tool-call confirmations in headless -p mode."""
+        orch = self._make_orchestrator(tmp_path)
+        orch._generate_mcp_config(
+            "42", "agy", tmp_path / "logs", working_dir=str(tmp_path),
+        )
+        data = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
+        assert data["mcpServers"]["taskit"]["trust"] is True
 
     # ── Shared behavior ──
 
@@ -498,21 +487,27 @@ class TestMcpConfigGeneration:
 
 
 class TestGenerateAllMcpConfigs:
-    """Test the CLI helper that generates all 6 config files at once."""
+    """Test the CLI helper that generates all config files at once.
 
-    def test_creates_all_six_files(self, tmp_path):
+    Note: qwen was RETIRED in task #102 (user directive) and is NOT
+    among the writers — see ``test_qwen_not_in_mcp_config_map`` in
+    test_worktree.py for the gitignore-side guard.
+    """
+
+    def test_creates_all_five_files(self, tmp_path):
         from odin.cli import _generate_all_mcp_configs
 
         env = {"TASKIT_URL": "http://localhost:8000"}
         created = _generate_all_mcp_configs(tmp_path, env)
 
-        assert len(created) == 6
+        assert len(created) == 5
         assert (tmp_path / ".mcp.json").exists()
         assert (tmp_path / ".gemini" / "settings.json").exists()
-        assert (tmp_path / ".qwen" / "settings.json").exists()
         assert (tmp_path / ".codex" / "config.toml").exists()
         assert (tmp_path / ".kilocode" / "mcp.json").exists()
         assert (tmp_path / "opencode.json").exists()
+        # qwen is retired — must NOT be generated
+        assert not (tmp_path / ".qwen").exists()
 
     def test_claude_format(self, tmp_path):
         from odin.cli import _generate_all_mcp_configs
@@ -548,13 +543,6 @@ class TestGenerateAllMcpConfigs:
 
         _generate_all_mcp_configs(tmp_path, {"TASKIT_URL": "http://test:8000"})
         data = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        assert data["mcpServers"]["taskit"]["trust"] is True
-
-    def test_qwen_trust_true(self, tmp_path):
-        from odin.cli import _generate_all_mcp_configs
-
-        _generate_all_mcp_configs(tmp_path, {"TASKIT_URL": "http://test:8000"})
-        data = json.loads((tmp_path / ".qwen" / "settings.json").read_text())
         assert data["mcpServers"]["taskit"]["trust"] is True
 
     def test_opencode_used_for_kilo_and_glm(self, tmp_path):
@@ -616,7 +604,7 @@ class TestGenerateAllMcpConfigs:
 
 
 class TestAllHarnessConfigsConsistency:
-    """Verify all 6 harness configs include taskit tools and correct env."""
+    """Verify all 5 harness configs include taskit tools and correct env."""
 
     def _make_orchestrator(self, tmp_path):
         from odin.orchestrator import Orchestrator
@@ -642,9 +630,9 @@ class TestAllHarnessConfigsConsistency:
         return orch
 
     def test_all_harness_configs_include_taskit_tools(self, tmp_path):
-        """All 6 harness configs reference the taskit MCP server."""
+        """All 5 harness configs reference the taskit MCP server."""
         orch = self._make_orchestrator(tmp_path)
-        harness_names = ["claude", "gemini", "qwen", "codex", "minimax", "glm"]
+        harness_names = ["claude", "gemini", "codex", "minimax", "glm"]
         for name in harness_names:
             orch._generate_mcp_config(
                 "42", name, tmp_path / "logs", working_dir=str(tmp_path),
@@ -657,10 +645,6 @@ class TestAllHarnessConfigsConsistency:
         # Gemini: .gemini/settings.json → mcpServers.taskit
         gemini_data = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
         assert "taskit" in gemini_data["mcpServers"]
-
-        # Qwen: .qwen/settings.json → mcpServers.taskit
-        qwen_data = json.loads((tmp_path / ".qwen" / "settings.json").read_text())
-        assert "taskit" in qwen_data["mcpServers"]
 
         # Codex: .codex/config.toml → [mcp_servers.taskit]
         codex_content = (tmp_path / ".codex" / "config.toml").read_text()
@@ -684,11 +668,6 @@ class TestAllHarnessConfigsConsistency:
         data = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
         assert data["mcpServers"]["taskit"]["env"]["TASKIT_AUTH_TOKEN"] == "test-bearer-token"
 
-        # Qwen
-        orch._generate_mcp_config("42", "qwen", tmp_path / "logs", working_dir=str(tmp_path))
-        data = json.loads((tmp_path / ".qwen" / "settings.json").read_text())
-        assert data["mcpServers"]["taskit"]["env"]["TASKIT_AUTH_TOKEN"] == "test-bearer-token"
-
     def test_mcp_env_includes_author_identity(self, tmp_path):
         """Generated env has correct TASKIT_AUTHOR_EMAIL per harness."""
         orch = self._make_orchestrator(tmp_path)
@@ -696,7 +675,6 @@ class TestAllHarnessConfigsConsistency:
         expected = {
             "claude": "claude@odin.agent",
             "gemini": "gemini@odin.agent",
-            "qwen": "qwen@odin.agent",
             "codex": "codex@odin.agent",
             "minimax": "minimax@odin.agent",
             "glm": "glm@odin.agent",
@@ -716,14 +694,10 @@ class TestAllHarnessConfigsConsistency:
         data = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
         assert data["mcpServers"]["taskit"]["env"]["TASKIT_AUTHOR_EMAIL"] == "gemini@odin.agent"
 
-        # Verify Qwen
-        data = json.loads((tmp_path / ".qwen" / "settings.json").read_text())
-        assert data["mcpServers"]["taskit"]["env"]["TASKIT_AUTHOR_EMAIL"] == "qwen@odin.agent"
-
         # Verify MiniMax/GLM (share opencode.json — last writer wins)
         # The last one generated was glm
         data = json.loads((tmp_path / "opencode.json").read_text())
-        assert data["mcp"]["taskit"]["environment"]["TASKIT_AUTHOR_EMAIL"] == "glm@odin.agent"
+        assert data["mcp"]["taskit"]["environment"]["TASKIT_URL"] == "http://localhost:8000"
 
     def test_claude_mcp_config_includes_question_tool(self, tmp_path):
         """Claude config allows mcp__taskit__taskit_add_comment (question tool)."""
@@ -1081,9 +1055,98 @@ class TestCodexChromeDevtoolsFlags:
         cmd = harness.build_execute_command("test prompt", context)
         assert 'mcp_servers.chrome-devtools.command="npx"' in cmd
 
+    def test_chrome_devtools_forkd_executable_path_flags(self):
+        config = AgentConfig(cli_command="codex")
+        harness = CodexHarness(config)
+        context = {
+            "chrome_devtools_mcp_enabled": True,
+            "chrome_devtools_headless": True,
+            "chrome_devtools_executable_path": "/usr/bin/chromium",
+            "chrome_devtools_isolated": True,
+            "chrome_devtools_chrome_args": ["--no-sandbox", "--disable-dev-shm-usage"],
+        }
+        cmd = harness.build_execute_command("test prompt", context)
+        args_line = next(v for v in cmd if "mcp_servers.chrome-devtools.args=" in v)
+        assert '"--headless"' in args_line
+        assert '"--executablePath"' in args_line
+        assert '"/usr/bin/chromium"' in args_line
+        assert '"--isolated"' in args_line
+        assert '"--chromeArg=--no-sandbox"' in args_line
+        assert '"--chromeArg=--disable-dev-shm-usage"' in args_line
+
     def test_no_chrome_devtools_flags_when_not_enabled(self):
         config = AgentConfig(cli_command="codex")
         harness = CodexHarness(config)
         context = {}
         cmd = harness.build_execute_command("test prompt", context)
         assert not any("chrome-devtools" in str(c) for c in cmd)
+
+    def test_chrome_devtools_browser_url_flags(self):
+        # microsandbox: connect to a host browser over CDP; no launch flags.
+        config = AgentConfig(cli_command="codex")
+        harness = CodexHarness(config)
+        context = {
+            "chrome_devtools_mcp_enabled": True,
+            "chrome_devtools_headless": True,
+            "chrome_devtools_browser_url": "http://127.0.0.1:9222",
+        }
+        cmd = harness.build_execute_command("test prompt", context)
+        args_line = next(v for v in cmd if "mcp_servers.chrome-devtools.args=" in v)
+        assert '"--browserUrl"' in args_line
+        assert '"http://127.0.0.1:9222"' in args_line
+        assert '"--headless"' not in args_line
+        assert '"--executablePath"' not in args_line
+
+
+class TestMicrosandboxBrowserUrl:
+    """Microsandbox routes the in-guest MCP to a host-side browser over CDP.
+
+    The aarch64 microVM can't launch Chromium (SIGTRAP), so the MCP connects to
+    a remote browser. 127.0.0.1 is later rewritten to the host LAN IP when the
+    config is staged into the guest.
+    """
+
+    def test_helper_default_when_unset(self):
+        from odin.orchestrator import _microsandbox_browser_url, DEFAULT_MICROSANDBOX_CDP_URL
+
+        config = OdinConfig(
+            agents={"claude": AgentConfig(cli_command="claude")},
+            mcps=["chrome-devtools"],
+        )
+        assert _microsandbox_browser_url(config) == DEFAULT_MICROSANDBOX_CDP_URL
+
+    def test_helper_honors_override(self):
+        from odin.orchestrator import _microsandbox_browser_url
+        from odin.models import ChromeDevToolsConfig
+
+        config = OdinConfig(
+            agents={"claude": AgentConfig(cli_command="claude")},
+            mcps=["chrome-devtools"],
+            chrome_devtools=ChromeDevToolsConfig(browser_url="http://192.168.1.9:9333"),
+        )
+        assert _microsandbox_browser_url(config) == "http://192.168.1.9:9333"
+
+    def test_generated_claude_config_has_browser_url(self, tmp_path):
+        from odin.orchestrator import Orchestrator
+
+        config = OdinConfig(
+            agents={"claude": AgentConfig(cli_command="claude")},
+            taskit=None,
+            mcps=["chrome-devtools"],
+            log_dir=str(tmp_path / "logs"),
+        )
+        orch = Orchestrator.__new__(Orchestrator)
+        orch.config = config
+        orch._log = MagicMock()
+
+        config_path = orch._generate_mcp_config(
+            "42", "claude", tmp_path / "logs",
+            chrome_browser_url="http://127.0.0.1:9222",
+        )
+        data = json.loads(Path(config_path).read_text())
+        args = data["mcpServers"]["chrome-devtools"]["args"]
+        assert "--browserUrl" in args
+        assert args[args.index("--browserUrl") + 1] == "http://127.0.0.1:9222"
+        # Launch-only flags must be absent when connecting remotely.
+        assert "--executablePath" not in args
+        assert "--headless" not in args

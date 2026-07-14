@@ -9,8 +9,12 @@ interface TaskTimeDisplayProps {
 }
 
 export function TaskTimeDisplay({ task, className = '' }: TaskTimeDisplayProps) {
-    const displayMs = task.executingTimeMs > 0 ? task.executingTimeMs : task.workTimeMs;
-    const label = task.executingTimeMs > 0 ? 'Executing time' : 'Work time (in progress + review)';
+    // Always the actual execution time (user directive) — never the
+    // in-progress/review wall-clock, which mostly measures queueing.
+    // 0s is honest for tasks that haven't executed yet; the tooltip
+    // still carries the full breakdown.
+    const displayMs = task.executingTimeMs;
+    const label = 'Executing time';
 
     const stagesWithTime = Object.entries(task.timeInStatuses)
         .filter(([, ms]) => ms > 0)

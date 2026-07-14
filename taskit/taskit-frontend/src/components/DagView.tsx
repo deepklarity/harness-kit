@@ -409,7 +409,7 @@ export function DagView({ tasks, allTasks, members, onTaskClick, debugMode }: Da
               {task.dependsOn && task.dependsOn.length > 0 && (
                 <div className="text-xs text-muted-foreground">Dependencies: {task.dependsOn.length}</div>
               )}
-              {(task.metadata as Record<string, unknown>)?.merge_status && (
+              {Boolean((task.metadata as Record<string, unknown>)?.merge_status) && (
                 <div className="text-xs text-muted-foreground">Merge: {formatMergeStatus((task.metadata as Record<string, unknown>).merge_status as string)}</div>
               )}
             </div>

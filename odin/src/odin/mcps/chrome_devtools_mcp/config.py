@@ -81,11 +81,6 @@ def _server_entry_gemini(args: List[str]) -> Dict:
     return {"chrome-devtools": {"command": _NPX_CMD, "args": args, "trust": True}}
 
 
-def _server_entry_qwen(args: List[str]) -> Dict:
-    """Qwen — same structure as Gemini."""
-    return {"chrome-devtools": {"command": _NPX_CMD, "args": args, "trust": True}}
-
-
 def _server_entry_codex(args: List[str]) -> List[str]:
     """Codex — returns list of ``-c`` flag pairs for CLI injection."""
     args_toml = "[" + ", ".join(f'"{a}"' for a in args) + "]"
@@ -121,7 +116,6 @@ def _opencode_permissions() -> Dict[str, str]:
 _FRAGMENT_MAP = {
     "claude": _server_entry_claude,
     "gemini": _server_entry_gemini,
-    "qwen": _server_entry_qwen,
     "codex": _server_entry_codex,
     "kilocode": _server_entry_kilocode,
     "minimax": _server_entry_opencode,
@@ -130,7 +124,9 @@ _FRAGMENT_MAP = {
 
 
 def server_fragment(
-    agent_name: str, *, headless: bool = False,
+    agent_name: str, *, headless: bool = False, executable_path: str | None = None,
+    chrome_args: List[str] | None = None, isolated: bool = False,
+    browser_url: str | None = None,
 ) -> Union[Dict, List[str]]:
     """Return the chrome-devtools MCP server fragment for a given agent.
 
@@ -138,10 +134,32 @@ def server_fragment(
     For Codex, returns a list of ``-c`` flag pairs.
     For OpenCode agents (minimax/glm), returns the ``mcp`` dict entry.
 
-    When *headless* is True, ``--headless`` is appended to the npx args.
+    Two mutually exclusive browser-provisioning modes:
+
+    * *launch in-guest* (forkd): ``executable_path``/``chrome_args``/``isolated``
+      tell the MCP to launch Chromium (installed as ``/usr/bin/chromium``) with
+      the flags that make it run headless as root in a container.
+    * *connect to a remote browser* (microsandbox): ``browser_url`` points the
+      MCP at a browser running OUTSIDE the guest (the aarch64 microVM can't
+      launch Chromium). It connects over CDP instead of launching, so the
+      launch-only flags (``--headless``/``--executablePath``/``--isolated``/
+      ``--chromeArg``) are omitted — chrome-devtools-mcp rejects them alongside
+      ``--browserUrl``. ``browser_url`` therefore takes precedence.
+
+    When *headless* is True (and not connecting remotely), ``--headless`` is
+    appended to the npx args.
     """
     args = list(_NPX_ARGS)
-    if headless:
-        args.append("--headless")
+    if browser_url:
+        args.extend(["--browserUrl", browser_url])
+    else:
+        if headless:
+            args.append("--headless")
+        if executable_path:
+            args.extend(["--executablePath", executable_path])
+        if isolated:
+            args.append("--isolated")
+        for chrome_arg in chrome_args or []:
+            args.append(f"--chromeArg={chrome_arg}")
     fn = _FRAGMENT_MAP.get(agent_name, _server_entry_claude)
     return fn(args)

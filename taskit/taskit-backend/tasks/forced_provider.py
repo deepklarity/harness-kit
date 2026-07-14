@@ -1,4 +1,9 @@
-"""Forced Gemini provider configuration and validation."""
+"""Forced base-provider configuration and validation.
+
+Any ACTIVE provider (present in agent_models.json) may be forced; the lineup
+file is the single source of the active set (F45) — no hardcoded provider
+lists here.
+"""
 
 from __future__ import annotations
 
@@ -11,9 +16,6 @@ from typing import Any, Dict, Optional
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-
-ALLOWED_FORCED_PROVIDERS = {"gemini"}
-
 
 @dataclass(frozen=True)
 class ForcedProviderSelection:
@@ -61,10 +63,14 @@ def get_forced_provider_selection() -> ForcedProviderSelection:
     if not provider:
         return ForcedProviderSelection(enabled=False)
 
-    if provider not in ALLOWED_FORCED_PROVIDERS:
-        allowed = ", ".join(sorted(ALLOWED_FORCED_PROVIDERS))
+    active = {
+        name for name, info in _load_agent_catalog().get("agents", {}).items()
+        if not info.get("retired")
+    }
+    if provider not in active:
+        allowed = ", ".join(sorted(active))
         raise ImproperlyConfigured(
-            f"FORCED_BASE_PROVIDER must be one of: {allowed}."
+            f"FORCED_BASE_PROVIDER must be an active agent (one of: {allowed})."
         )
 
     entry = _provider_entry(provider)

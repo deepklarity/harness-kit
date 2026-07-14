@@ -124,13 +124,41 @@ class MiniMaxProvider(BaseProvider):
 
             # Aggregate across all models in model_remains
             # NOTE: despite the name, current_interval_usage_count is the
-            # REMAINING count (the endpoint is called "remains")
+            # REMAINING count (the endpoint is called "remains"). Confirmed
+            # against the MiniMax-Coding-Plan-MCP / CodexBar reference
+            # parsers, which map current_interval_usage_count -> remaining.
+            #
+            # Models not on the account's plan report
+            # current_interval_total_count == 0 (no quota allocated at all).
+            # Summing those in would be harmless to the aggregate (0
+            # contributes nothing), but we still skip them explicitly so the
+            # aggregate is built only from models actually on the plan —
+            # this also keeps get_usage() and the "skip 0-limit models" rule
+            # consistent with how the frontend must render per-model rows.
             model_remains = data.get("model_remains", [])
-            total_remaining = 0
-            total_limit = 0
-            for m in model_remains:
-                total_remaining += m.get("current_interval_usage_count", 0)
-                total_limit += m.get("current_interval_total_count", 0)
+            in_plan_models = [
+                m for m in model_remains
+                if (m.get("current_interval_total_count") or 0) > 0
+            ]
+            if not in_plan_models:
+                # No model on this account currently has a real quota
+                # allocation. Surface as "no data" rather than a
+                # misleading 0/0 (the reported bug) — 0/0 reads as
+                # "quota exhausted" when it actually means "nothing to
+                # report".
+                return UsageInfo(
+                    provider=self.name,
+                    plan="Coding Plan",
+                    unit="prompts",
+                    raw=data,
+                )
+
+            total_remaining = sum(
+                m.get("current_interval_usage_count", 0) for m in in_plan_models
+            )
+            total_limit = sum(
+                m.get("current_interval_total_count", 0) for m in in_plan_models
+            )
             total_used = total_limit - total_remaining
 
             return UsageInfo(

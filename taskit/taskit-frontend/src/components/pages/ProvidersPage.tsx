@@ -189,15 +189,30 @@ function RawBreakdown({ raw, providerName }: { raw: Record<string, unknown> | nu
 
     // MiniMax — show per-model prompt counts
     if (providerName === 'minimax' && raw.model_remains && Array.isArray(raw.model_remains)) {
-        const models = raw.model_remains as Array<{ model?: string; current_interval_usage_count?: number; current_interval_total_count?: number }>;
+        const allModels = raw.model_remains as Array<{ model_name?: string; current_interval_usage_count?: number; current_interval_total_count?: number }>;
+        // Models with total_count 0/None are not on this account's plan —
+        // rendering them as "0 / 0" reads as quota exhaustion when it
+        // actually means "not applicable". Skip them entirely.
+        const models = allModels.filter(m => (m.current_interval_total_count ?? 0) > 0);
+        if (models.length === 0) {
+            return <span className="text-xs text-muted-foreground">No in-plan model data</span>;
+        }
         return (
             <div className="space-y-1 text-xs">
-                {models.map((m, idx) => (
-                    <div key={idx} className="flex justify-between">
-                        <span className="font-mono">{m.model ?? 'unknown'}</span>
-                        <span className="font-mono">{m.current_interval_usage_count?.toLocaleString() ?? '—'} / {m.current_interval_total_count?.toLocaleString() ?? '—'} prompts</span>
-                    </div>
-                ))}
+                {models.map((m, idx) => {
+                    // current_interval_usage_count is, despite its name, the
+                    // REMAINING count (confirmed against the MiniMax-Coding-
+                    // Plan-MCP / CodexBar reference parsers).
+                    const remaining = m.current_interval_usage_count ?? 0;
+                    const total = m.current_interval_total_count ?? 0;
+                    const used = total - remaining;
+                    return (
+                        <div key={idx} className="flex justify-between">
+                            <span className="font-mono">{m.model_name ?? 'unknown'}</span>
+                            <span className="font-mono">{used.toLocaleString()} / {total.toLocaleString()} prompts</span>
+                        </div>
+                    );
+                })}
             </div>
         );
     }

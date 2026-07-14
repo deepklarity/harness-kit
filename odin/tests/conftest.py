@@ -55,13 +55,6 @@ def make_config():
                     default_model="gemini-2.5-flash",
                     premium_model="gemini-2.5-pro",
                 ),
-                "qwen": AgentConfig(
-                    cli_command="qwen",
-                    capabilities=["coding", "writing"],
-                    cost_tier=CostTier.LOW,
-                    default_model="coder-model",
-                    premium_model="coder-model",
-                ),
             },
         )
         defaults.update(overrides)

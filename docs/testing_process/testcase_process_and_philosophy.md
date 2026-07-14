@@ -505,7 +505,7 @@ python testing_tools/snapshot_extractor.py <spec_id> [output_dir] [--slim]
 
 ### Related documents
 
-- `docs/philosophy/testing.md` — Testing principles (single source of truth, boundaries, anti-patterns)
+- `docs/testing_process/testing_philosophy.md` — Testing principles (single source of truth, boundaries, anti-patterns)
 - `docs/testing_process/testing_end_to_end.md` — E2E testing layers, snapshot workflow, debugging
 - `odin/tests/TEST_PLAN.md` — Living coverage checklist
 - `odin/tests/testcase_readme.md` — Complete test index

@@ -1,0 +1,6 @@
+{
+  "verdict": "PASS",
+  "summary": "Task 185 (Per-task proof paths: .proof/task-<id>/ (W4.1)) was merged after its reflection verdict passed \u2014 operator-asserted PASS is the ground truth.",
+  "fixture_category": "real_capture",
+  "source": ".proof/task-185/proof.md + merge diffstat"
+}

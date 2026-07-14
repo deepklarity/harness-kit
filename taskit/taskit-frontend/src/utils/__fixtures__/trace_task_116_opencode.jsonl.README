@@ -1,0 +1,12 @@
+// Real trace excerpt pinned from task #116 (opencode/MiniMax-M3 harness,
+// session ses_0cc8fcf77ffeBEnkVfX30d17Vo). Same harness family as task #111
+// (opencode/glm) reported in the user bug — the JSON event shape is identical:
+// { type: "step_start"|"tool_use"|"step_finish"|"text", sessionID, part: {...} }
+//
+// This fixture is what was reported broken: the first 10 lines are logfmt
+// (non-JSON) which parseTrace wraps as `{type: "text", raw: {text: ...}}`. The
+// original detectTraceFormat only sampled the first 10 events, so the minimax
+// signature `sessionID + part` was missed → detection fell through to
+// `unknown` → buildClaudeCodeTimeline produced 0 nodes → empty Timeline panel.
+//
+// Source: /Users/.../116/.odin/logs/task_116.trace.jsonl (lines 1-40)

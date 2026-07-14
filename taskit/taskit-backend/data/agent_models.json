@@ -10,12 +10,12 @@
         "writing"
       ],
       "cli_command": "claude",
-      "default_model": "claude-sonnet-4-6",
-      "premium_model": "claude-opus-4-7",
+      "default_model": "claude-sonnet-5",
+      "premium_model": "claude-opus-4-8",
       "models": [
         {
-          "name": "claude-sonnet-4-6",
-          "description": "Default — Sonnet 4.6, fast and capable, beats old Opus on coding",
+          "name": "claude-sonnet-5",
+          "description": "Default — Sonnet 5, near-Opus coding at Sonnet cost (new tokenizer: ~30% more tokens per text; intro $2/$10 through 2026-08-31)",
           "is_default": true,
           "supports_image_input": true,
           "input_price_per_1m_tokens": 3.0,
@@ -23,26 +23,8 @@
           "cache_read_price_per_1m_tokens": 0.3
         },
         {
-          "name": "claude-opus-4-7",
-          "description": "Premium — Opus 4.7 flagship, strongest coding, xhigh effort tier",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 5.0,
-          "output_price_per_1m_tokens": 25.0,
-          "cache_read_price_per_1m_tokens": 0.5
-        },
-        {
-          "name": "claude-sonnet-4-5",
-          "description": "Previous Sonnet — superseded by 4.6",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 3.0,
-          "output_price_per_1m_tokens": 15.0,
-          "cache_read_price_per_1m_tokens": 0.3
-        },
-        {
-          "name": "claude-opus-4-6",
-          "description": "Previous Opus — also powers Fast Mode tier",
+          "name": "claude-opus-4-8",
+          "description": "Premium — Opus 4.8 flagship, strongest long-horizon agentic work",
           "is_default": false,
           "supports_image_input": true,
           "input_price_per_1m_tokens": 5.0,
@@ -51,12 +33,22 @@
         },
         {
           "name": "claude-haiku-4-5",
-          "description": "Cheapest Claude — fastest, ideal for simple tasks",
+          "description": "Cheapest Claude — fastest, ideal for simple tasks and reflections",
           "is_default": false,
           "supports_image_input": true,
           "input_price_per_1m_tokens": 1.0,
           "output_price_per_1m_tokens": 5.0,
           "cache_read_price_per_1m_tokens": 0.1
+        },
+        {
+          "name": "claude-sonnet-4-5",
+          "description": "Retired — superseded by Sonnet 4.6/5, kept for historical cost lookups",
+          "is_default": false,
+          "retired": true,
+          "supports_image_input": true,
+          "input_price_per_1m_tokens": 3.0,
+          "output_price_per_1m_tokens": 15.0,
+          "cache_read_price_per_1m_tokens": 0.3
         }
       ]
     },
@@ -68,121 +60,17 @@
         "writing"
       ],
       "cli_command": "codex",
-      "default_model": "gpt-5.4",
+      "default_model": "gpt-5.5",
       "premium_model": "gpt-5.5",
       "models": [
         {
-          "name": "gpt-5.4",
-          "description": "Default — GPT-5.4, strong everyday coding, balanced reasoning",
-          "is_default": true,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 2.50,
-          "output_price_per_1m_tokens": 15.00,
-          "cache_read_price_per_1m_tokens": 0.25
-        },
-        {
           "name": "gpt-5.5",
-          "description": "Premium — GPT-5.5 frontier, complex coding, long agentic work, 1M ctx",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 5.00,
-          "output_price_per_1m_tokens": 30.00,
-          "cache_read_price_per_1m_tokens": 0.50
-        },
-        {
-          "name": "gpt-5.4-mini",
-          "description": "GPT-5.4 mini — faster, cheaper for light tasks",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 0.75,
-          "output_price_per_1m_tokens": 4.50,
-          "cache_read_price_per_1m_tokens": 0.075
-        },
-        {
-          "name": "gpt-5.3-codex",
-          "description": "Older codex-tuned model (auto-migrates to gpt-5.4)",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 1.75,
-          "output_price_per_1m_tokens": 14.00,
-          "cache_read_price_per_1m_tokens": 0.175
-        },
-        {
-          "name": "gpt-5.2",
-          "description": "Older GPT-5.2 — 400K context, kept for legacy sessions",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 1.75,
-          "output_price_per_1m_tokens": 14.00,
-          "cache_read_price_per_1m_tokens": 0.175
-        }
-      ]
-    },
-    "gemini": {
-      "color": "#3b82f6",
-      "cost_tier": "low",
-      "capabilities": [
-        "reasoning",
-        "coding",
-        "writing"
-      ],
-      "cli_command": "gemini",
-      "default_model": "gemini-3-flash-preview",
-      "premium_model": "gemini-3.1-pro-preview",
-      "models": [
-        {
-          "name": "gemini-3-flash-preview",
-          "description": "Default — Gemini 3 Flash, balanced speed/quality, 78% SWE-bench",
+          "description": "Default · Premium — GPT-5.5 frontier, complex coding, long agentic work, 1M ctx",
           "is_default": true,
           "supports_image_input": true,
-          "input_price_per_1m_tokens": 0.5,
-          "output_price_per_1m_tokens": 3.0,
-          "cache_read_price_per_1m_tokens": 0.05
-        },
-        {
-          "name": "gemini-3.1-pro-preview",
-          "description": "Premium — Gemini 3.1 Pro, strongest reasoning, 1M ctx (2x price >200k)",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 2.0,
-          "output_price_per_1m_tokens": 12.0,
-          "cache_read_price_per_1m_tokens": 0.20
-        },
-        {
-          "name": "gemini-2.5-flash-lite",
-          "description": "Cheapest Gemini — lowest cost for high-volume tasks",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 0.1,
-          "output_price_per_1m_tokens": 0.4,
-          "cache_read_price_per_1m_tokens": 0.01
-        },
-        {
-          "name": "gemini-3.1-flash-lite-preview",
-          "description": "Gemini 3.1 Flash-Lite — newer budget tier, low-latency",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 0.25,
-          "output_price_per_1m_tokens": 1.50,
-          "cache_read_price_per_1m_tokens": 0.025
-        },
-        {
-          "name": "gemini-2.5-pro",
-          "description": "Previous Pro — cheaper than 3.1 Pro, still strong",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 1.25,
-          "output_price_per_1m_tokens": 10.0,
-          "cache_read_price_per_1m_tokens": 0.125
-        },
-        {
-          "name": "gemini-2.5-flash",
-          "description": "Previous Flash — cheaper alternative to 3 Flash",
-          "is_default": false,
-          "supports_image_input": true,
-          "input_price_per_1m_tokens": 0.3,
-          "output_price_per_1m_tokens": 2.5,
-          "cache_read_price_per_1m_tokens": 0.03
+          "input_price_per_1m_tokens": 5.0,
+          "output_price_per_1m_tokens": 30.0,
+          "cache_read_price_per_1m_tokens": 0.5
         }
       ]
     },
@@ -194,40 +82,13 @@
         "writing"
       ],
       "cli_command": "kilo",
-      "default_model": "minimax-coding-plan/MiniMax-M2.7",
-      "premium_model": "minimax-coding-plan/MiniMax-M2.7",
+      "default_model": "minimax-coding-plan/MiniMax-M3",
+      "premium_model": "minimax-coding-plan/MiniMax-M3",
       "models": [
         {
-          "name": "minimax-coding-plan/MiniMax-M2.7",
-          "description": "Default · Premium — Latest M2.7, strongest coding, 56% SWE-Pro",
+          "name": "minimax-coding-plan/MiniMax-M3",
+          "description": "Default · Premium — Latest M3, strongest coding, tops SWE-Pro",
           "is_default": true,
-          "supports_image_input": false,
-          "input_price_per_1m_tokens": 0.30,
-          "output_price_per_1m_tokens": 1.20,
-          "cache_read_price_per_1m_tokens": 0.06
-        },
-        {
-          "name": "minimax-coding-plan/MiniMax-M2.5",
-          "description": "Previous M2.5 — strong real-world engineering",
-          "is_default": false,
-          "supports_image_input": false,
-          "input_price_per_1m_tokens": 0.3,
-          "output_price_per_1m_tokens": 1.2,
-          "cache_read_price_per_1m_tokens": 0.08
-        },
-        {
-          "name": "minimax-coding-plan/MiniMax-M2.1",
-          "description": "M2.1 — improved multi-language programming over M2",
-          "is_default": false,
-          "supports_image_input": false,
-          "input_price_per_1m_tokens": 0.3,
-          "output_price_per_1m_tokens": 1.2,
-          "cache_read_price_per_1m_tokens": 0.07
-        },
-        {
-          "name": "minimax-coding-plan/MiniMax-M2",
-          "description": "Original M2 — balanced general-purpose",
-          "is_default": false,
           "supports_image_input": false,
           "input_price_per_1m_tokens": 0.3,
           "output_price_per_1m_tokens": 1.2,
@@ -243,43 +104,97 @@
         "writing"
       ],
       "cli_command": "opencode",
-      "default_model": "zai-coding-plan/glm-4.7",
-      "premium_model": "zai-coding-plan/glm-5.1",
+      "default_model": "zai-coding-plan/glm-5.2",
+      "premium_model": "zai-coding-plan/glm-5.2",
       "models": [
         {
-          "name": "zai-coding-plan/glm-4.7",
-          "description": "Default — GLM-4.7, balanced cost/quality, 73.8% SWE-bench",
+          "name": "zai-coding-plan/glm-5.2",
+          "description": "Default · Premium — GLM-5.2 flagship, strongest GLM coding yet",
           "is_default": true,
           "supports_image_input": false,
-          "input_price_per_1m_tokens": 0.6,
-          "output_price_per_1m_tokens": 2.2,
-          "cache_read_price_per_1m_tokens": 0.11
-        },
-        {
-          "name": "zai-coding-plan/glm-5.1",
-          "description": "Premium — GLM-5.1 flagship, near Opus quality on coding",
-          "is_default": false,
-          "supports_image_input": false,
-          "input_price_per_1m_tokens": 1.40,
-          "output_price_per_1m_tokens": 4.40,
+          "input_price_per_1m_tokens": 1.4,
+          "output_price_per_1m_tokens": 4.4,
           "cache_read_price_per_1m_tokens": 0.26
+        }
+      ]
+    },
+    "agy": {
+      "color": "#22c55e",
+      "cost_tier": "low",
+      "capabilities": [
+        "reasoning",
+        "coding",
+        "writing"
+      ],
+      "cli_command": "agy",
+      "default_model": "Gemini 3.5 Flash (High)",
+      "premium_model": "Gemini 3.1 Pro (High)",
+      "models": [
+        {
+          "name": "Gemini 3.5 Flash (High)",
+          "description": "Default — Gemini 3.5 Flash high-effort; agy --model takes the display string from `agy models`. Subscription quota (5-hour rolling quota) — prices are Gemini API list estimates, not billed",
+          "is_default": true,
+          "supports_image_input": true,
+          "input_price_per_1m_tokens": 0.5,
+          "output_price_per_1m_tokens": 3.0,
+          "cache_read_price_per_1m_tokens": 0.05
         },
         {
-          "name": "zai-coding-plan/glm-5-turbo",
-          "description": "GLM-5 Turbo — strong reasoning, cheaper than 5.1",
+          "name": "Gemini 3.1 Pro (High)",
+          "description": "Premium — Gemini 3.1 Pro high-effort; low-volume provider, never the parallel workhorse",
           "is_default": false,
-          "supports_image_input": false,
-          "input_price_per_1m_tokens": 1.20,
-          "output_price_per_1m_tokens": 4.00,
-          "cache_read_price_per_1m_tokens": 0.24
-        },
+          "supports_image_input": true,
+          "input_price_per_1m_tokens": 2.0,
+          "output_price_per_1m_tokens": 12.0,
+          "cache_read_price_per_1m_tokens": 0.2
+        }
+      ]
+    },
+    "qwen": {
+      "color": "#06b6d4",
+      "cost_tier": "low",
+      "capabilities": [
+        "coding",
+        "writing"
+      ],
+      "cli_command": "qwen",
+      "default_model": "coder-model",
+      "premium_model": "coder-model",
+      "retired": true,
+      "models": [
         {
-          "name": "zai-coding-plan/glm-4.5-air",
-          "description": "GLM-4.5 Air — cheapest, lightweight for simple tasks",
-          "is_default": false,
+          "name": "coder-model",
+          "description": "Retired — free OAuth tier discontinued, kept for historical cost lookups",
+          "is_default": true,
+          "retired": true,
           "supports_image_input": false,
-          "input_price_per_1m_tokens": 0.2,
-          "output_price_per_1m_tokens": 1.1,
+          "input_price_per_1m_tokens": 0.3,
+          "output_price_per_1m_tokens": 1.2,
+          "cache_read_price_per_1m_tokens": 0.06
+        }
+      ]
+    },
+    "gemini": {
+      "color": "#3b82f6",
+      "cost_tier": "low",
+      "capabilities": [
+        "reasoning",
+        "coding",
+        "writing"
+      ],
+      "cli_command": "gemini",
+      "default_model": "gemini-3-flash-preview",
+      "premium_model": "gemini-3.1-pro-preview",
+      "retired": true,
+      "models": [
+        {
+          "name": "gemini-2.5-flash",
+          "description": "Retired — provider dropped from the active lineup, kept for historical cost lookups",
+          "is_default": true,
+          "retired": true,
+          "supports_image_input": true,
+          "input_price_per_1m_tokens": 0.3,
+          "output_price_per_1m_tokens": 2.5,
           "cache_read_price_per_1m_tokens": 0.03
         }
       ]

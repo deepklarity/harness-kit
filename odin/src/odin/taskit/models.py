@@ -16,6 +16,7 @@ class TaskStatus(str, Enum):
     TESTING = "testing"
     DONE = "done"
     FAILED = "failed"
+    CANCELED = "canceled"
 
 
 class Comment(BaseModel):
@@ -24,6 +25,7 @@ class Comment(BaseModel):
     author: str
     content: str
     attachments: List[str] = Field(default_factory=list)
+    comment_type: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
 
 

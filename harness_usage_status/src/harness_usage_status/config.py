@@ -24,7 +24,7 @@ ENV_VAR_MAP = {
 }
 
 # All known provider names (CLI-based + API-based)
-ALL_PROVIDERS = ["claude_code", "codex", "gemini", "qwen", "minimax", "glm"]
+ALL_PROVIDERS = ["claude_code", "codex", "gemini", "minimax", "glm"]
 
 
 class ProviderConfig(BaseModel):

@@ -1,0 +1,6 @@
+{
+  "_fixture_note": "PARSER-BASELINE SYNTHETIC fixture. NOT a real captured review. Used to verify that a clean JSON-contract review parses to the expected verdict and exercises the primary code path of parse_reflection_report(). Confidence: shape correctness only — agreement% on this fixture is 1.0 by construction because the output was generated to match the ground truth. Excluded from the recommendation evidence.",
+  "verdict": "PASS",
+  "fixture_category": "parser_baseline_synthetic",
+  "shape": "json_contract"
+}

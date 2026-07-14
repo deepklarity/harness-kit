@@ -740,3 +740,95 @@ class TestPaginatedResponseHandling:
 
         backend = self._make_backend_with_transport(handler)
         assert backend.delete_spec("sp_del") is True
+
+
+# ── Status parsing robustness ─────────────────────────────────────────
+
+
+class TestStatusParsingRobustness:
+    """One row with an unknown status must never crash the whole board.
+
+    Regression: a task set to CANCELED (a real backend status that odin's
+    TaskStatus enum didn't know) crashed every odin exec on the board because
+    _status_from_taskit did TaskStatus(status_str.lower()), which raises
+    ValueError on unknown values.
+    """
+
+    def _make_backend_with_transport(self, handler):
+        backend = TaskItBackend(base_url="http://localhost:8000", board_id=1, created_by="odin")
+        backend._client = httpx.Client(
+            base_url="http://localhost:8000",
+            timeout=30,
+            transport=httpx.MockTransport(handler),
+        )
+        return backend
+
+    def test_load_all_tasks_with_canceled_status(self):
+        """A task with CANCELED status (real backend value) must parse correctly."""
+        def handler(request):
+            return httpx.Response(200, json=[
+                {"id": 1, "title": "Active", "description": "", "status": "TODO",
+                 "assignee": None, "depends_on": [], "metadata": {}},
+                {"id": 2, "title": "Canceled", "description": "", "status": "CANCELED",
+                 "assignee": None, "depends_on": [], "metadata": {}},
+            ])
+
+        backend = self._make_backend_with_transport(handler)
+        tasks = backend.load_all_tasks()
+        assert len(tasks) == 2
+        assert tasks[1].status == TaskStatus.CANCELED
+
+    def test_load_all_tasks_with_unknown_status_does_not_crash(self):
+        """A task with a made-up status (e.g. PAUSED) must not crash the board
+        listing. The unknown task gets a safe default; sibling tasks parse
+        normally."""
+        def handler(request):
+            return httpx.Response(200, json=[
+                {"id": 1, "title": "Normal", "description": "", "status": "TODO",
+                 "assignee": None, "depends_on": [], "metadata": {}},
+                {"id": 2, "title": "Weird", "description": "", "status": "PAUSED",
+                 "assignee": None, "depends_on": [], "metadata": {}},
+                {"id": 3, "title": "Also Normal", "description": "", "status": "DONE",
+                 "assignee": None, "depends_on": [], "metadata": {}},
+            ])
+
+        backend = self._make_backend_with_transport(handler)
+        tasks = backend.load_all_tasks()
+        assert len(tasks) == 3
+        assert tasks[0].status == TaskStatus.TODO
+        assert tasks[2].status == TaskStatus.DONE
+
+    def test_load_task_with_canceled_status(self):
+        """Loading a single CANCELED task must parse correctly."""
+        def handler(request):
+            return httpx.Response(200, json={
+                "id": 42, "title": "Canceled Task", "description": "",
+                "status": "CANCELED", "assignee": None, "depends_on": [], "metadata": {},
+            })
+
+        backend = self._make_backend_with_transport(handler)
+        task = backend.load_task("42")
+        assert task is not None
+        assert task.status == TaskStatus.CANCELED
+
+    def test_load_task_with_unknown_status_does_not_crash(self):
+        """Loading a single task with an unknown status must not crash."""
+        def handler(request):
+            return httpx.Response(200, json={
+                "id": 99, "title": "Mystery", "description": "",
+                "status": "PAUSED", "assignee": None, "depends_on": [], "metadata": {},
+            })
+
+        backend = self._make_backend_with_transport(handler)
+        task = backend.load_task("99")
+        assert task is not None
+        assert task.status == TaskStatus.BACKLOG
+
+    def test_status_from_taskit_canceled(self):
+        """_status_from_taskit maps the backend CANCELED value to the enum."""
+        assert TaskItBackend._status_from_taskit("CANCELED") == TaskStatus.CANCELED
+
+    def test_status_from_taskit_unknown_returns_backlog(self):
+        """_status_from_taskit must not raise on unknown values; it returns
+        BACKLOG as a safe default."""
+        assert TaskItBackend._status_from_taskit("PAUSED") == TaskStatus.BACKLOG

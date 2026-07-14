@@ -4,6 +4,8 @@ Tasks already exist in TODO/IN_PROGRESS with dependencies resolved and agents as
 
 Split into sub-flows because: execution and reflection are distinct phases that fail independently, and the auto-reflection loop creates a cycle between them.
 
+See also: `../task-state-machine-celery-automation/` — the full state machine (all 8 statuses, operator vs celery edge ownership, stale recovery, model escalation, merge-gated TESTING promotion, finalize → DONE) plus the fast-first-checks debug runbook. Note PASS does not advance REVIEW → TESTING directly — `merge_task_on_reflection` does, after the merge lands (see `03-reflection-loop/`).
+
 ## Sub-flows (execution order)
 
 1. **02-execute-and-dispatch** — DAG picks up IN_PROGRESS tasks, checks dependencies (dual check: TaskIt + odin), dispatches to harnesses via odin exec, processes results into REVIEW or FAILED
@@ -49,5 +51,5 @@ Only TESTING (reflection passed) and DONE unblock dependents.
 | `ODIN_EXECUTION_STRATEGY` | taskit-backend | `""` (disabled) |
 | `ODIN_CLI_PATH` | dag_executor.py | `odin` |
 | `ODIN_WORKING_DIR` | dag_executor.py, orchestrator.py | cwd |
-| `DAG_EXECUTOR_MAX_CONCURRENCY` | dag_executor.py | `3` |
+| `DAG_EXECUTOR_MAX_CONCURRENCY` | settings.py | `10` |
 | `DAG_EXECUTOR_POLL_INTERVAL` | dag_executor.py | `5` (seconds) |

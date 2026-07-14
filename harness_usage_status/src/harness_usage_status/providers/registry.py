@@ -41,7 +41,6 @@ def _import_all_providers():
         gemini,
         minimax,
         glm,
-        qwen,
     )
 
 

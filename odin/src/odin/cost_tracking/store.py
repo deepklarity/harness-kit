@@ -16,19 +16,34 @@ class CostStore:
     """
 
     def __init__(self, storage_dir: str = ".odin/costs"):
-        self._dir = Path(storage_dir)
+        # Resolve to an absolute path at construction: a relative Path
+        # re-resolves against the *current* cwd on every operation, so a
+        # later cwd change — or the cwd being deleted, e.g. a worktree
+        # disposed mid-retry — silently retargets or crashes every write.
+        self._dir = Path(storage_dir).resolve()
         self._dir.mkdir(parents=True, exist_ok=True)
 
     def _spec_path(self, spec_id: str) -> Path:
         return self._dir / f"costs_{spec_id}.json"
 
     def save_record(self, record: TaskCostRecord) -> None:
-        """Append a cost record for a spec."""
+        """Append a cost record for a spec.
+
+        Never raises: cost bookkeeping must not be able to kill a run.
+        """
         spec_id = record.spec_id or "_orphan"
         path = self._spec_path(spec_id)
         records = self._load_raw(path)
         records.append(record.model_dump(mode="json"))
-        path.write_text(json.dumps(records, indent=2, default=str))
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(records, indent=2, default=str))
+        except OSError as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "cost record dropped (unwritable store at %s): %s", path, exc
+            )
 
     def load_by_spec(self, spec_id: str) -> List[TaskCostRecord]:
         """Load all cost records for a given spec."""

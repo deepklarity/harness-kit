@@ -69,6 +69,24 @@ interface InlineToken {
 }
 
 /**
+ * True when an underscore emphasis delimiter starting at `remaining` would be
+ * intra-word. Per CommonMark, `_` cannot open or close emphasis when its
+ * delimiter run is flanked by word characters, so identifiers like
+ * `test_real_wave3_reflections_replay` render literally. The check walks past
+ * any contiguous underscores so doubled runs like `a__b__c` are also literal.
+ */
+function isUnderscoreIntraWord(text: string, remaining: string, matchLen: number): boolean {
+    const offset = text.length - remaining.length;
+    let i = offset - 1;
+    while (i >= 0 && text[i] === '_') i--;
+    const prevChar = i >= 0 ? text[i] : '';
+    let j = matchLen;
+    while (j < remaining.length && remaining[j] === '_') j++;
+    const nextChar = j < remaining.length ? remaining[j] : '';
+    return /[A-Za-z0-9]/.test(prevChar) || /[A-Za-z0-9]/.test(nextChar);
+}
+
+/**
  * Parse inline markdown elements (bold, italic, code, links, images)
  */
 function parseInline(text: string): InlineToken[] {
@@ -122,9 +140,9 @@ function parseInline(text: string): InlineToken[] {
             continue;
         }
 
-        // Alternative bold: __text__
+        // Alternative bold: __text__ — underscores do not open emphasis inside words
         const boldAltMatch = remaining.match(/^__([^_]+)__/);
-        if (boldAltMatch) {
+        if (boldAltMatch && !isUnderscoreIntraWord(text, remaining, boldAltMatch[0].length)) {
             tokens.push({
                 type: 'bold',
                 content: boldAltMatch[1],
@@ -144,9 +162,12 @@ function parseInline(text: string): InlineToken[] {
             continue;
         }
 
-        // Italic: *text* or _text_ (but not inside words)
+        // Italic: *text* or _text_ — underscores do not open emphasis inside words
         const italicMatch = remaining.match(/^(\*|_)([^*_]+)\1/);
-        if (italicMatch) {
+        if (
+            italicMatch &&
+            !(italicMatch[1] === '_' && isUnderscoreIntraWord(text, remaining, italicMatch[0].length))
+        ) {
             tokens.push({
                 type: 'italic',
                 content: italicMatch[2],

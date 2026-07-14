@@ -3,11 +3,24 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
-from .models import Notification, NotificationPreference, User, UserRole
+from .models import Notification, NotificationPreference, User
 from .serializers import (
     NotificationPreferenceSerializer,
     NotificationSerializer,
 )
+
+
+def _fallback_notification_user():
+    """Dev-mode fallback: prefer admin, then first user regardless of role.
+
+    Mirrors ``tasks.views._fallback_task_user`` so notification endpoints
+    resolve the same default user as the rest of the board when auth is
+    disabled.
+    """
+    admin = User.objects.filter(is_admin=True).order_by("id").first()
+    if admin:
+        return admin
+    return User.objects.order_by("id").first()
 
 
 def _resolve_user(request):
@@ -15,13 +28,22 @@ def _resolve_user(request):
 
     Resolution order:
     1. request.taskit_user — set by auth middleware when AUTH_ENABLED is True
-    2. ?user_id= query param
-    3. ?email= query param
-    4. First HUMAN user in the database (development fallback)
+    2. request.user — set by Django AuthenticationMiddleware (may be AnonymousUser)
+    3. ?user_id= query param / body
+    4. ?email= query param / body
+    5. Admin user, then first user in the database (development fallback,
+       consistent with tasks.views._fallback_task_user)
 
     Returns a User instance, or None if no user can be resolved.
     """
     user = getattr(request, "taskit_user", None)
+    if not isinstance(user, User):
+        candidate = getattr(request, "user", None)
+        if isinstance(candidate, User):
+            user = candidate
+        else:
+            user = None
+
     if user is not None:
         return user
 
@@ -39,7 +61,7 @@ def _resolve_user(request):
         except User.DoesNotExist:
             return None
 
-    return User.objects.filter(role__in=[UserRole.HUMAN, UserRole.ADMIN]).order_by("id").first()
+    return _fallback_notification_user()
 
 
 class NotificationViewSet(viewsets.ModelViewSet):

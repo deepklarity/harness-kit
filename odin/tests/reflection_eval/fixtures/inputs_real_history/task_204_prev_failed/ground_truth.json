@@ -1,0 +1,6 @@
+{
+  "verdict": "FAIL",
+  "summary": "Previous attempt produced none of the acceptance-criteria artifacts: no proof.md, no table, no recommendation, nothing committed, 1/27 live calls. The production sonnet reviewer (reflect_208) verdicted this FAIL. Ground truth FAIL is authoritative.",
+  "fixture_category": "real_capture",
+  "source": "Previous attempt at task 204 + production sonnet review (reflect_208.out)"
+}

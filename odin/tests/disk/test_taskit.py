@@ -213,7 +213,7 @@ class TestReadyTasks:
         t1 = task_mgr.create_task("A", "a")
         t2 = task_mgr.create_task("B", "b")
         task_mgr.assign_task(t1.id, "gemini")
-        task_mgr.assign_task(t2.id, "qwen")
+        task_mgr.assign_task(t2.id, "gemini")
 
         ready = task_mgr.get_ready_tasks()
         assert len(ready) == 2
@@ -222,7 +222,7 @@ class TestReadyTasks:
         t1 = task_mgr.create_task("A", "a")
         t2 = task_mgr.create_task("B", "b")
         task_mgr.assign_task(t1.id, "gemini")
-        task_mgr.assign_task(t2.id, "qwen")
+        task_mgr.assign_task(t2.id, "gemini")
 
         # t2 depends on t1
         task = task_mgr.get_task(t2.id)
@@ -237,7 +237,7 @@ class TestReadyTasks:
         t1 = task_mgr.create_task("A", "a")
         t2 = task_mgr.create_task("B", "b")
         task_mgr.assign_task(t1.id, "gemini")
-        task_mgr.assign_task(t2.id, "qwen")
+        task_mgr.assign_task(t2.id, "gemini")
 
         task = task_mgr.get_task(t2.id)
         task.depends_on = [t1.id]

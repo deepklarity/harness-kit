@@ -13,6 +13,7 @@ End state: Spec archive created, plan JSON on disk, tasks on board with suggeste
 | `--direct` | Run agent as direct subprocess (no tmux). Used by web UI. |
 | `--base-agent` | Override which agent does planning (e.g. `codex`) |
 | `--base-model` | Override which model the planning agent uses |
+| `--no-gate` | Skip the clarification gate (questions + preview before task breakdown) |
 
 ## Flow
 
@@ -30,12 +31,34 @@ orchestrator.py :: Orchestrator.plan()
   → _fetch_quota() — {agent: {usage_pct, remaining_pct}} (graceful: {} on failure)
   → _fetch_routing_config() — GET /boards/{id}/routing-config/ (graceful: None on failure)
   → _build_available_agents(quota, routing_config)
-  → _build_plan_prompt(spec, plan_path, agents, quota, quick)
+
+  [CLARIFICATION GATE — default ON, skip with --no-gate]
+  Runs in ALL modes (interactive, auto, quiet) as a separate one-shot
+  dispatch BEFORE task breakdown:
+    → _build_clarification_prompt(spec, clarification_path, preview_path)
+    → _decompose(clar_prompt, ..., plan_path=clarification_path)
+      → agent writes clarification_<spec_id>.json (questions + summary)
+      → agent writes preview_<spec_id>.html (visual mockup)
+    → read clarification JSON from disk (graceful: empty defaults on failure)
+    → inject preview_path + preview_exists into clarification dict
+    → gate_callback(clarification) → CLI (_gate_interaction) displays:
+        - summary
+        - preview file path + ready/missing status
+        - questions (if any) with per-question input
+        - MANDATORY "Proceed with task breakdown? [y/N]" confirmation
+      → returns None → RuntimeError("Planning aborted at clarification gate")
+      → returns answers string → appended to spec for decomposition
+  Only after the nod does mode-specific task breakdown begin:
+    - Interactive: _run_interactive_plan (tmux/direct session)
+    - Auto/quiet: _decompose (streaming/spinner)
+
+  → _build_plan_prompt(spec, plan_path, agents, quota, quick, gate=interactive)
      → available agents JSON with capabilities, cost_tier, quota data
      → routing priority section
      → task schema + dependency + artifact coordination rules
      → instruction: "Write your final plan JSON to <plan_path>"
      → if quick: "Do NOT explore or read the codebase"
+     → if gate (interactive): CLARIFICATION PHASE section prepended
 
   [interactive + direct]
   interactive.py :: InteractivePlanSession._run_direct()

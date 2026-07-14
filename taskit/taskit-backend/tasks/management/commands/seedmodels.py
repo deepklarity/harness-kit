@@ -24,18 +24,21 @@ class Command(BaseCommand):
             help="Print what would be done without making changes",
         )
         parser.add_argument(
-            "--prune", action="store_true",
+            "--no-prune", action="store_true",
             help=(
-                "Make the JSON authoritative: drop models not in the JSON, "
-                "and clear available_models for agent users not in the JSON. "
-                "User records are preserved (to keep FK integrity for historical tasks)."
+                "Merge instead of prune: preserve user-added models and retired "
+                "agent Users not in the JSON. Default (task #135) is to make "
+                "agent_models.json authoritative — models not listed are "
+                "dropped from the active agent's available_models, and agent "
+                "Users not in the JSON are deactivated (is_active=False). "
+                "User records are preserved (FK integrity for historical tasks)."
             ),
         )
 
     def handle(self, *args, **options):
         filepath = Path(options["file"])
         dry_run = options["dry_run"]
-        prune = options["prune"]
+        prune = not options["no_prune"]
 
         with open(filepath) as f:
             data = json.load(f)
@@ -45,10 +48,19 @@ class Command(BaseCommand):
             self.stderr.write("No agents found in seed file.")
             return
 
-        for agent_name, agent_data in agents.items():
+        # Agents flagged "retired" stay in the JSON (so historical cost
+        # lookups keep resolving their pricing) but must never be seeded or
+        # reactivated as agent Users — they're excluded from seeded_emails so
+        # the prune step below deactivates them like any other stale agent.
+        active_agents = {
+            name: info for name, info in agents.items() if not info.get("retired")
+        }
+        seeded_emails = {f"{name}@odin.agent" for name in active_agents.keys()}
+
+        for agent_name, agent_data in active_agents.items():
             email = f"{agent_name}@odin.agent"
             color = agent_data.get("color", "#6366f1")
-            new_models = agent_data.get("models", [])
+            new_models = [m for m in agent_data.get("models", []) if not m.get("retired")]
 
             if dry_run:
                 mode = "PRUNE" if prune else "MERGE"
@@ -66,6 +78,12 @@ class Command(BaseCommand):
             # Ensure role is AGENT (can't rely on save() auto-detection
             # because the role field defaults to HUMAN, making the check falsy)
             user.role = "AGENT"
+
+            # Mark agents listed in the seed file as active. A User that was
+            # previously deactivated (retired) and is now back in the JSON
+            # gets reactivated by this re-seed (task #135 acceptance).
+            if not user.is_active:
+                user.is_active = True
 
             # Populate agent-level metadata from seed file
             user.cost_tier = agent_data.get("cost_tier", "medium")
@@ -102,10 +120,13 @@ class Command(BaseCommand):
 
             removed = 0
             if prune:
-                # JSON is authoritative — drop anything not in the seed file
+                # Default (task #135): JSON is authoritative — drop anything not
+                # in the seed file. Models absent here would otherwise leak
+                # into routing/UI even though agent_models.json is the single
+                # source of truth.
                 removed = len(existing_by_name)
             else:
-                # Default: preserve user-added models not in the seed file
+                # --no-prune: preserve user-added models not in the seed file.
                 for leftover in existing_by_name.values():
                     merged.append(leftover)
 
@@ -118,22 +139,26 @@ class Command(BaseCommand):
                 f"{verb} {email} — {len(merged)} models total ({added} new, {updated} updated{suffix})"
             ))
 
-        # Prune mode also cleans up agents not in the JSON (e.g. removed providers).
-        # We clear available_models rather than deleting the User to preserve any
-        # FK references from historical tasks/comments/history rows.
+        # Prune mode also deactivates agents not in the JSON (e.g. retired
+        # providers like qwen, gemini). We set is_active=False rather than
+        # deleting the User to preserve FK references from historical
+        # tasks/comments/history rows. Active-lineup queries filter on
+        # is_active=True so retired agents vanish from routing/UI but
+        # remain in history lookups.
         if prune:
-            seeded_emails = {f"{name}@odin.agent" for name in agents.keys()}
             stale_agents = User.objects.filter(
                 email__endswith="@odin.agent",
+                is_active=True,
             ).exclude(email__in=seeded_emails)
 
             for stale in stale_agents:
                 if dry_run:
-                    self.stdout.write(f"[DRY RUN/PRUNE] Would clear models on {stale.email}")
+                    self.stdout.write(
+                        f"[DRY RUN/PRUNE] Would deactivate {stale.email} (no longer in seed file)"
+                    )
                     continue
-                if stale.available_models:
-                    stale.available_models = []
-                    stale.save()
-                    self.stdout.write(self.style.WARNING(
-                        f"Cleared models on {stale.email} (no longer in seed file)"
-                    ))
+                stale.is_active = False
+                stale.save(update_fields=["is_active"])
+                self.stdout.write(self.style.WARNING(
+                    f"Deactivated {stale.email} (no longer in seed file)"
+                ))

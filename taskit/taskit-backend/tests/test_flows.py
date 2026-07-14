@@ -26,11 +26,21 @@ class TestTaskLifecycle(APITestCase):
 
     def setUp(self):
         super().setUp()
-        self.board = self.make_board()
+        # allow_project_root_execution=True: these tests exercise status
+        # lifecycle transitions, not the dispatch-readiness gate (see
+        # tests/test_dispatch_validation.py), so specless tasks here should
+        # still be able to reach IN_PROGRESS.
+        self.board = self.make_board(allow_project_root_execution=True)
         self.user = self.make_user()
 
     def test_full_lifecycle_todo_to_done(self):
-        """A task goes through TODO → IN_PROGRESS → REVIEW → DONE."""
+        """A task goes through TODO → IN_PROGRESS → REVIEW → TESTING → DONE.
+
+        REVIEW auto-advances to TESTING via the post-merge hook when no
+        reflection reviewer agent is configured (test environment has no
+        AGENT users). The lifecycle is still TODO→IN_PROGRESS→REVIEW→TESTING→DONE;
+        the human-facing kanban treats REVIEW and TESTING as adjacent QA gates.
+        """
         # Create task via API (records "created" history)
         resp = self.make_task_via_api(self.board, title="Implement auth")
         task_id = resp.data["id"]
@@ -41,14 +51,31 @@ class TestTaskLifecycle(APITestCase):
             "updated_by": "lead@test.com",
         }, format="json")
 
-        # Move through statuses
-        for new_status in ("IN_PROGRESS", "REVIEW", "DONE"):
-            resp = self.client.put(f"/tasks/{task_id}/", {
-                "status": new_status,
-                "updated_by": "alice@test.com",
-            }, format="json")
-            self.assertEqual(resp.status_code, 200)
-            self.assertEqual(resp.data["status"], new_status)
+        # Move through statuses. REVIEW → TESTING happens automatically via
+        # the auto-advance hook, so the PUT to REVIEW already shows TESTING
+        # when no reviewer agent is available.
+        resp = self.client.put(f"/tasks/{task_id}/", {
+            "status": "IN_PROGRESS",
+            "updated_by": "alice@test.com",
+        }, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "IN_PROGRESS")
+
+        resp = self.client.put(f"/tasks/{task_id}/", {
+            "status": "REVIEW",
+            "updated_by": "alice@test.com",
+        }, format="json")
+        self.assertEqual(resp.status_code, 200)
+        # No reviewer agent → REVIEW auto-advances to TESTING in the same call.
+        self.assertEqual(resp.data["status"], "TESTING")
+
+        # TESTING → DONE is the final manual hop.
+        resp = self.client.put(f"/tasks/{task_id}/", {
+            "status": "DONE",
+            "updated_by": "alice@test.com",
+        }, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "DONE")
 
         # Verify complete history trail
         resp = self.client.get(f"/tasks/{task_id}/history/")
@@ -56,9 +83,14 @@ class TestTaskLifecycle(APITestCase):
         field_names = [h["field_name"] for h in history]
         self.assertIn("created", field_names)
         self.assertIn("assignee_id", field_names)
-        # Status changed 3 times
+        # Status changed 4 times: IN_PROGRESS, REVIEW (auto-advanced), TESTING, DONE
         status_changes = [h for h in history if h["field_name"] == "status"]
-        self.assertEqual(len(status_changes), 3)
+        self.assertEqual(len(status_changes), 4)
+        new_values = sorted([h["new_value"] for h in status_changes])
+        self.assertEqual(
+            new_values,
+            ["DONE", "IN_PROGRESS", "REVIEW", "TESTING"],
+        )
 
     def test_status_change_records_old_and_new(self):
         task = self.make_task(self.board, status="TODO")
@@ -1036,7 +1068,6 @@ class TestOdinIntegrationFlow(APITestCase):
         }, format="json")
         self.client.put(f"/tasks/{task1_id}/", {
             "status": "DONE",
-            "result": "Schema designed: users table with JWT claims",
             "updated_by": "odin@system.com",
         }, format="json")
 
@@ -1047,7 +1078,6 @@ class TestOdinIntegrationFlow(APITestCase):
         }, format="json")
         self.client.put(f"/tasks/{task2_id}/", {
             "status": "DONE",
-            "result": "JWT middleware implemented in auth/middleware.py",
             "updated_by": "odin@system.com",
         }, format="json")
 
@@ -1058,7 +1088,6 @@ class TestOdinIntegrationFlow(APITestCase):
         }, format="json")
         self.client.put(f"/tasks/{task3_id}/", {
             "status": "FAILED",
-            "result": "3 of 10 tests failing: test_refresh_token, test_expiry, test_revocation",
             "updated_by": "odin@system.com",
         }, format="json")
 

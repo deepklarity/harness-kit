@@ -4,6 +4,7 @@ export const VERDICT_STYLES: Record<string, { bg: string; text: string; border: 
     PASS: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
     NEEDS_WORK: { bg: 'bg-orange-500/10', text: 'text-orange-300', border: 'border-orange-500/20' },
     FAIL: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20' },
+    ERROR: { bg: 'bg-rose-500/15', text: 'text-rose-300', border: 'border-rose-500/30' },
 };
 
 /** Tailwind prose classes for rendering markdown in reflection report sections. */

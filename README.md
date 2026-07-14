@@ -1,32 +1,40 @@
-
-
 # Harness Kit
 
-**Human + AI task orchestration that compounds.**
-
-A kit for building with AI agents — not just the orchestration, but also the engineering patterns around it. TDD-first execution, structured debugging, knowledge compounding, cost-aware delegation. Each run makes the next one better.
-
-Note:
-- This is currently experimental and is not sandboxed. We plan to add sanboxes and worktrees soon.
-- This is WIP and a lot of things are rough around the edges and can break. This is an early sketch of the patterns and orchestration we find useful for building with AI agents, not a polished product. We are sharing it in this state to get feedback and contributions from the community as we build it out.
-- Code is ephemeral. Fork it, rewrite it, build your own from scratch. The value is in the patterns and the orchestration, not the code itself. 
-- The system is only as good as the specs you feed it. Spend time on the spec, not the code.
-- We urge everyone to try out all other tools and as many as possible to find what works. This is just one approach that works for us, not the One True Way.
-
-
----
-<br>
-
-
-
+**Harness Kit is an open-source harness-engineering toolkit for building software with AI coding agents** — a multi-agent orchestration CLI (odin), a task board with proof-of-work (taskit), and a set of engineering patterns we call **Pattern Engineering**: TDD-first execution, structured root-cause analysis, knowledge compounding, and cost-aware delegation. Work runs as a dependency graph across whichever agents you have (Claude, Codex, GLM, MiniMax, and more), and every task carries its evidence on the board.
 
 https://github.com/user-attachments/assets/52352361-99ed-4c07-83c8-a28dc3b3ba5c
 
+## Pattern Engineering Quickstart
 
+You don't have to install anything to get value from this repo. Point your coding agent (Claude Code, Codex, Cursor — any of them) at the Quickstart and it will audit your repo, score it, and adopt the practices you approve:
 
+```bash
+# from your project directory
+git clone https://github.com/deepklarity/harness-kit.git ../harness-kit
+```
 
----
+Then paste this into your agent:
 
+```text
+Read ../harness-kit/docs/Quickstart.md and follow it: audit this repo,
+show me the scored report, and adopt what I approve.
+```
+
+The agent runs a read-only audit across eleven areas (agent entrypoints, testing discipline, knowledge compounding, verify gates, …), writes a scored report you can read in two minutes, and waits for your yes/no on each adoption. Full flow: [`docs/Quickstart.md`](docs/Quickstart.md).
+
+## Run the full kit
+
+The board, the orchestrator, and the sandbox — a fresh clone to a merged sample task in about ten minutes:
+
+```bash
+git clone https://github.com/deepklarity/harness-kit.git
+cd harness-kit
+./dev.sh          # backend :9100, dashboard :9200, workers
+```
+
+Then follow [`QUICKSTART.md`](QUICKSTART.md) — it checks your provider with `odin doctor` and runs a small spec end to end: plan → sandbox → review → merge. Full guided tour of the UI: [`docs/walkthrough.md`](docs/walkthrough.md).
+
+**Status: experimental.** We ship with it daily, and edges are rough. Platform notes and known gaps are in [`docs/guides/forkd-setup.md`](docs/guides/forkd-setup.md) and each project's README — read those before filing an issue.
 
 ## What it looks like
 
@@ -39,161 +47,69 @@ https://github.com/user-attachments/assets/52352361-99ed-4c07-83c8-a28dc3b3ba5c
 ![DAG — dependency graph with wave execution](screenshots/task-breakdown.png)
 *DAG view — tasks decomposed into dependency waves*
 
-![Just like humans collaborate](screenshots/task-detail.png)
-*Task detail — agent output, comments, evidence*
-
----
-
-## Quickstart
-Start the backend, frontend and celery worker with:
-```bash
-./dev.sh
-```
-
-Harness-Kit has a cli tool needed to execute agents.
-```
-cd odin/
-pip install -e . 
-```
-
-Opens at [localhost:9200](http://localhost:9200).
-
-First run creates a venv, installs everything, migrates SQLite, and seeds agent users (~60s). After that, starts in ~3s. `Ctrl-C` stops all services.
-
-Some sample specs are present in odin/sample_specs/web/apps/pomodoro_timer.md These could be run via odin cli.
-
----
-
 ## What's inside
 
 | Directory | What it does |
 | :--- | :--- |
-| `./`| All the best practices & skills are present here |
 | [`odin/`](odin/README.md) | CLI for multi-agent orchestration — plan, assign, execute, reflect |
-| [`taskit/`](taskit/README.md) | Task board UI + Django API (kanban, DAG view, timeline, analytics) |
+| [`taskit/`](taskit/README.md) | Task board UI + API — kanban, DAG view, timeline, cost analytics |
 | [`harness_usage_status/`](harness_usage_status/README.md) | CLI to check AI provider quotas |
-
----
+| [`.claude/skills/`](docs/_INDEX.md) | Portable skills: RCA, compounding, mock-first, audits — usable in any repo |
+| [`docs/`](docs/_INDEX.md) | Patterns, testing process, flow traces, adoption checklist |
 
 ## How it works
 
-**DAG orchestration.** Work decomposes into dependency graphs. Tasks execute in waves — independent work runs in parallel, dependent work waits. Failed task stops its dependents. No wasted compute.
+- **Everything is a task.** Work decomposes into a dependency graph; independent tasks run in parallel, dependent ones wait. Assembly, review, and testing are tasks too — no hardcoded stages.
+- **Cheapest capable agent.** The planner suggests assignments from cost, quota, and capability. You override when you want.
+- **Proof of work.** Every task carries evidence: agent output, screenshots, cost, duration. The board is the audit trail.
+- **Reflection loops.** Plan → execute → review → adjust. A reviewer model checks work before it merges; failures get root-caused, not retried blindly.
+- **Agents ask, humans decide.** When an agent is unsure it asks a question on the board and waits, instead of guessing.
+- **Provider agnostic.** Agents are swappable behind a harness interface.
 
-**Suggestive defaults.** The planner recommends agent assignments based on cost, quota and capability. You override when you want. Everything works out of the box. It looks at remaining quota between Claude and Codex and decides to assign to Codex because it's cheaper and has enough quota, but you can override and assign to Claude if you want. The system is smart, but the human is in control.
+The 20 tenets behind these choices: [`odin/docs/philosophy.md`](odin/docs/philosophy.md).
 
-**Reflection loops.** Plan → execute → review → adjust → execute again. Not one-shot. Human taste is the filter at every checkpoint. Council of LLMs is also there to reflect and catch mistakes before they become expensive. The system is designed for iteration and improvement, not "get it right the first time."
+## What is Pattern Engineering?
 
-**Proof of work.** Every task carries evidence: agent output, comments, duration, cost. The board is the audit trail. One shouldn't have to go outside this board to understand what happened and why. MCPs already configured for web & mobile apps. Get the proof of work in the board itself.
-
-**Cost-aware delegation.** Cheapest capable agent is the default. No overkill.
-
-**AskUserQuestions.** When in doubt, ask rather than guess. Agents can ask questions during execution using MCP and wait for human input.
-
-**Provider agnostic.** Claude, Gemini, Codex, Qwen, Kilo Code — agents are swappable behind a harness interface.
-
----
-
-## Engineering patterns
-
-The orchestration is half of it. The other half is the engineering discipline encoded around it — patterns we've found actually work when building with AI agents, not just for running them.
-
-Generating code is the easy part. The hard part is knowing whether it's correct, maintaining it when you've forgotten how it works, and not repeating the same mistakes across sessions. These patterns address the hard part:
+Our methodology inside harness engineering: instead of one-off prompts, encode the engineering discipline around agents as reusable, compounding patterns. Where context engineering shapes what a model sees and spec-driven development shapes what it builds, Pattern Engineering shapes **how the work is engineered** — and makes each run improve the next.
 
 | Pattern | What it encodes |
 | :--- | :--- |
-| **[Red/green TDD](https://simonwillison.net/guides/agentic-engineering-patterns/red-green-tdd/)** | Test-writing agents receive *only* behavioral requirements, never implementation details. Tests must fail before implementation starts. The boundary is structural, not a suggestion. |
-| **Mock-first development** | For complex features, mock the UI first, get human acceptance on the experience, then deepen layer by layer. Don't build the backend for an interface nobody validated. |
-| **Structured RCA** | 7-step root cause analysis: reproduce → locate → hypothesis → failing test → fix → verify → document. No jumping to fixes. |
-| **[Compound what you know](https://github.com/EveryInc/compound-engineering-plugin)** | Every solved problem becomes a searchable doc. Every debugging session can become a breadcrumb trace. Agents and future humans search this before re-exploring from scratch. |
-| **[Cognitive debt](https://simonwillison.net/guides/agentic-engineering-patterns/interactive-explanations/) paydown** | Breadcrumb analysis and linear walkthroughs keep code explainable. If you can't trace how a feature works end-to-end, you've taken on debt. |
-| **Loop audits** | Can an AI agent autonomously debug this area? If not, find the gaps — missing docs, missing tools, missing logs — before they bite you. |
-| **Slop audits** | Codebase hygiene — dead code, misplaced files, security issues. AI output meets the same bar as human code. |
+| **Red/green TDD** | Test-writing agents get only behavioral requirements, never implementation. Tests must fail before implementation starts — the boundary is structural. |
+| **Mock-first development** | Mock the UI, get human acceptance, then deepen layer by layer. |
+| **Structured RCA** | Reproduce → locate → hypothesis → failing test → fix → verify → document. No jumping to fixes. |
+| **Knowledge compounding** | Every solved problem becomes a searchable pattern doc; every debugging session can become a flow trace. Agents search these before re-exploring. |
+| **Loop and slop audits** | Can an agent debug this area alone? Is the codebase clean? Scheduled checks with scored reports. |
 
-These are implemented as skills in `.claude/skills/` and documented in the CLAUDE.md files throughout the repo. They're not locked to this kit — take the patterns even if you don't use the orchestration.
+These live as skills in `.claude/skills/` and transfer to any repo — that's what the [Pattern Engineering Quickstart](#pattern-engineering-quickstart) installs.
 
+## FAQ
 
----
+**How is this different from Spec Kit or spec-driven development?**
+Spec-driven development covers writing the spec. Harness Kit covers what happens after: decomposing the spec into a task graph, routing tasks to the cheapest capable agent, sandboxed execution, review, merge, and the evidence trail — plus the patterns that make the next spec cheaper.
+
+**Do I need the whole kit?**
+No. The patterns and skills adopt into any repo via the Quickstart with nothing installed. The board + orchestrator are the optional second step.
+
+**Which agents does it work with?**
+Claude Code, Codex, GLM and MiniMax (via opencode), and others behind a common harness interface. One authenticated provider is enough to start.
+
+**Is my code sent anywhere?**
+Only to the AI providers you configure. The kit itself runs locally: SQLite, local services, sandboxed task execution in microVMs.
+
 ## Motivation
 
-We built this for ourselves. It encodes how we are actually (are figuring out) working and developing AI agents — [current tenets](odin/docs/philosophy.md) we arrived at by shipping, not theorizing. It's opinionated at some places, because that's what makes it useful for us.
+Most AI tooling is one-shot: you prompt, you get output, nothing accumulates. We built Harness Kit so work accumulates — spec runs produce reflections, debugging becomes searchable traces, solved problems compound into patterns. The system gets better because the context gets richer, not just because models do.
 
-The thing we kept coming back to: most AI tooling is one-shot. You prompt, you get output, you move on. Nothing accumulates.
-
-*"Why doesn't it remember what we just said?"*
-*"Why does it keep making the same mistake?"*
-*"Just maybe this one extra prompt will fix it..."*
-
-We built Harness Kit so that work accumulates. Spec runs produce reflections. Debugging sessions become breadcrumb docs. Solved problems get compounded into searchable knowledge. The system gets smarter because the *context* gets richer, not just because the models get better.
-
-It works today — we ship with it daily. But the vision is bigger than where it is now, and each week we find ways to wire things tighter, compound more, waste less.
-
-**The value isn't in any single feature — it's in the engineering patterns encoded into the system:**
-
-- Writing code is cheap now. Writing *good* code — tested, proven, explainable — is the actual constraint. The kit is built around that distinction.
-- Quality of the spec you start with matters more than the LLM's ability to "understand" a vague prompt
-- Decompose work into dependency graphs, parallelize what's independent, serialize what depends
-- TDD is structural, not aspirational — test-writing agents have no implementation context, so they *can't* skip the red phase
-- Hoard what you learn — every solved problem becomes a searchable doc, every debugging session a breadcrumb trace. [Compound on what you know](https://simonwillison.net/guides/agentic-engineering-patterns/hoard-things-you-know-how-to-do/) so agents (and future you) don't rediscover from scratch
-- Delegate to the cheapest capable agent — don't burn $0.15/call tokens on $0.01 work
-- Keep **humans in control** with the board as the explainable source of truth
-
-Fork it, rewrite it, build your own from scratch. Bespoke software that fits how *you* work is easier to build than ever.
-
----
-
----
-
-## Philosophy
-
-Full version: [`odin/docs/philosophy.md`](odin/docs/philosophy.md). The short version:
-
-> **Everything is a task.** Assembly, review, testing — all tasks with dependencies. No hardcoded stages.
->
-> **Cheapest capable agent.** Don't use a $0.15/call model when $0.01 works.
->
-> **No slop.** AI output meets the same bar as human code.
->
-> **Taste is the filter.** LLMs produce volume. Humans curate.
->
-> **The board is truth.** If it's not on the board, it didn't happen.
-
----
+Code is ephemeral here: fork it, rewrite it, build your own. The value is in the patterns and the orchestration. And spend your time on the spec — the system is only as good as what you feed it.
 
 ## Resources
 
-We keep collecting useful references as we discover them — engineering patterns, orchestration tools, agent harnesses, and write-ups that have shaped how we think about building with AI. Some good ideas.
-
-| Resource | Note |
-| :--- | :--- |
-| [Agentic Engineering Patterns](https://simonwillison.net/guides/agentic-engineering-patterns/) | Simon Willison's guide (a work in continual progress)— red/green TDD, hoarding knowledge, cognitive debt. Overlaps heavily with what this kit encodes. |
-| [StrongDM Software Factory](https://factory.strongdm.ai/) | Software factory approach |
-| [Compound Engineering Plugin](https://github.com/EveryInc/compound-engineering-plugin) | Plan → execute → review → document workflow for Claude Code |
-| [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) | AI-powered kanban boards |
-| [Composio Agent Orchestrator](https://github.com/ComposioHQ/agent-orchestrator) | Multi-agent orchestration framework |
-| [Agent of Empires](https://github.com/njbrake/agent-of-empires) | Game-based agent coordination |
-| [Visual Explainer](https://github.com/nicobailon/visual-explainer) | Agent skill that turns terminal output into styled HTML with Mermaid diagrams, dark/light themes, and real typography |
-| [Pi.dev](https://pi.dev) | Minimal coding harness with plugins |
-| [DeepWiki](https://deepwiki.com/) | Understand codebases better |
-
-Many people are building in this space. We are excited to see how it evolves.
-
----
+Writing that shaped this kit: [Agentic Engineering Patterns](https://simonwillison.net/guides/agentic-engineering-patterns/) (Simon Willison), [Understanding is the new bottleneck](https://www.geoffreylitt.com/2026/07/02/understanding-is-the-new-bottleneck.html) (Geoffrey Litt), [The unreasonable effectiveness of HTML](https://claude.com/blog/using-claude-code-the-unreasonable-effectiveness-of-html) (Anthropic), [Compound Engineering Plugin](https://github.com/EveryInc/compound-engineering-plugin), [StrongDM Software Factory](https://factory.strongdm.ai/).
 
 ## Roadmap
 
-- **Git Worktree** — Branch per spec, use worktrees for task isolation and easy cleanup
-- **Mobile app** — Push notifications for MCP questions and task updates
-- **Inbox-style view** — Like Cursor agents / Antigravity. Human only sees what is relevant to them, not the full board
-- **More MCP & tools** — Better reflection, debugging and compounding on learnings
-- **Analytics & reporting** — Agent performance, cost, and bottleneck insights
-- **More skills** — Common workflows (debugging, code review, documentation) out of the box or customizable
-- **Digital Twins** — Slack & Gmail for agents to communicate, spawn information collection subagents
-- **Streamed agent output** — Faster feedback loops and better debugging on UI
-- **More encoded patterns** — Linear walkthroughs for cognitive debt paydown, automated proof-of-work validation, pattern-level analytics (which engineering patterns are actually improving outcomes)
+The living roadmap, scorecard, and backlog are in [`docs/fable_roadmap/`](docs/fable_roadmap/fable_roadmap.md) — the kit plans and builds itself through its own board, and grades itself against [`SCORECARD.md`](docs/fable_roadmap/SCORECARD.md). Near-term focus: onboarding and getting-started, a rethought human inbox, scheduled self-audits, running on more machines.
 
---------
+---
 
-## Troubleshooting:
-If you get stuck, check the [troubleshooting guide](TROUBLESHOOTING.md) for common issues and fixes.
-
-Built by [deepklarity.ai](https://deepklarity.ai).
+Built by [deepklarity.ai](https://deepklarity.ai). [MIT licensed](LICENSE). Contributions and issue reports welcome — and try other tools too; this is one approach that works for us, not the One True Way.

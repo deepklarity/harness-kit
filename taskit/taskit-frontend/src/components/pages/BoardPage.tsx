@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { format, subDays } from 'date-fns';
-import type { Board, Label, Member, Task } from '@/types';
+import type { Board, InboxSnapshot, Label, Member, Task } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
 import { usePolling } from '@/hooks/usePolling';
 import { DependencyBoardView } from '@/components/DependencyBoardView';
@@ -16,9 +16,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ClipboardList, Columns3, Calendar, GitBranch } from 'lucide-react';
+import { AlertOctagon, ArrowRight, ClipboardList, Columns3, Calendar, GitBranch } from 'lucide-react';
 import type { TaskSearchResult } from '@/services/integration/IntegrationService';
 import { didLeaveProgressStatus, markExecutionTransitionUnseen } from '@/utils/unseenStatusTransitions';
+import { mergeKanbanRefresh, appendLoadMore, collapseColumn } from '@/utils/kanbanColumns';
+import type { KanbanColumnsState } from '@/utils/kanbanColumns';
+
+const KANBAN_PAGE_SIZE = 20;
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -70,7 +74,7 @@ function ViewToggle({ value, onChange }: { value: BoardView; onChange: (v: Board
 
 // ─── List View ──────────────────────────────────────────────
 
-const STATUS_OPTIONS = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'EXECUTING', 'REVIEW', 'TESTING', 'DONE', 'FAILED'];
+const STATUS_OPTIONS = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'EXECUTING', 'REVIEW', 'TESTING', 'DONE', 'FAILED', 'CANCELED'];
 const PRIORITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 function splitParam(value: string | null): string[] {
@@ -314,7 +318,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
     const service = useService();
 
     const [searchParams, setSearchParams] = useSearchParams();
-    const [columnData, setColumnData] = useState<Record<string, { tasks: Task[]; totalCount: number; loadedCount: number }>>({});
+    const [columnData, setColumnData] = useState<KanbanColumnsState>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [pollingEnabled, setPollingEnabled] = useState(false);
@@ -322,6 +326,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
 
     const [loadingMore, setLoadingMore] = useState<Record<string, boolean>>({});
     const hasLoadedOnce = useRef(false);
+    const lastScopeRef = useRef<string | null>(null);
 
     const tasks = useMemo(() => Object.values(columnData).flatMap(c => c.tasks), [columnData]);
     const columnTotalCounts = useMemo(() => {
@@ -356,12 +361,26 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
                 date_from: dateFrom,
                 date_to: dateTo,
             });
+
+            if (!silent) {
+                // Foreground load (mount, board/date switch, explicit refresh):
+                // the response is authoritative — nothing to reconcile.
+                const next: KanbanColumnsState = {};
+                for (const [status, col] of Object.entries(response.columns)) {
+                    next[status] = { tasks: col.tasks, totalCount: col.totalCount, loadedCount: col.tasks.length };
+                }
+                setColumnData(next);
+                return;
+            }
+
+            // Silent poll refresh: merge by id so it never truncates tasks a
+            // "Show more" load already fetched (the server only ever returns
+            // page 1 per lane on a plain kanban fetch).
             setColumnData(prev => {
                 const allPrevTasks = Object.values(prev).flatMap(c => c.tasks);
                 const previousStatusById = new Map(allPrevTasks.map(task => [task.id, task.currentStatus]));
                 const transitionTs = Date.now();
-                const next: Record<string, { tasks: Task[]; totalCount: number; loadedCount: number }> = {};
-                for (const [status, col] of Object.entries(response.columns)) {
+                for (const col of Object.values(response.columns)) {
                     for (const task of col.tasks) {
                         const previousStatus = previousStatusById.get(task.id);
                         if (!previousStatus) continue;
@@ -369,12 +388,8 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
                             markExecutionTransitionUnseen(task.id, transitionTs);
                         }
                     }
-                    // On silent poll, preserve expanded columns by requesting at least as many as previously loaded
-                    const prevLoaded = prev[status]?.loadedCount ?? 0;
-                    const loadedCount = Math.max(col.tasks.length, prevLoaded);
-                    next[status] = { tasks: col.tasks, totalCount: col.totalCount, loadedCount };
                 }
-                return next;
+                return mergeKanbanRefresh(prev, response.columns);
             });
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to load kanban');
@@ -383,9 +398,15 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         }
     }, [service, selectedBoard, dateFrom, dateTo]);
 
+    const scopeKey = `${selectedBoard ?? ''}|${dateFrom ?? ''}|${dateTo ?? ''}`;
+
     useEffect(() => {
         let active = true;
-        const silent = hasLoadedOnce.current;
+        // A board or date-range switch must never merge with the previous
+        // scope's tasks — force a hard replace even if we've polled before.
+        const scopeChanged = lastScopeRef.current !== scopeKey;
+        lastScopeRef.current = scopeKey;
+        const silent = hasLoadedOnce.current && !scopeChanged;
         void load({ silent }).finally(() => {
             if (active) {
                 setPollingEnabled(true);
@@ -395,7 +416,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         return () => {
             active = false;
         };
-    }, [load, refreshKey]);
+    }, [load, refreshKey, scopeKey]);
 
     usePolling(() => load({ silent: true }), {
         enabled: pollingEnabled,
@@ -448,28 +469,18 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
         setLoadingMore(prev => ({ ...prev, [status]: true }));
         try {
             const currentTasks = columnData[status]?.tasks ?? [];
-            const result = await service.fetchKanbanMore(selectedBoard, status, currentTasks.length, 20, {
+            const result = await service.fetchKanbanMore(selectedBoard, status, currentTasks.length, KANBAN_PAGE_SIZE, {
                 date_from: dateFrom,
                 date_to: dateTo,
             });
-            setColumnData(prev => {
-                const col = prev[status];
-                if (!col) return prev;
-                const merged = [...col.tasks, ...result.tasks];
-                return { ...prev, [status]: { tasks: merged, totalCount: result.totalCount, loadedCount: merged.length } };
-            });
+            setColumnData(prev => appendLoadMore(prev, status, result));
         } finally {
             setLoadingMore(prev => ({ ...prev, [status]: false }));
         }
     }, [selectedBoard, loadingMore, columnData, service, dateFrom, dateTo]);
 
     const handleShowLess = useCallback((status: string) => {
-        setColumnData(prev => {
-            const col = prev[status];
-            if (!col) return prev;
-            const trimmed = col.tasks.slice(0, 20);
-            return { ...prev, [status]: { tasks: trimmed, totalCount: col.totalCount, loadedCount: 20 } };
-        });
+        setColumnData(prev => collapseColumn(prev, status, KANBAN_PAGE_SIZE));
     }, []);
 
     const visibleTasks = useMemo(() => {
@@ -706,6 +717,7 @@ export function BoardPage({
     onDeleteTask,
     onCreateSpec,
 }: BoardPageProps) {
+    const service = useService();
     const [searchParams, setSearchParams] = useSearchParams();
     const rawView = searchParams.get('view');
     const view: BoardView = rawView === 'list' || rawView === 'timeline' || rawView === 'dependencies' ? rawView : 'kanban';
@@ -723,8 +735,38 @@ export function BoardPage({
         }, { replace: true });
     }, [setSearchParams]);
 
+    // Failed-task banner: a board must never sit silent. Fetch the
+    // inbox's failed-task count for the current board so the banner can
+    // surface the failures prominently and link operators to the inbox.
+    const [failedInbox, setFailedInbox] = useState<InboxSnapshot | null>(null);
+    useEffect(() => {
+        if (!selectedBoard) {
+            setFailedInbox(null);
+            return;
+        }
+        let cancelled = false;
+        service.fetchInbox(selectedBoard)
+            .then(result => { if (!cancelled) setFailedInbox(result); })
+            .catch(() => { if (!cancelled) setFailedInbox(null); });
+        return () => { cancelled = true; };
+    }, [service, selectedBoard, refreshKey]);
+    const failedCount = failedInbox?.counts?.failed_tasks ?? 0;
+
     return (
         <div>
+            {failedCount > 0 && (
+                <Link
+                    to={`/stats?board=${selectedBoard}`}
+                    className="mb-4 flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300 transition-colors hover:bg-red-500/15"
+                >
+                    <AlertOctagon className="size-4 shrink-0" />
+                    <span className="font-medium">
+                        {failedCount} failed task{failedCount === 1 ? '' : 's'}
+                    </span>
+                    <span className="text-red-300/70">— open inbox</span>
+                    <ArrowRight className="ml-auto size-4 shrink-0" />
+                </Link>
+            )}
             <div className="flex items-center gap-4 mb-5">
                 <h2 className="text-lg font-semibold tracking-tight">Board</h2>
                 <ViewToggle value={view} onChange={setView} />

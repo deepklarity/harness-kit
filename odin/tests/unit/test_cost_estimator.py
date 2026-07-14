@@ -35,7 +35,7 @@ class TestLoadPricingTable:
             pytest.skip("agent_models.json not found")
 
         table = load_pricing_table(str(agent_models_path))
-        input_price, output_price = table["claude-sonnet-4-6"]
+        input_price, output_price = table["claude-sonnet-5"]
         assert input_price == 3.00
         assert output_price == 15.00
 

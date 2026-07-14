@@ -1,162 +1,96 @@
 # Reflection Loop
 
+Trigger: a task enters REVIEW (auto), or a user clicks "Reflect" (manual, on REVIEW/DONE/FAILED).
+End state: a `ReflectionReport` with verdict `PASS` / `NEEDS_WORK` / `FAIL`; on the auto path the task then merges + advances to TESTING, reworks, or FAILs after 3 attempts.
+
 ## Manual reflection
 
-Trigger: User clicks "Reflect" on a task in REVIEW, DONE, or FAILED status
-End state: ReflectionReport created with verdict (PASS/NEEDS_WORK/FAIL), comment posted on task. No status change.
-
 ```
-[User action]
 POST /tasks/:id/reflect/ {reviewer_agent, reviewer_model}
 
-views.py :: TaskViewSet.reflect()
+views.py :: TaskViewSet.reflect()          (~3501)
   → validates task.status in (REVIEW, DONE, FAILED)
   → creates ReflectionReport(status=PENDING)
   → execute_reflection.delay(report.id)
 
-dag_executor.py :: execute_reflection(report_id)  [Celery task]
+dag_executor.py :: execute_reflection(report_id)   [Celery]  (~1203)
   → report.status = RUNNING
-  → resolves working_dir (task metadata > spec metadata > env)
   → subprocess: odin reflect <task_id> --report-id <id> --model <model> --agent <agent>
+    (timeout DAG_EXECUTOR_REFLECTION_TIMEOUT_SECONDS, default 1800s)
 
-cli.py :: reflect(task_id, report_id, model, agent)
-  → reflection.py :: reflect_task()
-    → PATCH /reflections/:id/ status=RUNNING, assembled_prompt=<prompt>
-    → GET /tasks/:id/detail/ → gather context (title, description, execution output, comments, deps)
-    → build_reflection_prompt(context) → structured audit prompt
-    → harness.execute(prompt) → reviewer agent runs (300s timeout, read-only mode)
-    → parse_reflection_report(output) → {quality_assessment, slop_detection, improvements, agent_optimization, verdict, verdict_summary}
-    → PATCH /reflections/:id/ status=COMPLETED, sections=..., verdict=...
+reflection.py :: reflect_task()            (~553)
+  → PATCH /reflections/:id/ status=RUNNING, assembled_prompt=<prompt>
+  → GET /tasks/:id/detail/ → assemble context (see DETAILS.md §4: comments, proof, execution output, deps)
+  → build_reflection_prompt(context) → structured read-only audit prompt
+  → harness.execute(prompt) → reviewer runs read-only (read_only_workspace=True)
+  → parse_reflection_report(output) → sections + verdict
+  → PATCH /reflections/:id/ status=COMPLETED, sections=…, verdict=…
 
-views.py :: ReflectionReportViewSet.partial_update()
-  → saves report fields
-  → if COMPLETED + has verdict_summary:
-    → creates TaskComment(type=REFLECTION) on task
-    → content: "**Reflection: <VERDICT>**\n\n<verdict_summary>"
-    → attachments: [{type: "reflection", report_id, verdict}]
+views.py :: ReflectionReportViewSet.partial_update()   (~3566)
+  → saves report fields, posts TaskComment(type=REFLECTION) on COMPLETED+summary
 ```
 
-Manual flow does NOT change task status. Reflection is advisory only.
+Manual reflection on a REVIEW task follows the same verdict → merge/rework dispatch as the auto path below (it is the same `partial_update` handler). On DONE/FAILED tasks it is advisory (no eligible transition).
 
 ---
 
-## Auto-reflection with retry loop (implemented)
+## Auto-reflection with retry loop
 
-Trigger: Task transitions from EXECUTING → REVIEW via DAG executor
-End state: Task reaches TESTING (reflection passed) or FAILED (3 failed attempts)
+Trigger: a task transitions to REVIEW.
+End state: TESTING (passed, after merge) or FAILED (3 completed attempts without a PASS).
 
 ### State machine
 
 ```
-EXECUTING
-  ↓ (agent completes work, exit 0)
-REVIEW
-  ↓ (auto-trigger: _trigger_auto_reflection)
-  ↓ (reflection runs via odin reflect)
-  │
-  ├─ verdict=PASS → TESTING
-  │    → downstream tasks can proceed (TESTING is in COMPLETED_STATUSES)
-  │
-  ├─ verdict=NEEDS_WORK or FAIL, completed_count < 3
-  │    → _maybe_reassign_on_quota_failure(task, report)
-  │      [quota detected] → find alternative AGENT on board → update assignee + model_name
-  │      [not quota]      → no reassignment, keeps current agent
-  │    → REVIEW → IN_PROGRESS
-  │    → fires execution strategy (DAG picks up on next poll, now with new agent if reassigned)
-  │    → agent reworks, pushes for REVIEW again
-  │    → cycle repeats
-  │
-  ├─ verdict=NEEDS_WORK or FAIL, completed_count >= 3 → FAILED
-  │    → "Task failed after 3 reflection attempts without passing"
+EXECUTING ──(agent completes, exit 0)──▶ REVIEW
+                                           │  _trigger_auto_reflection(task)  (views.py ~277)
+                                           ▼  odin reflect runs
+                              ┌────────────┴─────────────┐
+                       verdict PASS               verdict NEEDS_WORK / FAIL
+                              │                            │
+        _merge_task_on_reflection_pass(task)        completed_count …
+        → merge_task_on_reflection.delay()          ├─ ≥ 3 → REVIEW → FAILED
+        → merge task branch into spec branch        │        "failed after 3 reflection attempts"
+        → _advance_task_to_testing()                │
+        → REVIEW → TESTING                          └─ < 3 → _maybe_reassign_on_quota_failure()
+        → downstream unblocked                                → _record_rework_continuity()
+                                                              → REVIEW → IN_PROGRESS
+                                                              → re-trigger execution (gated on
+                                                                DAG_EXECUTOR_MAX_CONCURRENCY)
 ```
 
-### Auto-trigger
+Key change from older docs: **PASS no longer transitions REVIEW→TESTING directly** — it first merges the task branch (`_merge_task_on_reflection_pass` → Celery `merge_task_on_reflection`), then `_advance_task_to_testing` sets TESTING. And **`FAIL` is not advisory-only** — it shares the NEEDS_WORK retry/fail path (`verdict in ("NEEDS_WORK","FAIL")`).
 
-```
-dag_executor.py :: execute_single_task()
-  → exit_code 0 → task.status = REVIEW
-  → views.py :: _trigger_auto_reflection(task)
-    → checks for existing PENDING/RUNNING reflection (duplicate guard)
-    → creates ReflectionReport(
-        reviewer_agent="claude",
-        reviewer_model="claude-sonnet-4-5-20250929",
-        requested_by="system@taskit",
-        status=PENDING)
-    → execute_reflection.delay(report.id)
-```
+### Auto-trigger and the reviewer default
 
-### Post-reflection status transitions
+`_trigger_auto_reflection(task)` (`views.py` ~277) fires from three sites now, not one:
+- `dag_executor.py :: execute_single_task()` (~607) after REVIEW is set
+- `views.py` TaskViewSet update (~2862) when status → REVIEW
+- `views.py` execution_result endpoint (~3397) when the result moves a task to REVIEW
 
-```
-views.py :: ReflectionReportViewSet.partial_update()
-  → [existing] saves report, posts reflection comment
+**There is no hardcoded reviewer default.** `_trigger_auto_reflection` calls `_reflection_reviewer_defaults(board=task.board)` (~300), which resolves via `_find_first_available_reviewer()` (~123): it picks an available board-member agent from `REFLECTION_PREFERRED_AGENTS = ["gemini","codex","claude"]` (randomized among the enabled set, `random.shuffle` at ~194), using that agent's default (or first) `available_models` entry. A board `reflection_model` override or a forced-provider selection wins. Retired providers are filtered out (`is_active`, ~142). Older claims of a fixed `haiku` or `claude-sonnet-4-5-20250929` default are stale.
 
-  [verdict = PASS]
-  → task.status = REVIEW → TESTING
-  → TaskHistory(changed_by="system@taskit")
-  → downstream tasks can now proceed
-
-  [verdict = NEEDS_WORK, completed_count < 3]
-  → task.status = REVIEW → IN_PROGRESS
-  → TaskHistory(changed_by="system@taskit")
-  → if task has assignee: fires execution strategy (triggers re-execution)
-  → on re-execution: orchestrator injects latest NEEDS_WORK reflection as prompt context
-    (partial — see DETAILS.md §6 for known gaps in context injection)
-  → cycle repeats
-
-  [verdict = NEEDS_WORK, completed_count >= 3]
-  → task.status = REVIEW → FAILED
-  → TaskHistory + TaskComment: "Task failed after 3 reflection attempts"
-
-  [verdict = FAIL]
-  → no status change (same as manual reflection)
-```
+Two early exits merge directly without a reviewer: `skip_reflection` on task/board (~283), and "no reviewer available" (~301).
 
 ### Dependency gating
 
 ```
-taskit-backend/tasks/dependencies.py :: COMPLETED_STATUSES = {DONE, TESTING}
-odin/src/odin/dependencies.py        :: COMPLETED_STATUSES = {DONE, TESTING}
-
-Both files must agree. REVIEW is excluded because task may loop back to
-IN_PROGRESS via NEEDS_WORK. Only TESTING (reflection passed) and DONE
-unblock dependents.
+taskit-backend/tasks/dependencies.py :: COMPLETED_STATUSES = {DONE, TESTING}   (line 36) — REVIEW excluded (fable task 214)
+odin/src/odin/dependencies.py        :: COMPLETED_STATUSES = {DONE, TESTING}   (line 35) — REVIEW excluded (fable task 214)
 ```
 
-### Quota failure reassignment
+Both files must agree. Only a dependency in TESTING or DONE unblocks dependents — TESTING is the post-merge gate. A dep in REVIEW is *not* complete (branch pre-merge), so a dependent that started then would build against missing upstream code.
 
-When an agent fails due to quota/rate-limit exhaustion, the retry loop reassigns to a different agent before re-executing.
+### Quota-failure reassignment
 
-```
-views.py :: _maybe_reassign_on_quota_failure(task, report)
-  → _is_quota_failure() checks three sources:
-    1. report.quota_failure field (set by reflection reviewer, most reliable)
-    2. task.metadata["last_failure_type"] == "llm_call_failure" + quota keywords in reason
-    3. report.verdict_summary contains "quota", "rate limit", "429", etc.
-
-  [quota detected]
-  → _find_alternative_agent(task)
-    1. AGENT users on same board (BoardMembership), excluding current assignee
-    2. Fallback: any AGENT user in system, excluding current
-    3. No alternative: logs warning, posts comment, keeps same agent
-  → updates task.assignee + task.model_name
-  → TaskHistory for "assignee" and "model" changes
-  → TaskComment: "Quota/rate-limit failure detected for X. Reassigned to Y for retry."
-
-  [not quota]
-  → returns immediately, no changes
-```
-
-Quota keywords (searched case-insensitively):
-`"quota"`, `"rate limit"`, `"rate_limit"`, `"429"`, `"too many requests"`, `"usage limit"`, `"out of quota"`, `"quota exceeded"`, `"quota_failure"`
+The `< 3` rework branch calls `_maybe_reassign_on_quota_failure(task, report)` (~3676) before requeuing. As merged in **W3.11**, this verifies real usage via `harness_usage_status` before switching providers (429-with-headroom → backoff the same agent; genuinely exhausted → reassign to a same-cost-tier fallback). That flow has its own breadcrumb: **`../../quota-failover-reassignment/`** — see it rather than re-deriving the logic here.
 
 ### Loop counting
 
-Loop count is based on `ReflectionReport.objects.filter(task=task, status=COMPLETED).count()`.
-No metadata counter — the count comes from actual completed reports in the DB.
+Loop count = `ReflectionReport.objects.filter(task=task, status=COMPLETED).count()` (~3629). No metadata counter.
 
-| Event | completed_count | Status transition |
-|-------|-----------------|-------------------|
-| First execution → REVIEW → reflection runs | 1 | PASS → TESTING, or NEEDS_WORK → IN_PROGRESS |
-| Second execution → REVIEW → reflection runs | 2 | PASS → TESTING, or NEEDS_WORK → IN_PROGRESS |
-| Third execution → REVIEW → reflection runs | 3 | PASS → TESTING, or NEEDS_WORK → FAILED |
+| Event | completed_count | Transition |
+|-------|-----------------|-----------|
+| 1st reflection completes | 1 | PASS → merge → TESTING, or NEEDS_WORK/FAIL → IN_PROGRESS |
+| 2nd | 2 | same |
+| 3rd | 3 | PASS → merge → TESTING, or NEEDS_WORK/FAIL → FAILED |

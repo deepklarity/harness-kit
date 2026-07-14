@@ -69,12 +69,6 @@ class TestServerFragmentGemini:
         assert frag["mobile"]["command"] == "npx"
 
 
-class TestServerFragmentQwen:
-    def test_has_trust(self):
-        frag = server_fragment("qwen")
-        assert frag["mobile"]["trust"] is True
-
-
 class TestServerFragmentCodex:
     def test_returns_flag_list(self):
         frag = server_fragment("codex")

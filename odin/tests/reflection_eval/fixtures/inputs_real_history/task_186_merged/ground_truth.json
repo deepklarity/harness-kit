@@ -1,0 +1,6 @@
+{
+  "verdict": "PASS",
+  "summary": "Task 186 (Auto-promotion v1.5: RECOMMEND PROMOTE auto-advances TESTING->DONE (W4.2)) was merged after its reflection verdict passed \u2014 operator-asserted PASS is the ground truth.",
+  "fixture_category": "real_capture",
+  "source": ".proof/task-186/proof.md + merge diffstat"
+}

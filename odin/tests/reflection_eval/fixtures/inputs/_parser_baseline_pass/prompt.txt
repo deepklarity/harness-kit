@@ -1,0 +1,31 @@
+You are auditing a task executed by an AI agent.
+
+## CONSTRAINTS
+- READ-ONLY mode.
+- Output a single fenced JSON block as the canonical review.
+
+## TASK UNDER REVIEW
+Title: Add a small UI tweak (button color)
+Status: REVIEW
+Agent: claude (claude-sonnet-5)
+Duration: 30000ms | Tokens: 4,200
+
+## [CTX:description]
+Change the "Submit" button background from gray to primary blue.
+
+## [CTX:execution_result]
+The agent updated src/Button.tsx:21 to use --color-primary. Build passed; visual screenshot attached showing the blue button on the dashboard.
+
+## [CTX:comments] Comments & Proof
+- [proof] Build passes; screenshot attached.
+
+## YOUR REPORT
+
+Output a single fenced JSON block as the canonical review.
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification."
+}
+```

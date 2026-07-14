@@ -1,68 +1,70 @@
-"""Centralized dependency checking for odin orchestrator.
+"""Odin-side dependency helpers — thin wrappers over odin.dag.
 
-Same rules as taskit-backend/tasks/dependencies.py but operates on
-odin's Pydantic Task model, using a task_resolver callable for lookups.
+Adapts the shared DAG algorithms to odin's Pydantic Task model.
+The canonical logic lives in odin.dag; this module only supplies the
+odin-specific predicates and the task_resolver calling convention.
 
-Dependencies are always evaluated at runtime -- never cached. This ensures
-recovery works: if a human fixes a failed upstream task, the dependent
-automatically unblocks on the next check.
+Status semantics:
+    COMPLETED_STATUSES — statuses that count as "agent finished AND its
+    work has merged to the spec branch". Only DONE and TESTING qualify:
+    TESTING is the post-merge gate (the dep branch has been folded into
+    the spec branch), DONE is the fully landed terminal state.
+
+    REVIEW is intentionally NOT in this set: REVIEW means the agent has
+    produced mergeable work, but the branch has not been folded into the
+    spec branch yet. A dependent that started while the dep was in
+    REVIEW would fork its worktree from the spec branch and build
+    against missing upstream code — silently broken, or worse, passing
+    against stale state. Dependents stay WAITING until the dep reaches
+    TESTING.
+
+    CANCELED is also not in this set: it is terminal-neutral (operator
+    parked the work) and treated as "still unmet, not failed" — see
+    odin.dag.check_dep_status.
 """
 
 import logging
-from enum import Enum
 from typing import Callable, List, Optional
 
+from odin.dag import DepStatus, check_dep_status, detect_cycle, filter_ready
 from odin.taskit.models import Task, TaskStatus
+
+__all__ = [
+    "DepStatus",
+    "COMPLETED_STATUSES",
+    "check_deps",
+    "get_failed_deps",
+    "get_unmet_deps",
+    "get_ready_tasks",
+]
 
 logger = logging.getLogger(__name__)
 
-# Statuses that count as "agent finished its work" -- downstream can proceed.
-# Must match taskit-backend/tasks/dependencies.py COMPLETED_STATUSES.
-# REVIEW is excluded: task is still under reflection and may loop back to
-# IN_PROGRESS via NEEDS_WORK. Only TESTING (reflection passed) and DONE
-# unblock dependents.
-# TODO: DRY this — single source of truth shared between odin and taskit
-#       so definitions can't silently diverge again.
+# Statuses that count as "agent finished AND merged to spec branch".
+# Must stay in sync with taskit-backend/tasks/dependencies.py (single source
+# of truth for the *semantic*; both use odin.dag for the *algorithm*).
+# TESTING = dep branch folded into spec branch. DONE = final landed state.
+# REVIEW is excluded on purpose (see module docstring): agent may have
+# produced mergeable work but the branch is still pre-merge, so dependents
+# cannot yet build against it.
 COMPLETED_STATUSES = {TaskStatus.DONE, TaskStatus.TESTING}
-
-
-class DepStatus(str, Enum):
-    READY = "ready"       # All deps satisfied (or no deps)
-    WAITING = "waiting"   # Deps exist but not all completed yet
-    BLOCKED = "blocked"   # At least one dep is FAILED
 
 
 def check_deps(
     task: Task,
     task_resolver: Callable[[str], Optional[Task]],
 ) -> DepStatus:
-    """Single entry point -- returns the current dependency status.
+    """Return the current dependency status for a task.
 
     Uses task_resolver (typically task_manager.get_task) to look up
-    dependency tasks by ID. Always queries current state.
+    dependency tasks by ID. Always queries current state — never cached.
     """
-    if not task.depends_on:
-        return DepStatus.READY
-
-    any_failed = False
-    all_completed = True
-
-    for dep_id in task.depends_on:
-        dep = task_resolver(dep_id)
-        if not dep:
-            # Unknown dep -- treat as unmet (waiting)
-            all_completed = False
-            continue
-        if dep.status == TaskStatus.FAILED:
-            any_failed = True
-        if dep.status not in COMPLETED_STATUSES:
-            all_completed = False
-
-    if any_failed:
-        return DepStatus.BLOCKED
-    if all_completed:
-        return DepStatus.READY
-    return DepStatus.WAITING
+    return check_dep_status(
+        task.depends_on,
+        task_resolver,
+        is_complete=lambda t: t.status in COMPLETED_STATUSES,
+        is_failed=lambda t: t.status == TaskStatus.FAILED,
+    )
 
 
 def get_failed_deps(
@@ -82,7 +84,7 @@ def get_unmet_deps(
     task: Task,
     task_resolver: Callable[[str], Optional[Task]],
 ) -> List[str]:
-    """Return IDs of dependencies not yet in a completed status (DONE/TESTING)."""
+    """Return IDs of dependencies not yet in a completed status."""
     unmet = []
     for dep_id in task.depends_on:
         dep = task_resolver(dep_id)
@@ -100,11 +102,10 @@ def get_ready_tasks(
     Only considers tasks in TODO status (assigned, waiting to execute).
     Skips tasks with failed deps. Preserves input order.
     """
-    ready = []
-    for task in tasks:
-        if task.status != TaskStatus.TODO:
-            continue
-        status = check_deps(task, task_resolver)
-        if status == DepStatus.READY:
-            ready.append(task)
-    return ready
+    return filter_ready(
+        tasks,
+        task_resolver,
+        is_complete=lambda t: t.status in COMPLETED_STATUSES,
+        is_failed=lambda t: t.status == TaskStatus.FAILED,
+        is_candidate=lambda t: t.status == TaskStatus.TODO,
+    )

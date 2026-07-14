@@ -1,0 +1,257 @@
+You are auditing a task executed by an AI agent.
+
+
+## CTX — proof artifact (`.proof/task-193/proof.md`)
+
+The worker writes the canonical, complete proof file to `.proof/task-193/proof.md`
+in the worktree (read-only worktree mount; `cat`, `grep`, `head` freely).
+Raw suite outputs sit beside it as `.proof/task-193/<name>.txt` — full output, no
+cap. Read **`.proof/task-193/proof.md` first** — it is the primary, authoritative
+source for what the worker claims and where it lives.
+
+For each acceptance criterion, choose complete vs minimal context: read
+the full proof file once, then grep the section you need. Do NOT re-run
+the verify suites to fill gaps — the worker already attached raw outputs
+under `.proof/task-193/`. The proof path carries no truncation or size cap; read
+the full file when a criterion needs the full chain of evidence.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Work efficiently: batch independent file reads/greps into a single step, and do NOT re-read a file or re-run a search you have already done — each extra tool call is a full model round-trip.
+- **REPORT FORMAT: ONE fenced JSON block, then optionally a markdown rendering.** Your first non-blank line MUST be a single ```json ... ``` fence containing a JSON object with at minimum a `verdict` key. After the fence you MAY also emit the legacy `### Quality Assessment / ### Verdict` sections as a human-readable rendering of the same JSON — the JSON block is the source of truth, the rendering is for the board UI.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.** This task may have been attempted by multiple agents or models previously. Comments are separated by "--- CURRENT ATTEMPT ---" when prior attempts exist. Use earlier history for understanding context only — do NOT penalize the current agent for failures, quota issues, or code quality problems from previous agents/models. Your verdict must reflect solely the current agent's work.
+
+## TASK UNDER REVIEW
+Title: needs_human merge reconciliation (W4.9)
+Status: DONE
+Agent: claude ((historical))
+Duration: N/Ams | Tokens: N/A
+
+## [CTX:description] Task Description
+Fable roadmap task needs_human merge reconciliation (W4.9). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+
+## [CTX:execution_result] Execution Output
+Merge task 193: needs_human merge reconciliation (W4.9)
+
+Conflict resolution: kept both new helpers in worktree.py (is_task_merged
+from task 196, is_ancestor from task 193). Proof files that collided on
+shared paths moved to .proof/task-193/, spec side kept at shared paths.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+
+
+ .proof/backend_merge_tests.txt                     |  299 ++++++
+ .proof/gate_backend.txt                            |   22 +
+ .proof/gate_odin.txt                               |   21 +
+ .proof/odin_worktree_tests.txt                     |  145 +++
+ .proof/replay_177_183.py                           |   99 ++
+ .proof/replay_177_183.txt                          |   14 +
+ .proof/task-193/backend_full_suite.txt             | 1023 ++++++++++++++++++++
+ .proof/task-193/odin_full_suite.txt                |   52 +
+ .proof/task-193/proof.md                           |   96 ++
+ odin/src/odin/worktree.py                          |   12 +
+ odin/tests/unit/test_worktree.py                   |   37 +
+ taskit/taskit-backend/tasks/dag_executor.py        |  119 ++-
+ .../tests/test_merge_reconciliation.py             |  275 ++++++
+ 13 files changed, 2210 insertions(+), 4 deletions(-)
+
+
+## [CTX:comments] Comments & Proof
+--- CURRENT ATTEMPT ---
+Proof of work (committed at .proof/task-193/proof.md):
+
+# Task 193 — needs_human merge reconciliation
+
+## Problem
+
+When the merge agent flags a task `metadata.merge_status='needs_human'`
+(ambiguous conflict, watchdog escalation, or Celery broker failure) and the
+operator then resolves the conflict by hand, the merge commit lands on the
+spec branch but **nothing ever clears the flag**. The board shows phantom
+pending merges forever. Root problem: merge state is written once by the
+merge agent and never reconciled against git reality.
+
+## Fix (cause, not symptom)
+
+A reconciliation pass that re-checks each flagged task against git: if the
+task branch is now an ancestor of the spec branch, the merge happened and
+the flag is stale — clear it. It rides the **existing** periodic seam
+(`scan_pending_merges` / Celery Beat `merge-watchdog-scan`), not a new cron.
+
+The git primitive lives where all git operations live (odin's
+`WorktreeManager`); the orchestration lives beside the existing merge-status
+machinery (`tasks/dag_executor.py`).
+
+## Files changed
+
+| File | Change |
+|---|---|
+| `odin/src/odin/worktree.py` | Added `WorktreeManager.is_ancestor(ancestor, descendant)` — wraps `git merge-base --is-ancestor`; returns True only on exit 0 (any other exit = not merged / unknown ref, never a positive signal). |
+| `taskit/taskit-backend/tasks/dag_executor.py` | Added `reconcile_needs_human_merges()` — iterates `metadata__merge_status="needs_human"` tasks, clears the flag + records `merge_resolution` + drops `merge_error`/`merge_ambiguous_files` + posts one STATUS_UPDATE comment when `is_ancestor` is True. Wired into `scan_pending_merges()` (runs before the watchdog) so it uses the existing Beat schedule — no new cron. |
+| `taskit/taskit-backend/tests/test_merge_reconciliation.py` | New — 8 tests covering the full scenario matrix. |
+| `odin/tests/unit/test_worktree.py` | New `TestIsAncestor` — 3 tests for the git primitive (exit 0 / not-ancestor / missing-ref). |
+
+### What the reconciliation does per task
+
+For each task with `merge_status='needs_human'`:
+1. Resolve branch (`task/<spec>/<id>`) + spec branch (`spec/<spec_id>`) + WorktreeManager.
+2. If any is missing → skip (leave flagged, no crash).
+3. `wt.is_ancestor(branch, spec_branch)`:
+   - **True** → clear: `merge_status='merged'`, `merge_resolution='reconciled: branch merged on spec branch'`, drop `merge_error`/`merge_ambiguous_files`, post one STATUS_UPDATE comment.
+   - **False/other** → leave flagged (flag still accurate).
+4. Idempotent: once cleared, the task is no longer `needs_human`, so the next scan skips it (no duplicate comments).
+
+## Test-first waves (evidence)
+
+**Wave 1 (failing tests) → Gate → Wave 2 (implementation).** Tests were
+written first and confirmed to fail with `ImportError` / `AttributeError`
+before any implementation existed:
+- `test_merge_reconciliation.py`: 8 errors (function didn't exist) — `.proof/gate_backend.txt`
+- `test_worktree.py::TestIsAncestor`: 3 errors (method didn't exist) — `.proof/gate_odin.txt`
+
+## Scenario matrix (all pinned by tests)
+
+| # | Scenario | Test | Outcome |
+|---|---|---|---|
+| 1 | flagged + branch merged on spec | `test_reconciles_when_branch_merged_into_spec` | cleared → merged, resolution recorded, error fields dropped, exactly ONE comment |
+| 2 | flagged + branch NOT merged | `test_leaves_unmerged_branch_untouched` | untouched (status, metadata, comments unchanged) |
+| 3 | already merged | `test_already_merged_not_iterated` | not selected → no duplicate comment |
+| 4 | no WorktreeManager | `test_skips_when_no_worktree_manager` | skipped gracefully, no crash |
+| 5 | no branch on metadata | `test_skips_task_without_branch_metadata` | skipped |
+| 6 | seam wired | `test_scan_pending_merges_invokes_reconciliation` | periodic entry point calls reconciliation (no new cron) |
+| 7 | mixed tasks | `test_multiple_tasks_only_reconciled_one_touched` | only the merged task reconciled |
+| 8 | idempotent | `test_idempotent_across_scans` | two scans → exactly one comment |
+
+## Acceptance criteria — MET
+
+- **A fixture task flagged needs_human whose branch is merged gets reconciled exactly once** — scenario 1 + 8 (one comment across two scans).
+- **Unmerged stays flagged** — scenario 2.
+- **Suites green** — taskit-backend: 774/774 pass; odin: 1443 pass (1 pre-existing unrelated `test_mcp_config_staged_outside_guest_tmpfs` failure, confirmed failing on base via stash; my diff does not touch microsandbox/MCP).
+
+## Verify (historical replay)
+
+`.proof/replay_177_183.py` reproduces the 177/183 pattern against a **real**
+git repository using the actual `WorktreeManager.is_ancestor` (no mocks):
+
+- `task/sp_fable_w4/177` (merged by hand) → `is_ancestor=True` → **RECONCILE**
+- `task/sp_fable_w4/183` (divergent, never merged) → `is_ancestor=False` → **SKIP**
+
+Output: `.proof/replay_177_183.txt`
+
+## Build / compile
+
+- `python3 -m py_compile odin/src/odin/worktree.py` → OK
+- `python3 -m py_compile taskit/taskit-backend/tasks/dag_executor.py` → OK
+- `scripts/self_audit_diff.sh` → `duplicates=0 commented_blocks=0 verdict=clean`
+
+## How to run the tests
+
+```bash
+# odin primitive
+cd odin && python3 -m pytest tests/unit/test_worktree.py::TestIsAncestor -v
+
+# taskit reconciliation + regression
+cd taskit/taskit-backend && \
+  USE_SQLITE=True FIREBASE_AUTH_ENABLED=False \
+  PYTHONPATH="$PWD/../../odin/src:$PWD/../../harness_usage_status/src" \
+  python3 manage.py test tests.test_merge_reconciliation tests.test_merge_dispatch_watchdog
+```
+
+
+## [CTX:dependencies] Dependent Tasks
+No blocking dependencies.
+
+## [CTX:metadata] Task Metadata
+spec=sp_fable_w4/w5 task_id=193 status=DONE
+
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers. The JSON block
+is the source of truth for the parser; the markdown is a convenience
+rendering the parser will ignore if both are present.
+
+### Required JSON contract
+
+Your first non-blank line MUST be a fenced JSON block:
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification, the same one you'd put after ### Verdict.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason. Then defects (file:line).",
+  "slop_detection": "Specific AI slop found, or 'None.'",
+  "improvements": "Bullet list of up to 5 actionable items (what, where, why). 'None.' if clean.",
+  "agent_optimization": "Description clarity / model tier / token efficiency / prompt improvement.",
+  "quota_failure": "QUOTA_FAILURE: <agent_name> if the current attempt hit a quota/rate limit; otherwise 'None.'.",
+  "fix_list": ["targeted", "fix", "items", "for", "rework"]
+}
+```
+
+Rules:
+- `verdict` MUST be exactly `PASS`, `NEEDS_WORK`, or `FAIL` (uppercase). A
+  bare word with no review content (just "PASS" alone, or a verdict
+  keyword buried in CLI noise) is treated as a reviewer failure — the
+  system will NOT honor it. The JSON object must be the FIRST thing you
+  emit, complete and parseable, or your review will not be processed.
+  Do NOT skip the structured JSON just because the verdict is obvious;
+  emit the JSON with full sections, even if the verdict is PASS with
+  nothing else to flag.
+- `summary` is the one-sentence justification. It appears on the board
+  as the verdict summary. The "Evidence rules" below apply to it.
+- `fix_list` is REQUIRED for `NEEDS_WORK`: name the exact artifact or
+  change needed so the rework is scoped, not a blind redo. Empty list
+  `[]` is fine for `PASS` and `FAIL`.
+- `quality_assessment`, `slop_detection`, `improvements`,
+  `agent_optimization`, `quota_failure` are strings; default to
+  `"None."` when there's nothing to report.
+- Do NOT emit anything before the opening ```json fence. No
+  preamble, no narration, no permission requests, no conversational
+  text. The parser uses the JSON block as the first content and
+  anything before it is treated as noise.
+
+### Verdict rubric (applies to `verdict` in the JSON)
+
+Choose from what the evidence PROVES. Each rework round costs a full VM
+boot, environment rebuild, and tokens — so FAIL and NEEDS_WORK must be
+earned by substance, never spent on process trivia or invented rules.
+
+- PASS — every acceptance criterion is verifiably met and the work is
+  correct, safe, and builds/runs. Minor style or proof-formatting nits
+  do NOT block a PASS; put them in `improvements`.
+- NEEDS_WORK — the work is substantially correct but has a fixable
+  gap: a missing or truncated proof artifact, an unmet non-critical
+  criterion, or a process slip that does not make the code wrong. Pair
+  EVERY NEEDS_WORK with a TARGETED fix list (the `fix_list` field in
+  the JSON, or a list of items under "### Actionable Improvements" in
+  the rendering — name the exact artifact or change needed) so the
+  rework is scoped, not a blind redo.
+- FAIL — reserved for work that is WRONG, UNSAFE, or UNVERIFIABLE: it breaks the build or a downstream integration, corrupts state, crashes the orchestrator, contradicts a stated acceptance criterion, or supplies no evidence that the core behavior works. Also use FAIL for quota/resource exhaustion (justification must mention "quota" or "rate limit") so the system can reassign to a different agent.
+
+Evidence rules — apply these BEFORE choosing a verdict:
+- CITE OR DROP. Any claimed rule/policy/convention violation MUST quote the exact rule text and name the file it lives in (e.g. CLAUDE.md: "Never run ANY git stash command"). If you cannot quote and locate the rule, it does not exist for this review — you may NOT lower the verdict for it; raise it in `improvements` at most. A cited rule only counts if its stated scope actually covers this situation (a rule scoped to "shared repos / concurrent sessions" is not violated by an action inside the task's own isolated worktree). If a rule violation affects the verdict, include that exact citation in the report text.
+- A truncated, malformed, or missing proof artifact is a REQUEST, not a verdict. Name the specific artifact you need and ask for it (NEEDS_WORK at most). It only drives FAIL when it leaves the CORE behavior genuinely unverifiable AND no other evidence (code you can read, build output, comments) establishes correctness.
+- Judge the SUBSTANCE of the best available evidence. Tasks may span
+  several attempts; earlier attempts' partial numbers or
+  contradictions with history are NOT defects of the current work.
+- Formatting/completeness of proof comments is NOT a verdict criterion
+  when the underlying acceptance criteria are verifiably met; mention
+  formatting issues in `improvements` instead.
+- Comments authored by a human operator (non-agent email) are
+  authoritative context — do not contradict them.
+- Do not demand artifacts the environment cannot produce (e.g. an
+  ODIN-STATUS block when the run was concluded by an operator).
+
+### Optional markdown rendering (after the JSON block)
+
+After the JSON fence you MAY emit the legacy sections as a human-readable rendering of the same content. The parser uses the JSON as the source of truth and ignores the rendering, so emitting it is purely for the board UI. The rendering is OPTIONAL — the JSON block is sufficient on its own. The legacy section names, in order, are:
+
+- `### Quality Assessment`
+- `### Slop Detection`
+- `### Actionable Improvements`
+- `### Agent Optimization`
+- `### Quota / Resource Failure`
+- `### Verdict`

@@ -83,7 +83,7 @@ def test_parse_tokens_gemini_result_stats():
     assert parse_tokens(stream) == {"input_tokens": 9997, "output_tokens": 1}
 
 
-def test_parse_tokens_qwen_result_usage():
+def test_parse_tokens_result_usage():
     stream = '{"type":"result","usage":{"input_tokens":1234,"output_tokens":567,"cache_read_input_tokens":0}}'
     assert parse_tokens(stream) == {"input_tokens": 1234, "output_tokens": 567}
 
@@ -162,7 +162,7 @@ def test_append_csv_migrates_old_schema(tmp_path):
     csv_path = tmp_path / "speed_log.csv"
     csv_path.write_text(
         "run_id,timestamp,harness,model,wall_ms,exit_code,stdout_chars,stdout_lines,error\n"
-        "r0,2026-04-24T00:00:00+00:00,qwen,coder-model,4000,0,1400,3,\n"
+        "r0,2026-04-24T00:00:00+00:00,gemini,coder-model,4000,0,1400,3,\n"
     )
     new_row = Row(
         "r1", "2026-04-24T01:00:00+00:00", "claude", "m1", 1200, 0, 300, 12,

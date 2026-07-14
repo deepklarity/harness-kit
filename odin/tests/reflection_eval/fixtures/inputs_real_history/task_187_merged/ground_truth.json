@@ -1,0 +1,6 @@
+{
+  "verdict": "PASS",
+  "summary": "Task 187 (Wave-planning automation: draft dispatchable briefs from BACKLOG (W4.3)) was merged after its reflection verdict passed \u2014 operator-asserted PASS is the ground truth.",
+  "fixture_category": "real_capture",
+  "source": ".proof/task-187/proof.md + merge diffstat"
+}

@@ -218,7 +218,7 @@ class TestExecutionResultEndpoint(APITestCase):
                     },
                 },
                 "status": "DONE",
-                "updated_by": "minimax+MiniMax-M2.5@odin.agent",
+                "updated_by": "minimax+MiniMax-M3@odin.agent",
             },
             format="json",
         )
@@ -232,7 +232,7 @@ class TestExecutionResultEndpoint(APITestCase):
         comments = TaskComment.objects.filter(task=self.task)
         self.assertEqual(comments.count(), 1)
         comment = comments.first()
-        self.assertEqual(comment.author_email, "minimax+MiniMax-M2.5@odin.agent")
+        self.assertEqual(comment.author_email, "minimax+MiniMax-M3@odin.agent")
         self.assertIn("Completed in 12.3s", comment.content)
         self.assertIn("8,420 tokens", comment.content)
         self.assertIn("Completed successfully.", comment.content)
@@ -302,6 +302,54 @@ class TestExecutionResultEndpoint(APITestCase):
         self.assertIn("Failure type: llm_call_failure", comment.content)
         self.assertIn("Reason: Qwen API returned HTTP 429", comment.content)
         self.assertIn("Origin: orchestrator:task_execution", comment.content)
+
+    def test_truncation_names_real_finish_reason_and_tokens(self):
+        """A truncation failure carries the real finish reason + token counts.
+
+        The orchestrator enriches the generic "Likely the model truncated"
+        error with the concrete stream reason (e.g. finish_reason="length")
+        and token counts. The board comment must name both so diagnosis and
+        resume act on evidence, not a guess.
+        """
+        enriched_error = (
+            "Agent did not emit an ODIN-STATUS block. Likely the model "
+            "truncated mid-generation or the response terminated silently "
+            "(e.g. provider hit output cap, network drop, or unknown error). "
+            'Provider stream ended at finish_reason="length" (likely output '
+            "cap). with 40 output tokens · 1,200 input."
+        )
+        resp = self.client.post(
+            f"/tasks/{self.task.id}/execution_result/",
+            {
+                "execution_result": {
+                    "success": False,
+                    "raw_output": '{"type":"step_finish","part":{"reason":"length"}}',
+                    "error": enriched_error,
+                    "duration_ms": 45000.0,
+                    "agent": "glm",
+                    "metadata": {
+                        "usage": {"total_tokens": 1240, "input_tokens": 1200, "output_tokens": 40},
+                        "stream_summary": {
+                            "finish_reason": "length",
+                            "output_tokens": 40,
+                            "input_tokens": 1200,
+                        },
+                    },
+                },
+                "status": "FAILED",
+                "updated_by": "glm+glm-4.5@odin.agent",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+        comment = TaskComment.objects.filter(task=self.task).first()
+        # Token counts surface in the metrics line.
+        self.assertIn("40 out", comment.content)
+        self.assertIn("1,200 in", comment.content)
+        # The real finish reason replaces the generic truncation guess.
+        self.assertIn('finish_reason="length"', comment.content)
+        self.assertIn("40 output tokens", comment.content)
 
     def test_claude_jsonl_extraction(self):
         """Dirty Claude JSONL output is cleaned before comment."""
@@ -454,7 +502,7 @@ class TestExecutionResultEndpoint(APITestCase):
                     "metadata": {},
                 },
                 "status": "REVIEW",
-                "updated_by": "glm+zai-coding-plan/glm-4.7@odin.agent",
+                "updated_by": "glm+zai-coding-plan/glm-5.2@odin.agent",
             },
             format="json",
         )

@@ -53,6 +53,5 @@ Run each task with a different harness to verify MCP works across all agents:
 |------|---------|-------|
 | Task 1 | claude | sonnet-4-5 |
 | Task 2 | gemini | gemini-2.0-flash |
-| Task 3 | qwen | coder-model |
 
 For harnesses that don't support MCP natively (codex), verify graceful degradation — the agent should still work but won't ask questions.

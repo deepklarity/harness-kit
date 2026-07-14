@@ -23,8 +23,8 @@ from odin.mcps.taskit_mcp.config import (
     format_gemini,
     format_kilocode,
     format_opencode,
-    format_qwen,
     get_tool_names,
+    server_entry,
     server_name,
     tool_names,
 )
@@ -163,7 +163,6 @@ class TestApprovalMechanismPresent:
     @pytest.mark.parametrize("agent_name,approval_key", [
         ("claude", "--allowedTools"),
         ("gemini", "trust"),
-        ("qwen", "trust"),
         ("minimax", "permission"),
     ])
     def test_approval_mechanism_present(self, agent_name, approval_key):
@@ -216,6 +215,82 @@ class TestMapConsistency:
             assert agent in MCP_FORMATTERS, (
                 f"Agent '{agent}' in AGENTS_WITH_TOOL_APPROVAL but no formatter"
             )
+
+
+# ── agy MCP wiring (regression) ─────────────────────────────
+
+
+class TestAgyMcpWiring:
+    """agy (Google Antigravity) is the only confined provider that MUST be in
+    MCP_CONFIG_MAP to receive the TaskIt-MCP proof-of-work prompt injection.
+
+    Regression guard for BACKLOG item 3 (W3.6): agy was the lone confined
+    provider absent from the orchestrator's MCP_CONFIG_MAP, so the
+    proof-of-work prompt was suppressed for it (orchestrator.py gates on
+    ``agent_name in MCP_CONFIG_MAP``). Told to call ``taskit_add_comment``
+    it could not reach, agy spun up a subagent and hung to timeout (#147).
+    Wiring agy into the maps makes the prompt injection + config generation
+    fire, so agy can post start+proof comments like every other confined
+    agent.
+
+    agy is gemini-cli's successor and writes its state dir to ``~/.gemini``
+    (microsandbox.py::_CREDENTIAL_PATHS comment), so it shares the gemini
+    config mechanism — exactly analogous to minimax+glm sharing
+    ``opencode.json``.
+    """
+
+    def test_agy_in_mcp_config_map(self):
+        """agy must be registered with a config path so config generation runs."""
+        assert "agy" in MCP_CONFIG_MAP, (
+            "agy missing from MCP_CONFIG_MAP — without it the orchestrator "
+            "suppresses the TaskIt-MCP proof-of-work prompt and writes no "
+            "MCP config for agy tasks."
+        )
+
+    def test_agy_uses_gemini_settings_path(self):
+        """agy reads .gemini/settings.json (gemini-cli successor, ~/.gemini state)."""
+        assert MCP_CONFIG_MAP["agy"] == ".gemini/settings.json", (
+            "agy must map to .gemini/settings.json — it is gemini-cli's "
+            "successor and writes state to ~/.gemini."
+        )
+
+    def test_agy_has_formatter(self):
+        """agy must have a formatter so init-time config generation covers it."""
+        assert "agy" in MCP_FORMATTERS, (
+            "agy missing from MCP_FORMATTERS — config generation cannot run"
+        )
+
+    def test_agy_formatter_produces_trust_true(self):
+        """agy's config must include trust:true for headless -p mode (gemini format)."""
+        env = {"TASKIT_URL": "http://test:8000"}
+        data = json.loads(MCP_FORMATTERS["agy"](env))
+        assert data["mcpServers"]["taskit"]["trust"] is True
+
+    def test_agy_server_entry_has_trust(self):
+        """server_entry('agy') must produce the gemini-style entry with trust.
+
+        The orchestrator's _generate_mcp_config() builds the config from
+        server_entry() (not the formatter), so the entry must carry trust:true
+        or the exec-time config will lack it even though init-time is correct.
+        """
+        env = {"TASKIT_URL": "http://test:8000"}
+        entry = server_entry("agy", env)
+        assert entry["taskit"]["trust"] is True, (
+            "server_entry('agy') must use the gemini server entry (trust:true), "
+            "not the claude default (no trust)."
+        )
+
+    def test_agy_has_tool_approval_entry(self):
+        """agy must appear in AGENTS_WITH_TOOL_APPROVAL (uses the 'trust' mechanism)."""
+        assert "agy" in AGENTS_WITH_TOOL_APPROVAL
+        assert AGENTS_WITH_TOOL_APPROVAL["agy"] == "trust"
+
+    def test_agy_config_propagates_env(self):
+        """agy's generated config must carry the TaskIt URL (guest-reachable)."""
+        env = {"TASKIT_URL": "http://192.168.1.5:8000", "TASKIT_TASK_ID": "7"}
+        data = json.loads(MCP_FORMATTERS["agy"](env))
+        assert data["mcpServers"]["taskit"]["env"]["TASKIT_URL"] == "http://192.168.1.5:8000"
+        assert data["mcpServers"]["taskit"]["env"]["TASKIT_TASK_ID"] == "7"
 
 
 # ── Formatter output validity ────────────────────────────────

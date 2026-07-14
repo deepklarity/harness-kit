@@ -47,7 +47,7 @@ When an agent finishes a task, it posts a comment:
 Completed in 12.3s · 8,420 tokens (5,200 in / 3,220 out)
 
 Assembled final HTML from both section files into mini_poem.html.
-The MiniMax and Qwen paragraphs are combined with proper HTML structure.
+The MiniMax paragraph is combined with proper HTML structure.
 ```
 
 The first line carries execution metrics — duration, token usage. The rest is the agent's summary. Together, this is the proof of work in human-readable form.

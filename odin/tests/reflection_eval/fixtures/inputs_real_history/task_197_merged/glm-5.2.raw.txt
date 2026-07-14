@@ -1,0 +1,35 @@
+I've reviewed the proof. The core fix is solid and well-evidenced; one secondary artifact is malformed.
+
+```json
+{
+  "verdict": "PASS",
+  "summary": "Promote-check `<id>` placeholder substitution fix is correct, well-tested (10 new tests), demoed end-to-end, and the odin suite is green (1504 passed); only the backend suite artifact is truncated (no summary line) but that suite is tangential to this odin-only change.",
+  "quality_assessment": "AC#1 (wave-4 brief promotes cleanly): MET — promote_check_demo.txt shows `RECOMMEND PROMOTE`, zero gaps, `.proof/task-203/` checked OK, `<unknown-placeholder>/report.md` dropped not held. AC#2 (suites green): PARTIALLY MET — odin suite verified green (1504 passed, 4 skipped, 1 pre-existing unrelated failure `test_mcp_config_staged_outside_guest_tmpfs` confirmed at odin_tests.txt:116); backend artifact shows only `Found 871 test(s).` collection line then a flood of captured Celery/Django app logs with NO `Ran 871 tests` / `OK` / `871 passed` summary line — claim of '871 passed, 0 failed' is not backed by cited artifact. Code quality: promote_check.py:127-187 fix is minimal, backward-compatible (task_id=None preserves old behavior), correctly separates raw extraction from substitution, adds dropped_artifacts surfacing. auto_promote.py correctly left untouched (subprocess inheritance verified).",
+  "slop_detection": "None. Comments are substantive (e.g. promote_check.py:81-87 explains the wave-4 false-gap motivation for the placeholder list); no boilerplate, no AI smell.",
+  "improvements": "- Re-capture backend_tests.txt with the actual pytest/Django summary line (currently ends mid-Celery-log at line 1054 with no `Ran N tests` / `OK` / `N passed` line) — the '871 passed, 0 failed' claim is currently unverifiable from the cited artifact. - Consider scoping the proof's 'Backend + odin suites green' criterion to just the odin suite for odin-only changes, or capture the backend summary line explicitly via `pytest -q --no-header` to avoid log-noise swamping the summary.",
+  "agent_optimization": "Description was clear; agent correctly diagnosed root cause (literal placeholder parsed as path), chose the minimal fix (substitution + drop residue), and justified not touching auto_promote.py via the subprocess code path. No model-tier or token concerns.",
+  "quota_failure": "None.",
+  "fix_list": []
+}
+```
+
+### Quality Assessment
+- **AC#1 (promote-check resolves `<id>` placeholders)**: MET. `promote_check_demo.txt` shows task 203 with `.proof/task-<id>/` substituted → `.proof/task-203/` (OK), leftover `<unknown-placeholder>/report.md` dropped (logged, not a gap), final `RECOMMEND PROMOTE`, zero gaps.
+- **AC#2 (suites green)**: PARTIALLY MET. Odin suite verified green at `odin_tests.txt:116` (`1 failed, 1504 passed, 4 skipped`); the single failure (`test_mcp_config_staged_outside_guest_tmpfs`) is pre-existing and unrelated (pytest `tmp_path` under `/tmp/`, not `promote_check`). Backend artifact is malformed: `backend_tests.txt:1` shows `Found 871 test(s).` collection but the file ends mid-Celery-log at line 1054 with no `Ran N tests` / `OK` / `N passed` summary — the "871 passed, 0 failed" claim is not established by the cited artifact.
+- **Code quality**: `promote_check.py:127-187` is minimal, backward-compatible (`task_id=None` preserves old behavior), correctly separates raw extraction (`_extract_raw_artifact_paths`) from substitution+filter (`extract_artifact_paths`), and surfaces dropped paths via `PromotionReport.dropped_artifacts`. The 10 new tests in `test_promote_check.py` cover all three placeholder tokens, drop semantics, backward compat, mixed cases, and end-to-end gate behavior.
+
+### Slop Detection
+None. Comments are substantive (e.g. `promote_check.py:81-87` ties the placeholder list to the wave-4 false-gap incident) — no boilerplate, no AI smell.
+
+### Actionable Improvements
+- Re-capture `backend_tests.txt` retaining the test-runner summary line (e.g. `Ran 871 tests in Xs` / `OK`); current artifact truncates at Celery log line 1054 with no summary.
+- For odin-only changes, consider scoping the suite-green criterion to the odin suite, or pipe backend output through `pytest -q` so app-log noise doesn't swamp the summary.
+
+### Agent Optimization
+Description was clear; agent correctly diagnosed root cause, chose the minimal substitution+drop fix, and justified leaving `auto_promote.py` untouched via the subprocess code-path argument. No model-tier or token concerns.
+
+### Quota / Resource Failure
+None.
+
+### Verdict
+**PASS** — the core acceptance criterion (placeholder substitution in the promote gate) is verifiably met through code, 10 new tests, the odin suite (green), and the end-to-end demo. The truncated backend artifact is a proof-formatting gap on a tangential smoke check (this change has zero backend impact), not a correctness defect — flagged in improvements, not a blocker.

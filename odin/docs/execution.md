@@ -75,7 +75,6 @@ When following all tasks, output is prefixed with `[task_id:agent]`:
 
 ```
 [a1b2c3d4:gemini] Writing intro paragraph...
-[d4e5f6a1:qwen] Generating code scaffold...
 [a1b2c3d4:gemini] Done.
 ```
 
@@ -142,7 +141,7 @@ The normal flow:
 1. `odin plan --quick` (or `odin run`) bulk-moves assigned tasks to IN_PROGRESS
 2. Celery Beat fires `poll_and_execute` every 5 seconds
 3. Each IN_PROGRESS task is checked:
-   - Are all `depends_on` tasks DONE or REVIEW? (REVIEW = agent finished)
+   - Are all `depends_on` tasks in TESTING or DONE? (TESTING = dep merged to spec branch)
    - Is an assignee set?
    - Is there a concurrency slot available?
 4. Ready tasks transition to EXECUTING and `execute_single_task.delay()` fires
@@ -181,7 +180,9 @@ Generated data.csv with 100 rows.
 [original task description]
 ```
 
-- Only DONE and REVIEW tasks contribute upstream context
+- Only DONE and REVIEW tasks contribute upstream context — REVIEW covers
+  the gap before the dep's auto-advance to TESTING completes; by the time
+  exec_task() runs, the dep's comments have already been persisted.
 
 ### Agent Communication During Execution
 
@@ -205,7 +206,7 @@ In mock mode, debug comments are skipped.
 ### Key Design Decisions
 
 - **Polling > events**: Self-healing, no missed events, resilient to race conditions
-- **REVIEW counts as satisfied**: Downstream tasks can start while upstream awaits human review
+- **Merge-gated dispatch (TESTING, not REVIEW)**: Dependents stay WAITING until the upstream branch is folded into the spec branch. REVIEW means the agent produced mergeable work but the branch is still pre-merge — a dependent that started then would build against missing upstream code
 - **Block-don't-fail on dep failure**: Tasks with failed deps stay in place (never picked up) — human can fix and retry
 - **TODO is a human boundary**: The DAG executor never promotes TODO tasks. IN_PROGRESS is the dispatch signal — only explicit user/odin actions cross that boundary
 - **No skipping statuses**: Every transition follows the lifecycle: TODO → IN_PROGRESS → EXECUTING

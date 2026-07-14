@@ -127,7 +127,11 @@ class TestBoardCRUD(APITestCase):
                 "auto_init": False,
             }, format="json")
         self.assertEqual(resp.status_code, 201)
-        self.assertEqual(resp.data["working_dir"], str(Path(tmpdir).resolve()))
+        # Resolve both sides: macOS tempdirs live under /var, a symlink to
+        # /private/var, and the API stores the path without resolving symlinks.
+        self.assertEqual(
+            Path(resp.data["working_dir"]).resolve(), Path(tmpdir).resolve()
+        )
 
     def test_create_board_in_new_child_directory(self):
         with tempfile.TemporaryDirectory() as parent_dir:

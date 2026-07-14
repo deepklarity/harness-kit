@@ -2,13 +2,13 @@
 
 ## 1. Agent Metadata Seeding
 
-**File**: `taskit/taskit-backend/seedmodels/agent_models.json`
-**Migration**: `taskit/taskit-backend/boards/management/commands/seed_agents.py`
-**Triggered by**: `python manage.py seed_agents` (run once on DB setup)
+**File**: `taskit/taskit-backend/data/agent_models.json`
+**Migration**: `taskit/taskit-backend/tasks/management/commands/seedmodels.py`
+**Triggered by**: `python manage.py seedmodels` (run once on DB setup)
 
 Key logic:
 - JSON defines agents with metadata: name, display_name, cost_tier, capabilities, default_model, premium_model, etc.
-- `seed_agents` command creates User records (username = agent name, is_agent=True)
+- `seedmodels` command creates User records (username = agent name, is_agent=True)
 - Creates AgentProfile for each agent with metadata from JSON
 - Board creation flow calls `boards.models.Board.create_memberships()` to create BoardMembership records for all enabled agents
 
@@ -36,9 +36,9 @@ Data out: DB records (User, AgentProfile, BoardMembership per board)
 
 ## 2. Routing Config API Endpoint
 
-**File**: `taskit/taskit-backend/boards/views.py`
+**File**: `taskit/taskit-backend/tasks/views.py`
 **Endpoint**: `GET /boards/{id}/routing-config/`
-**Function**: `RoutingConfigView.get()` (line ~TBD)
+**Function**: `BoardViewSet.routing_config()`
 **Called by**: `odin/src/odin/orchestrator.py :: _fetch_routing_config()`
 
 Key logic:
@@ -217,9 +217,9 @@ Key logic:
 
 ## 9. Board Creation & Agent Membership
 
-**File**: `taskit/taskit-backend/boards/views.py`
-**Endpoint**: `POST /boards/`
-**Function**: `BoardViewSet.create()` (line ~TBD)
+**File**: `taskit/taskit-backend/tasks/views.py`
+**Endpoint**: `POST /api/boards/`
+**Function**: `BoardViewSet.create()`
 
 Key logic:
 - Creates Board record
@@ -231,14 +231,14 @@ Key logic:
 
 ## 10. Agent/Model Toggle (DB-backed)
 
-**File**: `taskit/taskit-backend/boards/views.py`
-**Endpoint**: `PATCH /boards/{id}/memberships/{membership_id}/`
-**Function**: `BoardMembershipViewSet.partial_update()` (line ~TBD)
+**File**: `taskit/taskit-backend/tasks/views.py`
+**Endpoint**: `PATCH /api/boards/{id}/agents/{agent_name}/`
+**Function**: `BoardViewSet.agents_toggle()`
 
 Key logic:
-- Updates BoardMembership.is_active (agent on/off for this board)
-- Updates BoardMembership.preferred_model (override agent default)
-- Changes immediately visible via `GET /boards/{id}/routing-config/`
+- Updates BoardMembership (creates/deletes membership record to enable/disable agent)
+- Updates preferred model states via `BoardViewSet.agents_model_toggle()` endpoint
+- Changes immediately visible via `GET /api/boards/{id}/routing-config/`
 - No config.yaml writes — state lives in DB only
 
 ---
@@ -288,14 +288,14 @@ Data in: `task.assignees[0]`, `task.metadata.selected_model`
 
 ## 13. Frontend — Board Settings (Agent/Model Toggle)
 
-**File**: `taskit/taskit-frontend/src/components/BoardSettingsModal.tsx`
+**File**: `taskit/taskit-frontend/src/components/ManageMembersModal.tsx`
 
 Key logic:
-- Fetches board memberships via GET `/boards/{id}/memberships/`
-- Renders toggle per agent: `is_active` (enable/disable agent for this board)
-- Renders model dropdown: `preferred_model` (override agent default)
-- On change, PATCHes `/boards/{id}/memberships/{membership_id}/`
-- Changes immediately propagate to next `GET /boards/{id}/routing-config/` call
+- Fetches board agents via GET `/api/boards/{id}/agents/`
+- Renders toggle per agent (enable/disable agent for this board)
+- Renders checkboxes/toggles per model to enable/disable specific models
+- On change, PATCHes `/api/boards/{id}/agents/{agent_name}/` or `/api/boards/{id}/agents/{agent_name}/models/{model_name}/`
+- Changes immediately propagate to next `GET /api/boards/{id}/routing-config/` call
 
-Data in: BoardMembership list
-Data out: PATCH requests to update is_active or preferred_model
+Data in: Board agent configs list
+Data out: PATCH requests to enable/disable agents or models

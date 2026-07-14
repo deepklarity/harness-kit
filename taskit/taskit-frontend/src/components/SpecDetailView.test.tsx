@@ -1,13 +1,16 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { SpecDetailView } from './SpecDetailView'
-import type { Spec, SpecComment } from '../types'
+import type { Spec, SpecComment, SpecStory } from '../types'
 import { MemoryRouter } from 'react-router-dom'
+
+const mockGetSpecStory = vi.fn()
 
 // Mock the ServiceContext
 vi.mock('../contexts/ServiceContext', () => ({
     useService: () => ({
         fetchSpecDetail: vi.fn(),
+        getSpecStory: mockGetSpecStory,
     }),
 }))
 
@@ -45,6 +48,74 @@ function makeSpec(overrides: Partial<Spec> = {}): Spec {
 function renderWithRouter(ui: React.ReactElement) {
     return render(<MemoryRouter>{ui}</MemoryRouter>)
 }
+
+function renderAtPath(ui: React.ReactElement, path: string) {
+    return render(<MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>)
+}
+
+function makeStory(): SpecStory {
+    return {
+        spec_id: 42,
+        odin_id: 'sp_042',
+        title: 'Build login page',
+        task_count: 1,
+        tasks: [{
+            task_id: 1,
+            title: 'Wire up login form',
+            status: 'DONE',
+            agent: 'claude',
+            model: 'claude-sonnet-4-5',
+            dispatched_at: '2026-07-01T10:00:00Z',
+            duration_ms: 12000,
+            tokens: { total: 500, input: 300, output: 200 },
+            cost_usd: 0.5,
+            redo_rounds: { count: 0, verdicts: [] },
+            merge: null,
+            latest_comment: null,
+            depends_on: [],
+            gaps: [],
+        }],
+    }
+}
+
+describe('SpecDetailView - Story tab', () => {
+    const noop = () => {}
+
+    it('renders the overview by default and the story timeline when ?view=story', async () => {
+        mockGetSpecStory.mockResolvedValue(makeStory())
+        const spec = makeSpec()
+        renderAtPath(
+            <SpecDetailView specId="42" spec={spec} onBack={noop} onTaskClick={noop} />,
+            '/specs/42?view=story'
+        )
+
+        await waitFor(() => expect(screen.getByText('Wire up login form')).toBeInTheDocument())
+        // Overview-only content (Cost Breakdown card) is not rendered in story view
+        expect(screen.queryByText('Cost Breakdown')).not.toBeInTheDocument()
+    })
+
+    it('defaults to overview when no ?view param is present', () => {
+        const spec = makeSpec()
+        renderAtPath(
+            <SpecDetailView specId="42" spec={spec} onBack={noop} onTaskClick={noop} />,
+            '/specs/42'
+        )
+        expect(screen.getByText('Cost Breakdown')).toBeInTheDocument()
+    })
+
+    it('switching to the Story toggle renders the story timeline', async () => {
+        mockGetSpecStory.mockResolvedValue(makeStory())
+        const spec = makeSpec()
+        renderAtPath(
+            <SpecDetailView specId="42" spec={spec} onBack={noop} onTaskClick={noop} />,
+            '/specs/42'
+        )
+
+        fireEvent.click(screen.getByRole('radio', { name: 'Story' }))
+
+        await waitFor(() => expect(screen.getByText('Wire up login form')).toBeInTheDocument())
+    })
+})
 
 describe('SpecDetailView - Planning Trace', () => {
     const noop = () => {}

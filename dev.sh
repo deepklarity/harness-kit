@@ -39,6 +39,12 @@ cleanup() {
     for pid in ${PIDS[@]+"${PIDS[@]}"}; do
         kill "$pid" 2>/dev/null || true
     done
+    # Kill-and-requeue policy (user decision): task sandboxes must not
+    # outlive their supervisor. Orphans risk double execution, zombie
+    # writes, and unbudgeted memory; the executor requeues their tasks.
+    # (Only reaches task VMs — the odin-agents/odinbuild images are files,
+    # not processes, and are untouched.)
+    pkill -f "microsandbox run" 2>/dev/null || true
     wait 2>/dev/null || true
     log "Done."
 }
@@ -60,54 +66,130 @@ if [ "$env_conflicts" -eq 1 ]; then
     echo ""
 fi
 
-# --- Provision (idempotent, each step skips if already done) ---
-
-if [ ! -f "$ROOT_DIR/.venv/bin/activate" ]; then
-    log "Creating virtual environment..."
-    python3 -m venv "$ROOT_DIR/.venv"
-fi
+# --- Provision (idempotent — shared with install.sh so the first-run
+#     story is the same in both paths; see scripts/lib/provision.sh) ---
 # shellcheck disable=SC1091
-source "$ROOT_DIR/.venv/bin/activate"
-
-REQ_HASH=$(md5 -q "$BACKEND_DIR/requirements.txt" 2>/dev/null || md5sum "$BACKEND_DIR/requirements.txt" | cut -d' ' -f1)
-REQ_STAMP="$ROOT_DIR/.venv/.requirements-hash"
-if [ ! -f "$REQ_STAMP" ] || [ "$(cat "$REQ_STAMP")" != "$REQ_HASH" ]; then
-    log "Installing backend deps..."
-    pip install -r "$BACKEND_DIR/requirements.txt" --quiet
-    echo "$REQ_HASH" > "$REQ_STAMP"
-fi
-
-# odin must install AFTER backend deps — installing requirements.txt first
-# ensures shared dependencies (httpx, pydantic, etc.) are resolved before
-# odin's editable install layers on top without conflicts.
-if ! python -c "from odin.worktree import WorktreeManager" 2>/dev/null; then
-    log "Installing odin..."
-    pip install -e "$ODIN_DIR" --quiet
-    # Verify — fail fast if install didn't work
-    python -c "from odin.worktree import WorktreeManager" || {
-        echo "ERROR: odin install failed. Run: pip install -e $ODIN_DIR"
-        exit 1
-    }
-fi
-
-PKG_HASH=$(md5 -q "$FRONTEND_DIR/package.json" 2>/dev/null || md5sum "$FRONTEND_DIR/package.json" | cut -d' ' -f1)
-PKG_STAMP="$FRONTEND_DIR/node_modules/.package-hash"
-if [ ! -f "$PKG_STAMP" ] || [ "$(cat "$PKG_STAMP")" != "$PKG_HASH" ]; then
-    log "Installing frontend deps..."
-    (cd "$FRONTEND_DIR" && npm install --silent)
-    echo "$PKG_HASH" > "$PKG_STAMP"
-fi
-
-# Migrations — always run (fast no-op when nothing changed)
-log "Checking migrations..."
-python "$BACKEND_DIR/manage.py" migrate --run-syncdb --verbosity 0
-
-# Seed agent users (idempotent — merges, never duplicates)
-python "$BACKEND_DIR/manage.py" seedmodels --verbosity 0 > /dev/null 2>&1 || true
-
-# Broker dirs
-mkdir -p "$BACKEND_DIR/.celery/out" "$BACKEND_DIR/.celery/processed" "$BACKEND_DIR/.celery/results"
+source "$ROOT_DIR/scripts/lib/provision.sh"
+provision_environment
 mkdir -p "$LOG_DIR"
+
+find_first_dir() {
+    for path in "$@"; do
+        expanded="${path/#\~/$HOME}"
+        if [ -d "$expanded" ]; then
+            printf '%s\n' "$expanded"
+            return 0
+        fi
+    done
+    return 1
+}
+
+ensure_forkd_tap_if_available() {
+    if [ "${FORKD_SETUP_TAP:-auto}" = "0" ]; then
+        return 0
+    fi
+
+    local scripts_dir="${FORKD_SCRIPTS_DIR:-}"
+    if [ -z "$scripts_dir" ]; then
+        scripts_dir="$(find_first_dir ~/forkd-poc/forkd/scripts /usr/local/share/forkd/scripts /opt/forkd/scripts 2>/dev/null || true)"
+    fi
+    if [ -z "$scripts_dir" ] || [ ! -f "$scripts_dir/host-tap.sh" ]; then
+        return 0
+    fi
+
+    local tap="${FORKD_TAP:-forkd-tap0}"
+    if ip link show "$tap" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    log "Creating forkd tap device ($tap)..."
+    sudo bash "$scripts_dir/host-tap.sh"
+}
+
+ensure_forkd_tap_if_available
+
+# Forkd browser snapshot provisioning — setup-time only, never per task.
+# Set FORKD_PROVISION_BROWSER=0 to skip on machines that do not use forkd/chrome-devtools.
+if [ "${FORKD_PROVISION_BROWSER:-auto}" != "0" ] && [ -x "$ROOT_DIR/scripts/provision_forkd_browser.sh" ]; then
+    log "Checking forkd browser snapshot..."
+    if ! "$ROOT_DIR/scripts/provision_forkd_browser.sh" --if-configured; then
+        warn "forkd browser snapshot provisioning failed."
+        warn "Stopping dev startup so chrome-devtools proof tasks do not fail later in the UI."
+        warn "Set FORKD_PROVISION_BROWSER=0 only if you intentionally want to run without forkd browser proof."
+        exit 1
+    fi
+fi
+
+find_first_executable() {
+    for path in "$@"; do
+        expanded="${path/#\~/$HOME}"
+        if [ -x "$expanded" ]; then
+            printf '%s\n' "$expanded"
+            return 0
+        fi
+    done
+    return 1
+}
+
+start_forkd_controller_if_available() {
+    if [ "${FORKD_START_CONTROLLER:-auto}" = "0" ]; then
+        return 0
+    fi
+
+    local controller="${FORKD_CONTROLLER_BIN:-}"
+    if [ -z "$controller" ]; then
+        controller="$(command -v forkd-controller 2>/dev/null || true)"
+    fi
+    if [ -z "$controller" ]; then
+        controller="$(find_first_executable ~/forkd-poc/bin/forkd-controller ~/bin/forkd-controller 2>/dev/null || true)"
+    fi
+    if [ -z "$controller" ]; then
+        if [ "${FORKD_START_CONTROLLER:-auto}" = "1" ]; then
+            echo "forkd-controller not found" >&2
+            exit 1
+        fi
+        return 0
+    fi
+
+    local controller_url="${FORKD_CONTROLLER_URL:-http://127.0.0.1:8889}"
+    local browser_tag="${FORKD_BROWSER_SNAPSHOT_TAG:-odin-node22-4g-cli-browser}"
+    if curl -fsS "$controller_url/v1/snapshots" >/dev/null 2>&1; then
+        if [ "${FORKD_PROVISION_BROWSER:-auto}" != "0" ] && [ -d "/var/lib/forkd/snapshots/$browser_tag" ] && ! curl -fsS "$controller_url/v1/snapshots/$browser_tag/info" >/dev/null 2>&1; then
+            warn "forkd-controller is already running but does not know browser snapshot $browser_tag."
+            warn "Stop the old forkd-controller and rerun ./dev.sh so the refreshed /var/lib/forkd/state.json is loaded."
+            exit 1
+        fi
+        info "forkd-controller already running at $controller_url"
+        return 0
+    fi
+
+    local bind_addr="${FORKD_CONTROLLER_BIND:-127.0.0.1:8889}"
+    local snapshot_root="${FORKD_SNAPSHOT_ROOT:-/var/lib/forkd/snapshots}"
+    local audit_log="${FORKD_AUDIT_LOG:-/tmp/odin-forkd-controller-audit.log}"
+    log "Starting forkd-controller at $controller_url..."
+    sudo -E "$controller" serve \
+        --bind "$bind_addr" \
+        --snapshot-root "$snapshot_root" \
+        --audit-log "$audit_log" \
+        > "$LOG_DIR/forkd-controller.log" 2>&1 &
+    PIDS+=($!)
+
+    for _ in $(seq 1 40); do
+        if curl -fsS "$controller_url/v1/snapshots" >/dev/null 2>&1; then
+            info "forkd-controller ready"
+            return 0
+        fi
+        sleep 0.25
+    done
+
+    warn "forkd-controller did not become ready."
+    warn "See $LOG_DIR/forkd-controller.log"
+    tail -40 "$LOG_DIR/forkd-controller.log" 2>/dev/null || true
+    exit 1
+}
+
+start_forkd_controller_if_available
+
 
 # --- Start ---
 
@@ -115,12 +197,69 @@ mkdir -p "$LOG_DIR"
 export CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS:-http://localhost:$FRONTEND_PORT}"
 export VITE_HARNESS_TIME_API_URL="${VITE_HARNESS_TIME_API_URL:-http://localhost:$BACKEND_PORT}"
 export VITE_INSTANCE="${INSTANCE}"
+# Dedicated merge queue (must be set before backend/celery import settings):
+# a merge is a 10s git job; on the shared pool it waits behind ~26-min
+# sandbox executions (observed 12-min merge latency). settings.py routes
+# merge_task_on_reflection to this queue; a threads worker serves it below.
+export MERGE_QUEUE_NAME="${MERGE_QUEUE_NAME:-merges}"
+# Executor concurrency: 4 slots fit since per-agent VM RAM dropped to
+# 2048-3072 MiB (profiled; 3x3072+1x2048 + 6GB OS reserve < 18GB host).
+export DAG_EXECUTOR_MAX_CONCURRENCY="${DAG_EXECUTOR_MAX_CONCURRENCY:-4}"
+# macOS can't read /proc/meminfo, so the sandbox RAM budget is unbounded
+# unless set explicitly. 12 GiB leaves ~6 for OS + backend + celery + UI on
+# this 18 GiB host. VMs are 2-3 GiB each (see .odin/config.yaml), but the
+# budget accounts the 3 GiB honest cap per spawn.
+export SANDBOX_MEMORY_BUDGET_MIB="${SANDBOX_MEMORY_BUDGET_MIB:-12288}"
+export SANDBOX_DEFAULT_VM_MEM_MIB="${SANDBOX_DEFAULT_VM_MEM_MIB:-3072}"
+# Dedicated reflection queue: a reflection is part of a flow, not a
+# competing task — reviews must never wait behind the 3-slot execution
+# pool. settings.py routes execute_reflection to this queue.
+export REFLECTION_QUEUE_NAME="${REFLECTION_QUEUE_NAME:-reflections}"
 if [ "$INSTANCE" = "dev" ]; then
     export ODIN_CLI_PATH="${ODIN_CLI_PATH:-odin-dev}"
 fi
 
-python "$BACKEND_DIR/manage.py" runserver 0.0.0.0:$BACKEND_PORT > "$LOG_DIR/backend.log" 2>&1 &
-PIDS+=($!)
+# Backend HTTP server. SERVE_MODE selects between Django's dev runserver and a
+# production ASGI server:
+#   - dev  (default): manage.py runserver  — autoreload, dev-only, drops
+#                     connections under sustained concurrent load.
+#   - prod          : gunicorn with an uvicorn worker if gunicorn is installed
+#                     (canonical Django Channels production setup, graceful
+#                     reload on SIGHUP), falling back to plain uvicorn otherwise.
+#                     Both are ASGI, so channels/websockets keep working exactly
+#                     as they do under daphne's runserver.
+# The always-on loop runs on SQLite + InMemory channel layer
+# (config/settings.py CHANNEL_LAYERS), which is single-process only, so the
+# worker default is 1. The single uvicorn worker still serves many concurrent
+# HTTP requests via its async event loop + threadpool (fixes the connection
+# drops). Raise BACKEND_WORKERS only after moving to Postgres + a Redis channel
+# layer (USE_SQLITE=False).
+start_backend() {
+    local workers="${BACKEND_WORKERS:-1}"
+    if [ "${SERVE_MODE:-dev}" = "prod" ]; then
+        if command -v gunicorn >/dev/null 2>&1; then
+            log "Starting backend (gunicorn + uvicorn worker, workers=$workers)..."
+            (cd "$BACKEND_DIR" && gunicorn config.asgi:application \
+                -k uvicorn.workers.UvicornWorker \
+                -w "$workers" \
+                --bind "0.0.0.0:${BACKEND_PORT}" \
+                --access-logfile - --error-logfile - \
+                --log-level info) > "$LOG_DIR/backend.log" 2>&1 &
+        else
+            log "Starting backend (uvicorn, workers=$workers; gunicorn not installed)..."
+            (cd "$BACKEND_DIR" && uvicorn config.asgi:application \
+                --workers "$workers" \
+                --host 0.0.0.0 --port "$BACKEND_PORT" \
+                --log-level info) > "$LOG_DIR/backend.log" 2>&1 &
+        fi
+    else
+        log "Starting backend (runserver)..."
+        python "$BACKEND_DIR/manage.py" runserver "0.0.0.0:${BACKEND_PORT}" > "$LOG_DIR/backend.log" 2>&1 &
+    fi
+    PIDS+=($!)
+}
+
+start_backend
 
 (cd "$FRONTEND_DIR" && npm run dev -- --port $FRONTEND_PORT) > "$LOG_DIR/frontend.log" 2>&1 &
 PIDS+=($!)
@@ -129,6 +268,14 @@ PIDS+=($!)
 pkill -f "celery.*worker" 2>/dev/null && sleep 1 || true
 
 (cd "$BACKEND_DIR" && celery -A config worker --beat --loglevel=info --concurrency=3 --pool=prefork) > "$LOG_DIR/celery.log" 2>&1 &
+PIDS+=($!)
+
+# Worker for the dedicated merge queue (MERGE_QUEUE_NAME exported above).
+(cd "$BACKEND_DIR" && celery -A config worker -Q "$MERGE_QUEUE_NAME" --loglevel=info --concurrency=2 --pool=threads -n merges@%h) > "$LOG_DIR/celery-merges.log" 2>&1 &
+PIDS+=($!)
+
+# Worker for the dedicated reflection queue (REFLECTION_QUEUE_NAME exported above).
+(cd "$BACKEND_DIR" && celery -A config worker -Q "$REFLECTION_QUEUE_NAME" --loglevel=info --concurrency=2 --pool=threads -n reflections@%h) > "$LOG_DIR/celery-reflections.log" 2>&1 &
 PIDS+=($!)
 
 BOLD='\033[1m'

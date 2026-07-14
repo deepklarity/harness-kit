@@ -30,11 +30,7 @@ def _make_config(work_dir: str, base_agent: str = "codex") -> OdinConfig:
                 capabilities=["coding", "writing", "research"],
                 cost_tier=CostTier.LOW,
             ),
-            "qwen": AgentConfig(
-                cli_command="qwen",
-                capabilities=["coding", "writing"],
-                cost_tier=CostTier.LOW,
-            ),
+
         },
         task_storage=f"{work_dir}/.odin/tasks",
         log_dir=f"{work_dir}/.odin/logs",

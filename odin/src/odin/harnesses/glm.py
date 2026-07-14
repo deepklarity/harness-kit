@@ -5,9 +5,10 @@ import os
 import shlex
 import shutil
 import time
-from typing import AsyncIterator
+from pathlib import Path
+from typing import Any, AsyncIterator, Dict
 
-from odin.harnesses.base import BaseHarness, read_with_tee, read_with_trace, extract_text_from_stream, SUBPROCESS_STREAM_LIMIT, validate_odin_status
+from odin.harnesses.base import BaseHarness, read_with_tee, read_with_trace, extract_text_from_stream, extract_token_usage, SUBPROCESS_STREAM_LIMIT, terminate_subprocess, validate_odin_status, validate_odin_status_full
 from odin.harnesses.registry import register_harness
 from odin.models import AgentConfig, TaskResult
 
@@ -49,6 +50,7 @@ class GLMHarness(BaseHarness):
         trace_file = context.get("trace_file")
         timeout_seconds = context.get("timeout_seconds", 300)
         timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
+        proc: asyncio.subprocess.Process | None = None
         try:
             cmd = self.build_execute_command(prompt, context)
             proc = await asyncio.create_subprocess_exec(
@@ -61,17 +63,23 @@ class GLMHarness(BaseHarness):
             )
             self._current_pid = proc.pid
 
+            usage = {}
             if trace_file and output_file:
                 stdout_text = await read_with_trace(proc, output_file, trace_file)
                 await asyncio.wait_for(proc.wait(), timeout=timeout)
+                try:
+                    usage = extract_token_usage(Path(trace_file).read_text(encoding="utf-8"))
+                except OSError:
+                    usage = {}
             elif output_file:
                 stdout_text = await read_with_tee(proc, output_file)
                 await asyncio.wait_for(proc.wait(), timeout=timeout)
+                usage = extract_token_usage(stdout_text)
             else:
                 stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                stdout_text = extract_text_from_stream(
-                    stdout_bytes.decode("utf-8", errors="replace")
-                )
+                raw_str = stdout_bytes.decode("utf-8", errors="replace")
+                stdout_text = extract_text_from_stream(raw_str)
+                usage = extract_token_usage(raw_str)
 
             duration = (time.monotonic() - start) * 1000
             stderr_text = ""
@@ -83,17 +91,30 @@ class GLMHarness(BaseHarness):
                     pass
 
             self._current_pid = None
+            meta = {"usage": usage} if usage else {}
             if proc.returncode == 0:
                 if context.get("validate_status", True):
-                    agent_success, agent_error = validate_odin_status(stdout_text)
+                    status = validate_odin_status_full(
+                        stdout_text,
+                        worktree_path=context.get("working_dir"),
+                    )
+                    agent_success, agent_error = status.as_legacy_tuple()
                 else:
                     agent_success, agent_error = True, None
+                    status = None
+                if status is not None and status.raw_block is not None:
+                    meta["malformed_status"] = {
+                        "raw_block": status.raw_block,
+                        "inferred": status.inferred,
+                        "inference_reason": status.inference_reason,
+                    }
                 return TaskResult(
                     success=agent_success,
                     output=stdout_text,
                     error=agent_error,
                     duration_ms=round(duration, 1),
                     agent=self.name,
+                    metadata=meta,
                 )
             else:
                 return TaskResult(
@@ -102,9 +123,12 @@ class GLMHarness(BaseHarness):
                     error=stderr_text,
                     duration_ms=round(duration, 1),
                     agent=self.name,
+                    metadata=meta,
                 )
         except asyncio.TimeoutError:
             self._current_pid = None
+            if proc is not None:
+                await terminate_subprocess(proc)
             timeout_msg = (
                 f"Command timed out after {timeout_seconds}s"
                 if timeout_seconds and timeout_seconds > 0

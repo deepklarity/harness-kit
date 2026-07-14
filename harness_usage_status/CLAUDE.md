@@ -10,7 +10,6 @@ A CLI tool that provides a centralized view of remaining usage quotas across mul
 - **Claude Code** — `claude` CLI for status; web API for usage (`claude.ai/api/organizations/{orgId}/usage`)
 - **Codex (OpenAI)** — `codex` CLI for status; web API for usage (`chatgpt.com/backend-api/wham/usage`)
 - **Gemini** — `gemini` CLI for status; OAuth-backed quota API
-- **Qwen** — `qwen` CLI for status; FIXME: no account-level quota API
 
 ### API-based (subscription via API keys)
 - **MiniMax** — Coding Plan `/remains` endpoint
@@ -63,4 +62,3 @@ Odin imports from this package optionally for **quota-aware agent routing**:
 
 - Each CLI-based provider requires the respective CLI tool to be installed and authenticated separately (e.g., `claude` CLI must be logged in for Claude Code quota)
 - Web API endpoints change without notice — all URLs are configurable in YAML for quick updates
-- Qwen has no account-level quota API yet — status works but usage data is unavailable

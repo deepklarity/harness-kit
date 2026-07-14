@@ -17,6 +17,45 @@ logger = TaskContextAdapter(setup_logger("odin.taskit"))
 _TOKEN_REFRESH_MARGIN = 300
 
 
+class _RetryingClient(httpx.Client):
+    """httpx.Client that retries transient transport failures.
+
+    The TaskIt backend is a Django dev server over SQLite; under concurrent
+    load (parallel agents + MCP + operator calls) it occasionally drops a
+    connection without a response. One such drop must not crash a 30-minute
+    agent run (F36, task #103 2026-07-05) — retry briefly, then give up.
+
+    A retried POST can, in the worst case, be applied twice if the server
+    processed the first request but died before responding. Comments and
+    execution results tolerate that (dedup/stale-result guards); losing the
+    whole run does not.
+    """
+
+    _TRANSIENT = (
+        httpx.RemoteProtocolError,
+        httpx.ConnectError,
+        httpx.ReadError,
+        httpx.WriteError,
+    )
+    _ATTEMPTS = 3
+
+    def send(self, request: httpx.Request, **kwargs) -> httpx.Response:
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, self._ATTEMPTS + 1):
+            try:
+                return super().send(request, **kwargs)
+            except self._TRANSIENT as exc:
+                last_exc = exc
+                if attempt < self._ATTEMPTS:
+                    logger.warning(
+                        "Transient TaskIt HTTP error on %s %s (attempt %d/%d): %s — retrying",
+                        request.method, request.url.path, attempt, self._ATTEMPTS, exc,
+                    )
+                    time.sleep(0.5 * attempt)
+        assert last_exc is not None
+        raise last_exc
+
+
 def _unwrap_list(data) -> list:
     """Unwrap a DRF paginated response to a plain list.
 
@@ -189,7 +228,7 @@ class TaskItBackend(BoardBackend):
             login_url = f"{self._base_url}/auth/login/"
             auth = TaskItAuth(login_url, admin_email, admin_password)
 
-        self._client = httpx.Client(base_url=self._base_url, timeout=30, auth=auth)
+        self._client = _RetryingClient(base_url=self._base_url, timeout=30, auth=auth)
         self._trial_board_id: Optional[int] = None
 
     # -- Trial board --
@@ -221,6 +260,38 @@ class TaskItBackend(BoardBackend):
         board_id = self._ensure_trial_board(name)
         self._board_id = board_id
         logger.info("Switched to trial board: id=%d, name=%s", board_id, name)
+        return board_id
+
+    def create_board(
+        self,
+        name: str,
+        working_dir: str,
+        disabled_agents: Optional[List[str]] = None,
+    ) -> int:
+        """Create a new board pointed at an existing working_dir.
+
+        Used by `odin new-project` to provision a board for a freshly
+        cloned or scaffolded repo. Unlike `_ensure_trial_board` (find-or-
+        create), this always creates — callers gate re-runs themselves.
+        Switches this backend to the new board and returns its id.
+        """
+        payload: Dict[str, Any] = {
+            "name": name,
+            "description": "Created by `odin new-project`",
+            "working_dir": working_dir,
+            "directory_mode": "existing",
+            "auto_init": False,
+        }
+        if disabled_agents:
+            payload["disabled_agents"] = disabled_agents
+        resp = self._client.post("/boards/", json=payload)
+        _raise_for_status(resp)
+        board_id = resp.json()["id"]
+        self._board_id = board_id
+        logger.info(
+            "Board created on TaskIt: id=%s, name=%s, working_dir=%s",
+            board_id, name, working_dir,
+        )
         return board_id
 
     # -- Health check --
@@ -269,6 +340,32 @@ class TaskItBackend(BoardBackend):
         _raise_for_status(resp)
         return resp.json()
 
+    def fetch_agent_stats(self, *, spec_id: Optional[str] = None) -> dict:
+        """Fetch per-agent success-rate + median cost from the TaskIt API.
+
+        Returns the agent-stats response: {"agents": [...]} where each row
+        has the shape consumed by ``odin.agent_routing.stats_from_dicts``.
+        Optional ``spec_id`` scopes the rollup to a single spec on this
+        board — useful during planning when the spec is known.
+
+        Default First: returns ``{"agents": []}`` on any backend error
+        rather than raising. The orchestrator treats an empty list as
+        thin-history and falls back to the static routing.
+        """
+        params: Dict[str, Any] = {}
+        if spec_id is not None:
+            params["spec"] = spec_id
+        try:
+            resp = self._client.get(
+                f"/boards/{self._board_id}/agent-stats/",
+                params=params or None,
+            )
+            _raise_for_status(resp)
+            data = resp.json()
+            return data if isinstance(data, dict) else {"agents": []}
+        except Exception:
+            return {"agents": []}
+
     # -- Agent -> User resolution --
 
     def _resolve_agent_user(self, agent_name: str) -> int:
@@ -301,8 +398,15 @@ class TaskItBackend(BoardBackend):
         return status.value.upper()
 
     @staticmethod
-    def _status_from_taskit(status_str: str) -> TaskStatus:
-        return TaskStatus(status_str.lower())
+    def _status_from_taskit(status_str: str, task_id: Optional[str] = None) -> TaskStatus:
+        try:
+            return TaskStatus(status_str.lower())
+        except ValueError:
+            logger.warning(
+                "Unknown task status %r from TaskIt for task %s — defaulting to BACKLOG",
+                status_str, task_id or "(unknown)",
+            )
+            return TaskStatus.BACKLOG
 
     # -- Task operations --
 
@@ -389,7 +493,7 @@ class TaskItBackend(BoardBackend):
             id=str(data["id"]),
             title=data["title"],
             description=data.get("description", ""),
-            status=self._status_from_taskit(data["status"]),
+            status=self._status_from_taskit(data["status"], task_id=str(data.get("id"))),
             assigned_agent=agent,
             spec_id=spec_odin_id or (str(spec_pk) if spec_pk else None),
             depends_on=depends_on,
@@ -503,6 +607,12 @@ class TaskItBackend(BoardBackend):
     def get_comments(self, task_id: str) -> list:
         """GET /tasks/:id/comments/ — fetch all comments for a task."""
         resp = self._client.get(f"/tasks/{task_id}/comments/")
+        _raise_for_status(resp)
+        return _unwrap_list(resp.json())
+
+    def get_reflection_reports(self, task_id: str) -> list:
+        """GET /tasks/:id/reflections/ — fetch all reflection reports."""
+        resp = self._client.get(f"/tasks/{task_id}/reflections/")
         _raise_for_status(resp)
         return _unwrap_list(resp.json())
 

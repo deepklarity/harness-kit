@@ -6,7 +6,7 @@ import { TaskTimeDisplay } from './TaskTimeDisplay';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2, Bot, GitBranch, RotateCcw } from 'lucide-react';
+import { Inbox, FileText, Package, User, AlertTriangle, MessageCircle, HelpCircle, Pencil, BellRing, Trash2, Bot, GitBranch, RotateCcw, CalendarClock } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,6 +24,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 
 import { getSeenCommentCount } from '../utils/unseenComments';
 import { hasUnseenExecutionCompletion } from '../utils/unseenStatusTransitions';
+import { getDispatchBlockReason } from './dispatchBlock';
+import { DispatchBlockBanner } from './DispatchBlockBanner';
 
 interface TaskCardProps {
     task: Task;
@@ -60,6 +62,10 @@ const STATUS_STYLES: Record<string, string> = {
     testing: 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-400',
     done: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400',
     failed: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400',
+    // CANCELED is terminal-neutral (fable task 192) — distinct muted
+    // slate look that reads as "off the board" without borrowing
+    // FAILED's red semantics.
+    canceled: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
     other: 'bg-secondary text-muted-foreground',
 };
 
@@ -88,8 +94,11 @@ export const TaskCard = memo(function TaskCard({
     const hasUnseen = totalComments > seenCount;
     const needsExecutionReviewAttention = hasUnseenExecutionCompletion(task);
     const hasPendingQuestion = !!(task.metadata?.has_pending_question);
+    const dispatchBlock = getDispatchBlockReason(task);
     const escalationCount = (task.metadata?.escalation_count as number) || 0;
     const model = task.modelName || (task.metadata?.model ?? task.metadata?.selected_model) as string | undefined;
+    const needsHuman = task.needsHuman === true;
+    const needsHumanReason = needsHuman ? (task.needsHumanReason || 'Needs human attention') : '';
 
     // Resolve assignee full name
     const assignee = task.assigneeIds.length > 0 ? memberMap?.get(task.assigneeIds[0]) : null;
@@ -178,6 +187,18 @@ export const TaskCard = memo(function TaskCard({
                 }}
             >
                 <CardContent className={compact ? "relative !px-2.5 !py-1.5" : "relative px-2 py-1.5 space-y-0.5"} title={compact ? task.name : undefined}>
+                    <div
+                        data-testid="needs-human-indicator"
+                        data-active={needsHuman ? 'true' : 'false'}
+                        role="status"
+                        aria-label={needsHuman ? needsHumanReason : undefined}
+                        title={needsHumanReason}
+                        className={`pointer-events-auto absolute left-0 top-0 bottom-0 z-10 w-1 rounded-l-sm transition-colors ${
+                            needsHuman
+                                ? 'bg-amber-500 dark:bg-amber-400 animate-pulse-subtle'
+                                : 'bg-transparent'
+                        }`}
+                    />
                     {onDelete && !isOverlay && (
                         <button
                             className="absolute right-1.5 top-1.5 opacity-40 hover:opacity-100 transition-opacity p-1 rounded-sm hover:bg-destructive/10 text-muted-foreground hover:text-destructive z-20"
@@ -197,6 +218,9 @@ export const TaskCard = memo(function TaskCard({
                                 >
                                     <BellRing className="size-2.5" />
                                 </div>
+                            )}
+                            {dispatchBlock && (
+                                <DispatchBlockBanner info={dispatchBlock} compact testId="dispatch-blocked-banner" />
                             )}
                             <div className="flex items-center gap-1.5 min-w-0">
                                 <span className="text-muted-foreground font-mono font-semibold text-[10px] shrink-0">#{task.idShort}</span>
@@ -249,6 +273,12 @@ export const TaskCard = memo(function TaskCard({
                                         {escalationCount}x
                                     </Badge>
                                 )}
+                                {task.scheduleSummary && (
+                                    <span className="inline-flex items-center gap-0.5 text-[10px] text-sky-500" title={`Created by schedule #${task.scheduleSummary.id}${task.scheduleSummary.current_run_id ? ` (run ${task.scheduleSummary.current_run_id})` : ''}`}>
+                                        <CalendarClock className="size-2.5" />
+                                        scheduled
+                                    </span>
+                                )}
                                 <div className="flex items-center gap-1 ml-auto shrink-0">
                                     {hasUnseen && (
                                         <span className="relative flex size-1.5" title={`${totalComments - seenCount} new`}>
@@ -292,6 +322,9 @@ export const TaskCard = memo(function TaskCard({
                                     <AlertTriangle className="size-3 shrink-0" />
                                     <span>Blocked — dependency failed</span>
                                 </div>
+                            )}
+                            {dispatchBlock && (
+                                <DispatchBlockBanner info={dispatchBlock} testId="dispatch-blocked-banner" />
                             )}
                             <div className="flex items-center gap-1.5">
                                 <span className="text-xs text-muted-foreground font-mono font-semibold">#{task.idShort}</span>

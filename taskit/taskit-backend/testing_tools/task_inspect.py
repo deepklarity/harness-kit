@@ -35,7 +35,7 @@ def diagnose(task, comments):
 
     if not meta.get("last_duration_ms"):
         problems.append("No duration recorded — execution_result may not have been posted")
-    if not meta.get("last_usage"):
+    if not extract_token_parts(task)[0]:
         problems.append("No token usage captured — agent metadata.usage was empty or not forwarded")
 
     full_output = meta.get("full_output", "")
@@ -79,7 +79,7 @@ def inspect_task(task_id, mode="standard", sections=None):
         return
 
     meta = task.metadata or {}
-    total, inp, out = extract_token_parts(meta)
+    total, inp, out = extract_token_parts(task)
     duration_ms = meta.get("last_duration_ms")
     comments = list(TaskComment.objects.filter(task_id=task.id).order_by("created_at"))
     problems = diagnose(task, comments)
@@ -166,9 +166,15 @@ def inspect_task(task_id, mode="standard", sections=None):
         else:
             print("  (none)")
 
-        # Reverse deps
-        dependents = Task.objects.filter(depends_on__contains=[str(task.id)])
-        if dependents.exists():
+        # Reverse deps. depends_on__contains relies on Postgres JSONField
+        # support and raises NotSupportedError on SQLite, so filter in
+        # Python instead — scoped to the same board to keep it cheap.
+        task_id_str = str(task.id)
+        dependents = [
+            d for d in Task.objects.filter(board_id=task.board_id).exclude(pk=task.pk)
+            if task_id_str in [str(dep_id) for dep_id in (d.depends_on or [])]
+        ]
+        if dependents:
             print(f"\n  DEPENDED ON BY")
             print(f"  {'-' * 50}")
             for d in dependents:
@@ -180,7 +186,7 @@ def inspect_task(task_id, mode="standard", sections=None):
         if meta:
             if duration_ms:
                 print(f"  duration:    {format_duration(duration_ms)}")
-            print(f"  tokens:      {format_token_parts(meta)}")
+            print(f"  tokens:      {format_token_parts(task)}")
             if meta.get("selected_model"):
                 print(f"  exec model:  {meta['selected_model']}")
             if meta.get("working_dir"):

@@ -5,7 +5,7 @@ A step-by-step walkthrough of the staged orchestration workflow.
 ## What is Odin?
 
 Odin is a DAG-based orchestration system. It breaks a task into sub-tasks with
-dependencies, assigns each to an AI agent (codex, gemini, qwen, etc.), and
+dependencies, assigns each to an AI agent (codex, gemini, etc.), and
 executes them in dependency-respecting waves. Think of it like a Trello board
 with dependency arrows: plan creates visible tasks, you review and adjust, then
 trigger execution. Tasks execute in waves — independent tasks run in parallel,
@@ -58,10 +58,8 @@ Plan created! 5 tasks with suggested assignments:
 ├──────────────┼────────────────────────┼────────┼──────────┼──────────┼──────────────────────────────┼──────────┤
 │ a1b2c3d4e5f6 │ Scaffold HTML          │ codex  │ -        │ 78% left │ Needs file creation capab…   │ assigned │
 │ d4e5f6a1b2c3 │ Write intro paragraph  │ gemini │ a1b2c3d4 │ 85% left │ Low cost, writing capable…   │ assigned │
-│ f6a1b2c3d4e5 │ Write middle paragraph │ qwen   │ a1b2c3d4 │ 92% left │ Cheapest with writing cap…   │ assigned │
 │ b2c3d4e5f6a1 │ Write closing paragraph│ gemini │ a1b2c3d4 │ 85% left │ Low cost, writing capable…   │ assigned │
 │ 1234abcd5678 │ Assemble into HTML     │ codex  │ d4e5f6a1,│ 78% left │ Reads all outputs, combi…   │ assigned │
-│              │                        │        │ f6a1b2c3,│          │                              │          │
 │              │                        │        │ b2c3d4e5 │          │                              │          │
 └──────────────┴────────────────────────┴────────┴──────────┴──────────┴──────────────────────────────┴──────────┘
 

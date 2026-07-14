@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Iterable, List
 
 from django.db import transaction
+from django.db.models import OuterRef, QuerySet, Subquery
 
-from .models import Task, TaskStatus
+from .db import retry_on_locked
+from .models import Task, TaskHistory, TaskStatus
 
 
 KANBAN_COLUMNS: List[str] = [
@@ -18,6 +20,32 @@ KANBAN_COLUMNS: List[str] = [
     TaskStatus.DONE,
     TaskStatus.FAILED,
 ]
+
+# Terminal lanes are populated by automatic system transitions (reflection
+# pass, spec finalize), not by users dragging cards into place — so their
+# read order is defined explicitly as most-recently-landed-first rather
+# than reusing kanban_position (a drag-order field that only *incidentally*
+# tracks recency because system moves happen to insert at index 0).
+RECENCY_ORDERED_COLUMNS = {TaskStatus.TESTING, TaskStatus.DONE}
+
+
+def order_column_queryset(qs: QuerySet, column_status: str) -> QuerySet:
+    """Apply the explicit read-order for a Kanban lane.
+
+    TESTING/DONE: most-recently-landed first, via the timestamp of the
+    latest history row that transitioned the task into that lane. Every
+    other lane keeps kanban_position (the user-managed drag order).
+    """
+    if column_status not in RECENCY_ORDERED_COLUMNS:
+        return qs.order_by("kanban_position", "id")
+
+    landed_at = (
+        TaskHistory.objects
+        .filter(task=OuterRef("pk"), field_name="status", new_value=column_status)
+        .order_by("-changed_at")
+        .values("changed_at")[:1]
+    )
+    return qs.annotate(landed_at=Subquery(landed_at)).order_by("-landed_at", "-id")
 
 
 def get_column_for_status(status: str) -> str:
@@ -51,12 +79,18 @@ def _persist_dense_positions(tasks: Iterable[Task]) -> None:
             task.kanban_position = idx
 
 
+@retry_on_locked(max_retries=3, base_delay=0.05)
 def move_task(task: Task, target_status: str, target_index: int | None = None) -> int:
     """Reposition a task in Kanban order.
 
     - Manual move/reorder: pass explicit ``target_index``.
     - System move: pass ``target_index=None`` and task is inserted at top on
       cross-column transitions.
+
+    The whole reposition is retried on a transient SQLite ``database is
+    locked`` (the bounded backstop in ``tasks.db.retry_on_locked``). WAL +
+    busy_timeout absorbs normal contention; this catches the tail where
+    concurrent writers collide on the column rewrite.
     """
     source_column = get_column_for_status(task.status)
     target_column = get_column_for_status(target_status)

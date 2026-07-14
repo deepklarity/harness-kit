@@ -8,6 +8,8 @@ import { formatCost } from '../utils/costEstimation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { SpecStoryView } from './SpecStoryView';
 
 import {
     AlertDialog,
@@ -47,6 +49,8 @@ import {
   Package,
   Search,
   X,
+  LayoutGrid,
+  BookOpen,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { TraceViewer, TerminalOutputView } from './TraceViewer';
@@ -57,7 +61,6 @@ const PLANNER_AGENT_COLORS: Record<string, string> = {
     claude: '#8b5cf6',
     gemini: '#22c55e',
     codex: '#3b82f6',
-    qwen: '#f97316',
     kilo: '#ec4899',
 };
 
@@ -87,7 +90,18 @@ interface SpecDetailViewProps {
 
 export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, onDeleteSpec }: SpecDetailViewProps) {
     const service = useService();
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const rawView = searchParams.get('view');
+    const view: 'overview' | 'story' = rawView === 'story' ? 'story' : 'overview';
+    const setView = useCallback((v: 'overview' | 'story') => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams();
+            const board = prev.get('board');
+            if (board) next.set('board', board);
+            if (v !== 'overview') next.set('view', v);
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
     const [spec, setSpec] = useState<Spec | null>(cachedSpec || null);
     const [loading, setLoading] = useState(!cachedSpec);
     const [error, setError] = useState<{ notFound: boolean; message: string } | null>(null);
@@ -255,6 +269,7 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
 
     // Cost data comes from the backend — single source of truth
     const costSummary = spec.costSummary;
+    const mergeSummary = spec.mergeSummary;
 
     const routingConfig = spec.metadata?.model_routing as Array<{ agent: string; model: string }> | undefined;
     const specBranch = spec.metadata?.branch as string | undefined;
@@ -268,6 +283,16 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                     <ArrowLeft className="size-3.5" /> Back to specs
                 </Button>
                 <div className="flex flex-wrap items-center gap-2">
+                    <ToggleGroup type="single" value={view} onValueChange={(v) => v && setView(v as 'overview' | 'story')} size="sm">
+                        <ToggleGroupItem value="overview" aria-label="Overview" className="gap-1.5 text-xs px-2 sm:px-3">
+                            <LayoutGrid className="size-3.5" />
+                            <span className="hidden sm:inline">Overview</span>
+                        </ToggleGroupItem>
+                        <ToggleGroupItem value="story" aria-label="Story" className="gap-1.5 text-xs px-2 sm:px-3">
+                            <BookOpen className="size-3.5" />
+                            <span className="hidden sm:inline">Story</span>
+                        </ToggleGroupItem>
+                    </ToggleGroup>
                     <Link to={`/specs/${specId}/debug${searchParams.get('board') ? `?board=${searchParams.get('board')}` : ''}`} className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 h-8 text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors group">
                         <Bug className="size-3.5 group-hover:text-orange-400 transition-colors" /> Debug Execution
                     </Link>
@@ -490,9 +515,9 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                                     <>, <span className="text-red-400">{spec?.tasks?.filter(t => t.currentStatus === 'FAILED').length} failed</span></>
                                 )}
                             </span>
-                            {costSummary && ((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0)) > 0 && (
+                            {costSummary && ((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (mergeSummary?.merge_cost_usd || 0)) > 0 && (
                                 <span className="text-xs font-mono text-emerald-400">
-                                    {formatCost((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0))}
+                                    {formatCost((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (mergeSummary?.merge_cost_usd || 0))}
                                 </span>
                             )}
                         </div>
@@ -613,6 +638,10 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                 </div>
             )}
 
+            {view === 'story' ? (
+                <SpecStoryView specId={specId} onTaskClick={onTaskClick} />
+            ) : (
+            <>
             {/* Cost + Tasks side by side */}
             <div className="flex gap-4 items-start mb-6 max-md:flex-col">
                 {/* Cost Breakdown — compact key-value layout */}
@@ -635,11 +664,17 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                                 {formatCost(costSummary?.reflection_cost_usd ?? null)}
                             </span>
                         </div>
-                        {costSummary && ((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0)) > 0 && (
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Merge</span>
+                            <span className="font-mono font-semibold text-amber-400">
+                                {formatCost(mergeSummary?.merge_cost_usd ?? null)}
+                            </span>
+                        </div>
+                        {costSummary && ((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (mergeSummary?.merge_cost_usd || 0)) > 0 && (
                             <div className="flex items-center justify-between text-xs border-t border-border/50 pt-1.5">
                                 <span className="text-muted-foreground font-semibold">Total</span>
                                 <span className="font-mono font-semibold text-foreground">
-                                    {formatCost((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0))}
+                                    {formatCost((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (mergeSummary?.merge_cost_usd || 0))}
                                 </span>
                             </div>
                         )}
@@ -798,7 +833,7 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
             })()}
 
             {/* Branch Commits */}
-            {spec.metadata?.branch && commits.length > 0 && (
+            {Boolean(spec.metadata?.branch) && commits.length > 0 && (
                 <Card className="border-border mb-6">
                     <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowCommits(v => !v)}>
                         <CardTitle className="text-sm flex items-center gap-1.5">
@@ -826,6 +861,8 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                         </CardContent>
                     )}
                 </Card>
+            )}
+            </>
             )}
 
         </div>

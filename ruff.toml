@@ -1,0 +1,54 @@
+# Ruff configuration for the harness-kit monorepo.
+#
+# Scope: covers odin/, taskit/taskit-backend/, and harness_usage_status/.
+# This is the config-only slice (fable 01.2) of the parked lint initiative:
+#   - Establish a shared, minimal rule baseline.
+#   - Capture current violation counts as a baseline (no fixes applied here).
+#
+# Arrangement choice: a single shared root `ruff.toml` was picked over
+# per-project `[tool.ruff]` sections because (a) the three target projects
+# share the same rule set, (b) one file is cheaper to maintain than three, and
+# (c) the acceptance command (`ruff check odin/ taskit/taskit-backend/
+# harness_usage_status/`) runs from the repo root, so a root config is
+# discovered automatically without per-project wiring. taskit-backend has no
+# pyproject.toml (it is a Django project on requirements.txt), so a root
+# config also avoids forcing a packaging file on it.
+#
+# Rule selection: deliberately minimal — `E` (pycodestyle errors), `F`
+# (Pyflakes: unused imports/names, undefined names), and `I` (isort import
+# sorting). These are the universally agreed-upon core and the literal set
+# named in the task ("E/F/I"). Additional "obvious win" rule groups (W, UP, B,
+# C4, SIM) are intentionally deferred to a follow-up lint slice so the initial
+# baseline stays small and easy to triage; enable them incrementally as
+# violations get fixed.
+
+# --- Top-level settings (must precede any [table] header) ---
+target-version = "py310"
+line-length = 100
+
+# Exclude generated/non-maintained trees from checks. `extend-exclude` adds to
+# ruff's built-in defaults (which already cover .git, __pycache__, .venv, etc.).
+extend-exclude = [
+    ".odin",          # worktrees, logs, spec archives — not lint targets
+    ".tmp-scratch",   # scratch space
+    ".venv-test",     # local test virtualenv
+    "**/migrations",  # generated Django migrations
+    "build",          # build artifacts
+    "dist",           # distribution artifacts
+    "*.egg-info",     # packaging metadata
+    "node_modules",   # non-Python (taskit-frontend)
+]
+
+[lint]
+# Minimal starter set: E (pycodestyle errors), F (Pyflakes), I (isort).
+select = ["E", "F", "I"]
+
+[lint.per-file-ignores]
+# Django auto-generated migration files legitimately use star imports and
+# unused app registry helpers; they are excluded above, but this guard keeps
+# things quiet if any migration is checked explicitly.
+"**/migrations/**/*.py" = ["E", "F", "I"]
+
+[lint.isort]
+# Treat the three project roots as first-party so import grouping is sensible.
+known-first-party = ["odin", "harness_usage_status", "tasks"]

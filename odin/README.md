@@ -143,7 +143,7 @@ See [config/config.sample.yaml](config/config.sample.yaml) for the full template
 
 ## Forced Provider Mode (Optional)
 
-If you want Odin to always use Gemini or Qwen as the planning base provider, set the following in your project's `.env`:
+If you want Odin to always use Gemini as the planning base provider, set the following in your project's `.env`:
 
 ```dotenv
 FORCED_BASE_PROVIDER=gemini
@@ -152,19 +152,18 @@ FORCED_BASE_PROVIDER=gemini
 Supported values for `FORCED_BASE_PROVIDER`:
 
 - `gemini`
-- `qwen`
 
 You can also pin a specific model. This is optional. If omitted, Odin uses that provider's default model.
 
 ```dotenv
-FORCED_BASE_PROVIDER=qwen
-FORCED_BASE_MODEL=coder-model
+FORCED_BASE_PROVIDER=gemini
+FORCED_BASE_MODEL=gemini-2.5-pro
 ```
 
 Notes:
 
 - `FORCED_BASE_MODEL` must belong to the selected provider.
-- Forced provider mode currently supports only `gemini` and `qwen`.
+- Forced provider mode currently supports only `gemini`.
 - The selected provider CLI must be available on `PATH`.
 - When forced provider mode is active, Odin ignores the usual base-agent selection for planning flows.
 
@@ -229,7 +228,6 @@ All `task_id` and `spec_id` support prefix matching.
 | CLI | Claude | `claude` |
 | CLI | Codex | `codex` |
 | CLI | Gemini | `gemini` |
-| CLI | Qwen | `qwen` |
 | API | MiniMax | Requires `MINIMAX_API_KEY` |
 | API | GLM | Requires `ZAI_API_KEY` |
 
@@ -242,7 +240,7 @@ pip install -e "odin/[dev]"
 ```
 
 ```bash
-# Full integration suite (requires gemini, qwen, codex CLIs on PATH)
+# Full integration suite (requires gemini, codex CLIs on PATH)
 python -m pytest odin/tests/test_real.py -v
 
 # Incremental runs

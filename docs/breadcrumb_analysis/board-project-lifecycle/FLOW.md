@@ -13,7 +13,7 @@ User runs: odin init [--board-id 42 --base-url http://localhost:9101]
     → if --board-id: registers in ~/.odin/boards.json (global board registry)
     → creates subdirs: .odin/tasks/, .odin/logs/, .odin/specs/
     → if no .git/: git init + .gitignore + initial commit (NEW)
-    → generates MCP configs for 6 agent CLIs (.mcp.json, .gemini/, .qwen/, .codex/, .kilocode/, opencode.json)
+    → generates MCP configs for 5 agent CLIs (.mcp.json, .gemini/, .codex/, .kilocode/, opencode.json; qwen retired in #102)
     → generates .claude/settings.local.json (Claude Code permissions)
     → generates .env.example (auth template)
 

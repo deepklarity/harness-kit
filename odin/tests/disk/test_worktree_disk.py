@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from odin.mcps.taskit_mcp.config import HARNESS_GENERATED_PATHS, MCP_CONFIG_MAP
 from odin.worktree import WorktreeManager, AGENT_CONFIG_PATHS, _GITIGNORE_MARKER
 
 
@@ -125,6 +126,22 @@ class TestTaskWorktree:
             post_hooks=["touch hook_marker.txt"],
         )
         assert (path / "hook_marker.txt").exists()
+
+    def test_stale_directory_recovered(self, wt, repo):
+        """Stale directory (no .git) at the worktree path is cleaned up and
+        the worktree created fresh — regression for task 236 retry crash
+        ('already exists')."""
+        wt.create_spec_branch("sp_stale")
+        stale_path = wt.get_worktree_path("sp_stale", "801")
+        stale_path.mkdir(parents=True)
+        (stale_path / "leftover.txt").write_text("from failed run")
+        # No .git — stale state
+
+        path = wt.create_task_worktree("sp_stale", "801")
+        assert path.exists()
+        assert (path / ".git").exists()
+        # Stale content must be gone — fresh checkout, not the old dir
+        assert not (path / "leftover.txt").exists()
 
     def test_existing_task_branch_reused(self, wt, repo):
         """If task branch exists from a previous run, worktree reattaches to it."""
@@ -289,6 +306,141 @@ class TestMerge:
 
         log = _run(["git", "log", "--oneline", "spec/sp_noff"], cwd=repo)
         assert "Merge task 550: My task title" in log.stdout
+
+    def test_merge_strips_committed_proof_from_spec_branch(self, wt, repo):
+        """Committed .proof/ on the task branch never reaches the spec branch.
+
+        Agents commit .proof/task-<id>/ per convention, but it belongs on the
+        task board (uploaded as attachments), not in shared git history. The
+        merge strips it before the push — even when the agent explicitly
+        committed it.
+        """
+        wt.create_spec_branch("sp_cproof")
+        path = wt.create_task_worktree("sp_cproof", "560")
+
+        _commit_file(path, "feature.py", "def hello(): pass\n", "add feature")
+        proof_dir = path / ".proof" / "task-560"
+        proof_dir.mkdir(parents=True)
+        (proof_dir / "proof.md").write_text("# Proof\nAll green.")
+        (proof_dir / "tests.txt").write_text("5 passed")
+        # Force-add past the worktree .gitignore (which now excludes .proof/).
+        # This simulates a task branch that committed .proof/ before the
+        # gitignore was in place, or an agent that bypassed it — exactly the
+        # scenario the post-merge strip is designed to catch.
+        _run(["git", "add", "-f", ".proof/"], cwd=path)
+        _run(["git", "commit", "-m", "add proof files"], cwd=path)
+
+        result = wt.merge_task_into_spec("sp_cproof", "560", "Task with proof")
+        assert result.success is True
+
+        # Real code is on the spec branch
+        show = _run(["git", "show", "spec/sp_cproof:feature.py"], cwd=repo)
+        assert "def hello()" in show.stdout
+
+        # .proof/ is NOT on the spec branch
+        ls = _run(["git", "ls-tree", "-r", "--name-only", "spec/sp_cproof"], cwd=repo)
+        proof_files = [l for l in ls.stdout.splitlines() if l.startswith(".proof")]
+        assert proof_files == [], f".proof/ leaked onto spec branch: {proof_files}"
+
+    def test_merge_without_proof_is_unaffected(self, wt, repo):
+        """A task with no .proof/ merges normally — strip is a no-op."""
+        wt.create_spec_branch("sp_noproof")
+        path = wt.create_task_worktree("sp_noproof", "561")
+        _commit_file(path, "code.py", "x = 1\n", "add code")
+
+        result = wt.merge_task_into_spec("sp_noproof", "561")
+        assert result.success is True
+
+        show = _run(["git", "show", "spec/sp_noproof:code.py"], cwd=repo)
+        assert "x = 1" in show.stdout
+
+    def test_auto_commit_excludes_uncommitted_proof(self, wt, repo):
+        """Uncommitted .proof/ is not swept into the task branch by auto-commit."""
+        wt.create_spec_branch("sp_acproof")
+        path = wt.create_task_worktree("sp_acproof", "562")
+        _commit_file(path, "code.py", "x = 1\n", "add code")
+
+        proof_dir = path / ".proof" / "task-562"
+        proof_dir.mkdir(parents=True)
+        (proof_dir / "proof.md").write_text("evidence")
+
+        result = wt.merge_task_into_spec("sp_acproof", "562")
+        assert result.success is True
+
+        # code.py merged, .proof/ did not
+        show = _run(["git", "show", "spec/sp_acproof:code.py"], cwd=repo)
+        assert "x = 1" in show.stdout
+        ls = _run(["git", "ls-tree", "-r", "--name-only", "spec/sp_acproof"], cwd=repo)
+        assert not any(l.startswith(".proof") for l in ls.stdout.splitlines())
+
+    def test_auto_commit_pathspec_leaves_proof_untracked_and_on_disk(self, wt, repo):
+        """_auto_commit_worktree must leave .proof/ untracked while the
+        files remain on disk so the proof uploader can read them.
+
+        The pathspec exclude in ``git add`` is the primary mechanism —
+        .proof/ is never staged, not staged-then-unstaged.  This test
+        calls _auto_commit_worktree directly (not via merge) to verify
+        the index state immediately after the commit.
+        """
+        wt.create_spec_branch("sp_pf2")
+        path = wt.create_task_worktree("sp_pf2", "563")
+        _commit_file(path, "code.py", "x = 1\n", "add code")
+
+        # Uncommitted source change + uncommitted .proof/ files
+        proof_dir = path / ".proof" / "task-563"
+        proof_dir.mkdir(parents=True)
+        (proof_dir / "proof.md").write_text("# Evidence\nAll tests pass.")
+        (proof_dir / "odin_tests.txt").write_text("5 passed")
+        (path / "feature.py").write_text("y = 2\n")
+
+        result = wt._auto_commit_worktree("sp_pf2", "563", "test task")
+        assert result.committed is True
+
+        # feature.py committed, .proof/ is NOT tracked
+        tracked = _run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=path)
+        assert "feature.py" in tracked.stdout
+        assert not any(l.startswith(".proof") for l in tracked.stdout.splitlines())
+
+        # .proof/ files survive on disk for the proof uploader
+        assert (proof_dir / "proof.md").read_text() == "# Evidence\nAll tests pass."
+        assert (proof_dir / "odin_tests.txt").read_text() == "5 passed"
+
+
+# ------------------------------------------------------------------
+# Merge-status query (git-reality check used by the merge watchdog)
+# ------------------------------------------------------------------
+
+class TestIsTaskMerged:
+    """is_task_merged — is the task branch already an ancestor of the spec branch?
+
+    The merge watchdog uses this to avoid escalating a merge whose commit
+    landed but whose metadata stamp never did. Must be exact (never false
+    'merged') and never raise.
+    """
+
+    def test_not_merged_before_merge(self, wt, repo):
+        wt.create_spec_branch("sp_q")
+        path = wt.create_task_worktree("sp_q", "901")
+        _commit_file(path, "f.py", "x = 1\n", "task work")
+
+        assert wt.is_task_merged("sp_q", "901") is False
+
+    def test_merged_after_merge(self, wt, repo):
+        wt.create_spec_branch("sp_qm")
+        path = wt.create_task_worktree("sp_qm", "902")
+        _commit_file(path, "f.py", "x = 1\n", "task work")
+        assert wt.merge_task_into_spec("sp_qm", "902").success
+
+        assert wt.is_task_merged("sp_qm", "902") is True
+
+    def test_missing_branches_return_false(self, wt):
+        """Neither branch exists → False, not an exception."""
+        assert wt.is_task_merged("sp_missing", "999") is False
+
+    def test_missing_task_branch_return_false(self, wt, repo):
+        """Spec branch exists but task branch does not → False."""
+        wt.create_spec_branch("sp_half")
+        assert wt.is_task_merged("sp_half", "9999") is False
 
 
 # ------------------------------------------------------------------
@@ -472,18 +624,72 @@ class TestAgentConfigCopy:
         path = wt.create_task_worktree("sp_nocfg", "2030")
         assert path.exists()
 
+    def test_reprovisions_missing_config_on_reused_task_worktree(self, wt, repo):
+        """A half-provisioned worktree (has .git but missing .odin/config.yaml)
+        gets its config re-provisioned when the worktree is reused across
+        retries. Regression for task #339: the idempotent early-return path
+        skipped _copy_agent_configs, so a worktree left half-provisioned by a
+        crashed run never received its config back — load_config() then fell
+        back to defaults and produced a misleading resolver failure.
+        """
+        odin_dir = repo / ".odin"
+        odin_dir.mkdir(exist_ok=True)
+        (odin_dir / "config.yaml").write_text("board_id: 5\n")
+
+        wt.create_spec_branch("sp_reprov")
+        path = wt.create_task_worktree("sp_reprov", "2040")
+        assert (path / ".odin" / "config.yaml").exists()
+
+        # Simulate a half-provisioned worktree: remove the config.
+        (path / ".odin" / "config.yaml").unlink()
+        assert not (path / ".odin" / "config.yaml").exists()
+
+        # Reuse across a retry — config must be re-provisioned.
+        path2 = wt.create_task_worktree("sp_reprov", "2040")
+        assert path == path2
+        assert (path2 / ".odin" / "config.yaml").read_text() == "board_id: 5\n"
+
+    def test_reprovisions_missing_config_on_reused_spec_worktree(self, wt, repo):
+        """Same re-provisioning guarantee for the spec worktree."""
+        odin_dir = repo / ".odin"
+        odin_dir.mkdir(exist_ok=True)
+        (odin_dir / "config.yaml").write_text("board_id: 9\n")
+
+        wt.create_spec_branch("sp_reprovs")
+        path = wt.create_spec_worktree("sp_reprovs")
+        assert (path / ".odin" / "config.yaml").exists()
+
+        (path / ".odin" / "config.yaml").unlink()
+        assert not (path / ".odin" / "config.yaml").exists()
+
+        path2 = wt.create_spec_worktree("sp_reprovs")
+        assert path == path2
+        assert (path2 / ".odin" / "config.yaml").read_text() == "board_id: 9\n"
+
 
 class TestAgentConfigGitignore:
-    def test_gitignore_written_in_worktree(self, wt, repo):
+    def test_excludes_written_to_info_exclude_not_tracked_gitignore(self, wt, repo):
+        """Agent-config ignores go to git info/exclude, NEVER the tracked
+        .gitignore. Regression (task 287): odin appended to the tracked
+        .gitignore as an uncommitted change, so any task branch that also
+        touched .gitignore aborted its merge with would-be-overwritten."""
         wt.create_spec_branch("sp_gi")
         path = wt.create_task_worktree("sp_gi", "2100")
 
-        gi = (path / ".gitignore")
-        assert gi.exists()
-        content = gi.read_text()
+        exclude = _run(
+            ["git", "rev-parse", "--git-path", "info/exclude"], cwd=path
+        ).stdout.strip()
+        exclude_path = Path(exclude)
+        if not exclude_path.is_absolute():
+            exclude_path = path / exclude_path
+        content = exclude_path.read_text()
         assert _GITIGNORE_MARKER in content
         assert "/.env" in content
         assert "/.claude" in content
+
+        # The tracked .gitignore must be untouched: worktree starts clean.
+        status = _run(["git", "status", "--porcelain"], cwd=path).stdout.strip()
+        assert status == "", f"worktree dirty after setup: {status!r}"
 
     def test_git_add_does_not_stage_agent_configs(self, wt, repo):
         """git add -A in the worktree should not stage agent config files."""
@@ -551,3 +757,371 @@ class TestAgentConfigMergeFix:
         )
         committed_files = log.stdout.strip().splitlines()
         assert ".gitignore" not in committed_files
+
+    def test_auto_commit_excludes_all_harness_generated_paths(self, wt, repo):
+        """Regression for F24 (instance 2): merge-time auto-commit must
+        never sweep generated agent configs onto the task branch.
+
+        Fills the worktree with every artifact the harness/MCP config
+        writers produce — ``.codex/``, ``.gemini/``, ``.kilocode/``,
+        ``.qwen/``, ``opencode.json``, ``.mcp.json``, ``*.orig`` backups —
+        then runs auto-commit and asserts the committed tree contains
+        none of them.  Mirrors the real-world failure mode where two
+        tasks share the same harness config and the second commit would
+        otherwise conflict against the first.
+        """
+        wt.create_spec_branch("sp_f24")
+        path = wt.create_task_worktree("sp_f24", "2230")
+
+        # Write every file the MCP_CONFIG_MAP writers produce
+        configs = {
+            ".codex/config.toml": "[mcp_servers.taskit]\n",
+            ".gemini/settings.json": '{"mcpServers": {}}',
+            ".kilocode/mcp.json": '{"mcpServers": {}}',
+            ".qwen/settings.json": '{"mcpServers": {}}',
+            "opencode.json": '{"permission": {}, "mcp": {}}',
+            ".mcp.json": '{"mcpServers": {}}',
+        }
+        for rel, content in configs.items():
+            full = path / rel
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text(content)
+
+        # A .orig backup (as git merge would create) and a stray
+        # settings.local.json that the Claude CLI generates.
+        (path / "opencode.json.orig").write_text("old\n")
+        (path / ".claude").mkdir()
+        (path / ".claude" / "settings.local.json").write_text(
+            '{"permissions": {"allow": ["Read"]}}'
+        )
+
+        # Add one legitimate change that *should* be committed.
+        (path / "feature.py").write_text("print('hi')\n")
+
+        # Auto-commit via merge
+        result = wt.merge_task_into_spec("sp_f24", "2230", "F24 regression")
+        assert result.success is True, f"merge failed: {result.error}"
+
+        # Walk the committed tree on the task branch and confirm none of
+        # the harness-generated paths leaked in.  ``git log --name-only``
+        # returns files touched in every commit, including the auto-commit.
+        log = _run(
+            ["git", "log", "--all", "--name-only", "--pretty=format:",
+             "task/sp_f24/2230"],
+            cwd=repo,
+        )
+        committed_files = set(filter(None, log.stdout.strip().splitlines()))
+
+        # Legitimate change should have made it through.
+        assert "feature.py" in committed_files
+
+        # None of the harness-generated paths should be committed.
+        never_commit = {
+            ".codex/config.toml",
+            ".gemini/settings.json",
+            ".kilocode/mcp.json",
+            ".qwen/settings.json",
+            "opencode.json",
+            "opencode.json.orig",
+            ".mcp.json",
+            ".claude/settings.local.json",
+            ".gitignore",
+        }
+        leaked = never_commit & committed_files
+        assert not leaked, (
+            f"Auto-commit swept harness-generated configs onto task "
+            f"branch: {sorted(leaked)}"
+        )
+
+
+class TestAutoCommitPollutionGuard:
+    """Defence-in-depth against merge-time auto-commit sweeps that
+    ``.gitignore`` alone can't stop (regression for the 4,738-file
+    venv pollution incident).
+
+    Two guards:
+      1. A hard pollution blocklist (venv markers, node_modules,
+         site-packages, __pycache__) unstaged regardless of .gitignore.
+      2. A bulk-add guard: if more than ``_AUTO_COMMIT_MAX_NEW_FILES``
+         new untracked files would be committed, refuse the bulk and
+         commit only tracked modifications.
+    """
+
+    def _committed_files(self, repo, branch):
+        log = _run(
+            ["git", "log", "--all", "--name-only", "--pretty=format:", branch],
+            cwd=repo,
+        )
+        return set(filter(None, log.stdout.strip().splitlines()))
+
+    def test_venv_with_stale_gitignore_is_excluded(self, wt, repo):
+        """A venv (with pyvenv.cfg) sitting in a worktree whose
+        .gitignore predates the ``.venv*/`` pattern must never enter
+        the auto-commit tree.  Real work alongside it still commits.
+        """
+        from odin.worktree import _AUTO_COMMIT_MAX_NEW_FILES
+
+        wt.create_spec_branch("sp_venv")
+        path = wt.create_task_worktree("sp_venv", "2401")
+
+        # Simulate a real Python venv (the thing that caused the incident).
+        # pyvenv.cfg is the definitive venv marker.
+        (path / ".venv" / "bin").mkdir(parents=True)
+        (path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        (path / ".venv" / "bin" / "python").write_text("binary\n")
+        (path / ".venv" / "lib" / "site-packages").mkdir(parents=True)
+        (path / ".venv" / "lib" / "site-packages" / "pkg.py").write_text("# pkg\n")
+        # A __pycache__ dir at repo root too.
+        (path / "__pycache__").mkdir()
+        (path / "__pycache__" / "x.pyc").write_text("bytecode\n")
+
+        # Legitimate real work.
+        (path / "feature.py").write_text("print('real work')\n")
+
+        # Confirm the venv is genuinely unignored (stale .gitignore scenario):
+        # ``git status --porcelain`` must list .venv as untracked.
+        raw_status = _run(["git", "status", "--porcelain"], cwd=path).stdout
+        assert ".venv/" in raw_status or ".venv/pyvenv.cfg" in raw_status, (
+            "test setup broken: .venv is already gitignored; this test "
+            "needs a stale-ignore scenario to be meaningful"
+        )
+
+        result = wt.merge_task_into_spec("sp_venv", "2401", "venv guard")
+        assert result.success is True, f"merge failed: {result.error}"
+
+        committed = self._committed_files(repo, "task/sp_venv/2401")
+        assert "feature.py" in committed, "real work should still be committed"
+        # No venv / pycache file may have leaked in.
+        venv_leaked = {f for f in committed if ".venv" in f.split("/")
+                       or f.startswith("__pycache__")
+                       or "site-packages" in f.split("/")}
+        assert not venv_leaked, f"auto-commit swept venv pollution: {sorted(venv_leaked)}"
+
+    def test_venv_at_nonstandard_name_excluded_via_marker(self, wt, repo):
+        """A venv at a non-obvious name (``env/``) is detected via the
+        ``pyvenv.cfg`` marker file, not just the ``.venv*`` prefix."""
+        wt.create_spec_branch("sp_envmk")
+        path = wt.create_task_worktree("sp_envmk", "2402")
+
+        (path / "env" / "bin").mkdir(parents=True)
+        (path / "env" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        (path / "env" / "bin" / "python").write_text("binary\n")
+        (path / "real.py").write_text("x = 1\n")
+
+        result = wt.merge_task_into_spec("sp_envmk", "2402", "marker")
+        assert result.success is True, f"merge failed: {result.error}"
+
+        committed = self._committed_files(repo, "task/sp_envmk/2402")
+        assert "real.py" in committed
+        env_leaked = {f for f in committed if f.startswith("env/")}
+        assert not env_leaked, f"pyvenv.cfg marker missed a venv: {sorted(env_leaked)}"
+
+    def test_node_modules_excluded(self, wt, repo):
+        """node_modules is in the hard blocklist."""
+        wt.create_spec_branch("sp_nm")
+        path = wt.create_task_worktree("sp_nm", "2403")
+
+        (path / "node_modules" / "foo").mkdir(parents=True)
+        (path / "node_modules" / "foo" / "index.js").write_text("module.exports\n")
+        (path / "app.js").write_text("console.log('real')\n")
+
+        result = wt.merge_task_into_spec("sp_nm", "2403", "nm guard")
+        assert result.success is True, f"merge failed: {result.error}"
+
+        committed = self._committed_files(repo, "task/sp_nm/2403")
+        assert "app.js" in committed
+        assert not any(f.startswith("node_modules/") for f in committed), \
+            "node_modules leaked into commit"
+
+    def test_bulk_guard_refuses_many_new_files(self, wt, repo):
+        """When the sweep would add more than ``_AUTO_COMMIT_MAX_NEW_FILES``
+        new untracked files, the bulk is refused and only tracked
+        modifications are committed.  The skip is reported."""
+        from odin.worktree import _AUTO_COMMIT_MAX_NEW_FILES
+
+        wt.create_spec_branch("sp_bulk")
+        path = wt.create_task_worktree("sp_bulk", "2404")
+
+        # A tracked file to modify (README.md exists from _init_repo).
+        (path / "README.md").write_text("# modified by task\n")
+
+        # Generate well over the threshold of new untracked files that
+        # are NOT on the pollution blocklist (so only the bulk guard
+        # catches them).
+        over = _AUTO_COMMIT_MAX_NEW_FILES + 50
+        bulk_dir = path / "generated_logs"
+        bulk_dir.mkdir()
+        for i in range(over):
+            (bulk_dir / f"log_{i}.txt").write_text(f"entry {i}\n")
+
+        result = wt.merge_task_into_spec("sp_bulk", "2404", "bulk guard")
+        assert result.success is True, f"merge failed: {result.error}"
+
+        committed = self._committed_files(repo, "task/sp_bulk/2404")
+        # The tracked modification must survive.
+        assert "README.md" in committed
+        # None of the bulk new files should be committed.
+        bulk_leaked = {f for f in committed if f.startswith("generated_logs/")}
+        assert not bulk_leaked, (
+            f"bulk guard failed: {len(bulk_leaked)} new files committed "
+            f"(expected 0)"
+        )
+
+    def test_bulk_guard_threshold_allows_under_limit(self, wt, repo):
+        """Exactly at / under the threshold, new files ARE committed
+        (boundary check — guard must not be over-eager)."""
+        from odin.worktree import _AUTO_COMMIT_MAX_NEW_FILES
+
+        wt.create_spec_branch("sp_thresh")
+        path = wt.create_task_worktree("sp_thresh", "2405")
+
+        # Just under the threshold of legitimate new source files.
+        count = _AUTO_COMMIT_MAX_NEW_FILES - 1
+        src_dir = path / "src_new"
+        src_dir.mkdir()
+        for i in range(count):
+            (src_dir / f"mod_{i}.py").write_text(f"x{i} = {i}\n")
+
+        result = wt.merge_task_into_spec("sp_thresh", "2405", "threshold")
+        assert result.success is True, f"merge failed: {result.error}"
+
+        committed = self._committed_files(repo, "task/sp_thresh/2405")
+        src_committed = {f for f in committed if f.startswith("src_new/")}
+        assert len(src_committed) == count, (
+            f"bulk guard over-fired: only {len(src_committed)} of {count} "
+            f"legitimate files committed"
+        )
+
+    def test_exclusion_reported_in_result_and_log(
+        self, wt, repo, caplog,
+    ):
+        """The exclusion must be visible — never silent.  Both the
+        returned result object and the WARNING log carry the skipped
+        count."""
+        import logging
+        from odin.worktree import AutoCommitResult
+
+        wt.create_spec_branch("sp_rep")
+        path = wt.create_task_worktree("sp_rep", "2406")
+
+        (path / ".venv" / "bin").mkdir(parents=True)
+        (path / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        (path / ".venv" / "bin" / "python").write_text("x\n")
+        (path / "feature.py").write_text("print('real')\n")
+
+        with caplog.at_level(logging.WARNING, logger="odin.worktree"):
+            ac = wt._auto_commit_worktree("sp_rep", "2406", "report test")
+
+        assert isinstance(ac, AutoCommitResult)
+        assert ac.committed is True
+        assert ac.skipped_blocklist >= 2, (
+            f"expected venv files blocklisted, got {ac.skipped_blocklist}"
+        )
+        # The log must mention the exclusion loudly (WARNING level).
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("excluded" in r.getMessage().lower() or "blocklist" in r.getMessage().lower()
+                   for r in warnings), (
+            f"exclusion not surfaced in logs: {[r.getMessage() for r in warnings]}"
+        )
+
+
+# ------------------------------------------------------------------
+# Provenance trailers (Task-Id / Spec-Id)
+# ------------------------------------------------------------------
+
+class TestProvenanceTrailers:
+    """Every commit odin creates on the merge path carries Task-Id and
+    Spec-Id trailers so ``testing_tools/why.py`` can answer
+    "why does this line exist" via blame → trailer → task/spec."""
+
+    def test_auto_commit_message_has_trailers(self, wt, repo):
+        """Uncommitted work auto-committed at merge time carries trailers."""
+        wt.create_spec_branch("sp_tr")
+        path = wt.create_task_worktree("sp_tr", "501")
+        # Leave work uncommitted — auto-commit kicks in at merge
+        (path / "feature.py").write_text("x = 1\n")
+
+        result = wt.merge_task_into_spec("sp_tr", "501", "Trailer task")
+        assert result.success is True
+
+        # The auto-commit is on the task branch
+        auto_msg = _run(
+            ["git", "log", "--format=%B", "-1", "task/sp_tr/501"],
+            cwd=repo,
+        ).stdout
+        trailers = _run(
+            ["git", "log", "--format=%(trailers)", "-1", "task/sp_tr/501"],
+            cwd=repo,
+        ).stdout
+        assert "Task-Id: 501" in auto_msg
+        assert "Spec-Id: sp_tr" in auto_msg
+        assert "Task-Id: 501" in trailers
+        assert "Spec-Id: sp_tr" in trailers
+
+    def test_merge_commit_message_has_trailers(self, wt, repo):
+        """The --no-ff merge commit carries trailers."""
+        wt.create_spec_branch("sp_mt")
+        path = wt.create_task_worktree("sp_mt", "502")
+        _commit_file(path, "work.py", "y = 2\n", "real work")
+
+        result = wt.merge_task_into_spec("sp_mt", "502", "Merge trailer")
+        assert result.success is True
+
+        # Find the merge commit on the spec branch
+        merge_msg = _run(
+            ["git", "log", "--format=%B", "--merges", "-1", "spec/sp_mt"],
+            cwd=repo,
+        ).stdout
+        trailers = _run(
+            ["git", "log", "--format=%(trailers)", "--merges", "-1", "spec/sp_mt"],
+            cwd=repo,
+        ).stdout
+        assert "Task-Id: 502" in merge_msg
+        assert "Spec-Id: sp_mt" in merge_msg
+        assert "Task-Id: 502" in trailers
+        assert "Spec-Id: sp_mt" in trailers
+
+    def test_trailers_extractable_by_key(self, wt, repo):
+        """``git log --format=%(trailers:key=...)`` returns just the value,
+        which is what why.py uses to walk the chain."""
+        from odin.worktree import _provenance_trailers
+
+        # Unit-test the helper directly too
+        block = _provenance_trailers("sp_x", "99")
+        assert "Task-Id: 99" in block
+        assert "Spec-Id: sp_x" in block
+
+        wt.create_spec_branch("sp_key")
+        path = wt.create_task_worktree("sp_key", "503")
+        _commit_file(path, "f.txt", "z\n", "work")
+
+        wt.merge_task_into_spec("sp_key", "503", "Key extract")
+
+        task_id = _run(
+            ["git", "log", "--format=%(trailers:key=Task-Id,valueonly)",
+             "--merges", "-1", "spec/sp_key"],
+            cwd=repo,
+        ).stdout.strip()
+        spec_id = _run(
+            ["git", "log", "--format=%(trailers:key=Spec-Id,valueonly)",
+             "--merges", "-1", "spec/sp_key"],
+            cwd=repo,
+        ).stdout.strip()
+        assert task_id == "503"
+        assert spec_id == "sp_key"
+
+    def test_trailers_present_without_title(self, wt, repo):
+        """Merge with no task_title still gets trailers."""
+        wt.create_spec_branch("sp_nt")
+        path = wt.create_task_worktree("sp_nt", "504")
+        _commit_file(path, "a.txt", "a\n", "work")
+
+        result = wt.merge_task_into_spec("sp_nt", "504")
+        assert result.success is True
+
+        trailers = _run(
+            ["git", "log", "--format=%(trailers)", "--merges", "-1", "spec/sp_nt"],
+            cwd=repo,
+        ).stdout
+        assert "Task-Id: 504" in trailers
+        assert "Spec-Id: sp_nt" in trailers

@@ -1,0 +1,20 @@
+### Quality Assessment
+- MET: tasks/middleware.py uses TokenStore for the JWT path.
+- MET: tests pass for the new path (767 tests, 0 failures).
+- UNMET: cookie-based legacy path is broken (ImportError at startup).
+
+### Slop Detection
+None.
+
+### Actionable Improvements
+- Wire TokenStore initialization so the legacy cookie path also resolves tokens.
+- Add a regression test for the cookie path before closing this task.
+
+### Agent Optimization
+The agent could have caught the import-time failure with a one-line smoke test.
+
+### Quota / Resource Failure
+None.
+
+### Verdict
+NEEDS_WORK — refactor is correct on the new path but breaks the legacy cookie path; the ImportError is a fixable gap, not a structural problem.

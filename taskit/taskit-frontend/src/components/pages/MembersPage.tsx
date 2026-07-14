@@ -40,6 +40,7 @@ export function MembersPage({ selectedBoard, refreshKey = 0, onEditMember }: Mem
             joined_from: searchParams.get('joined_from') || undefined,
             joined_to: searchParams.get('joined_to') || undefined,
             sort: searchParams.get('sort') || undefined,
+            since_spec: searchParams.get('since_spec') || undefined,
             page: Number.isNaN(page) ? 1 : page,
             page_size: Number.isNaN(pageSize) ? 25 : pageSize,
         };
@@ -105,6 +106,7 @@ export function MembersPage({ selectedBoard, refreshKey = 0, onEditMember }: Mem
 
     return (
         <div>
+            {/* The agent+model league moved to Stats (Cost & Agents zone). */}
             <FilterBar resultCount={loading ? undefined : count} resultLabel={count === 1 ? 'member' : 'members'} onClearAll={() => setSearchParams(prev => {
                 const next = new URLSearchParams();
                 const board = prev.get('board');

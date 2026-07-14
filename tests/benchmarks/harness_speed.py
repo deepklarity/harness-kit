@@ -22,7 +22,7 @@ _ODIN_SRC = _HARNESS_KIT / "odin" / "src"
 if _ODIN_SRC.exists() and str(_ODIN_SRC) not in sys.path:
     sys.path.insert(0, str(_ODIN_SRC))
 
-from odin.harnesses import claude, codex, gemini, glm, minimax, qwen  # noqa: E402
+from odin.harnesses import claude, codex, gemini, glm, minimax  # noqa: E402
 from odin.models import AgentConfig  # noqa: E402
 
 AGENT_MODELS = _HARNESS_KIT / "taskit" / "taskit-backend" / "data" / "agent_models.json"
@@ -34,7 +34,6 @@ HARNESSES = {
     "claude": claude.ClaudeHarness,
     "codex": codex.CodexHarness,
     "gemini": gemini.GeminiHarness,
-    "qwen": qwen.QwenHarness,
     "glm": glm.GLMHarness,
     "minimax": minimax.MiniMaxHarness,
 }
@@ -166,7 +165,6 @@ def parse_tokens(raw_stdout: str) -> dict[str, int]:
       - Claude:         {"modelUsage": {"<model>": {"inputTokens", "outputTokens"}}}
       - Codex:          {"type": "turn.completed", "usage": {"input_tokens", "output_tokens"}}
       - Gemini:         {"type": "result", "stats": {"input_tokens", "output_tokens"}}
-      - Qwen:           {"type": "result", "usage": {"input_tokens", "output_tokens"}}
       - opencode/kilo:  {"type": "step_finish", "part": {"tokens": {"input", "output"}}}
     """
     in_tok = 0

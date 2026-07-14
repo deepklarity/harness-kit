@@ -71,11 +71,6 @@ def _server_entry_gemini() -> Dict:
     return {"mobile": {"command": _NPX_CMD, "args": _NPX_ARGS, "trust": True}}
 
 
-def _server_entry_qwen() -> Dict:
-    """Qwen — same structure as Gemini."""
-    return {"mobile": {"command": _NPX_CMD, "args": _NPX_ARGS, "trust": True}}
-
-
 def _server_entry_codex() -> List[str]:
     """Codex — returns list of ``-c`` flag pairs for CLI injection."""
     return [
@@ -110,7 +105,6 @@ def _opencode_permissions() -> Dict[str, str]:
 _FRAGMENT_MAP = {
     "claude": _server_entry_claude,
     "gemini": _server_entry_gemini,
-    "qwen": _server_entry_qwen,
     "codex": _server_entry_codex,
     "kilocode": _server_entry_kilocode,
     "minimax": _server_entry_opencode,

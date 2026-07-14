@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
-from odin.orchestrator import Orchestrator
+from odin.orchestrator import Orchestrator, WorktreeIsolationError
 
 @pytest.fixture
 def mock_orchestrator(odin_dirs, make_config, tmp_path):
@@ -252,8 +252,8 @@ class TestExecTaskWorktree:
         assert task.metadata["merge_status"] == "pending"
 
     @pytest.mark.asyncio
-    async def test_exec_task_handles_worktree_creation_failure(self, mock_orchestrator):
-        """Verify graceful fallback when worktree creation fails."""
+    async def test_exec_task_refuses_to_run_without_isolation(self, mock_orchestrator):
+        """Worktree creation failure raises — never project-root fallback (F51)."""
         orch = mock_orchestrator
         _create_task(orch)
 
@@ -261,13 +261,11 @@ class TestExecTaskWorktree:
         orch._worktree.create_spec_branch.side_effect = RuntimeError("git broken")
 
         with patch.object(orch, "_execute_task", new_callable=AsyncMock) as mock_exec:
-            mock_exec.return_value = {"success": True, "output": "done"}
-            result = await orch.exec_task("tsk_abc123")
+            with pytest.raises(WorktreeIsolationError, match="git broken"):
+                await orch.exec_task("tsk_abc123")
 
-        mock_exec.assert_called_once()
-        assert result["success"] is True
+        mock_exec.assert_not_called()
         orch._worktree.merge_task_into_spec.assert_not_called()
-        orch._worktree.cleanup_task_worktree.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_exec_task_cleans_up_worktree_on_success(self, mock_orchestrator, tmp_path):
@@ -382,8 +380,8 @@ class TestExecTaskWorktree:
         orch._worktree.create_task_worktree.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_worktree_creation_failure_uses_original_working_dir(self, mock_orchestrator):
-        """When worktree creation fails, _execute_task gets original working_dir."""
+    async def test_worktree_creation_failure_never_executes(self, mock_orchestrator):
+        """When worktree creation fails, the agent must never start (F51)."""
         orch = mock_orchestrator
         _create_task(orch)
 
@@ -391,13 +389,10 @@ class TestExecTaskWorktree:
         orch._worktree.create_spec_branch.side_effect = RuntimeError("git broken")
 
         with patch.object(orch, "_execute_task", new_callable=AsyncMock) as mock_exec:
-            mock_exec.return_value = {"success": True, "output": "done"}
-            await orch.exec_task("tsk_abc123")
+            with pytest.raises(WorktreeIsolationError):
+                await orch.exec_task("tsk_abc123")
 
-        # working_dir should be the default (not a worktree path)
-        call_args = mock_exec.call_args
-        working_dir = call_args[0][3]  # positional arg 3 is working_dir
-        assert "worktree" not in working_dir.lower()
+        mock_exec.assert_not_called()
 
 
 # ------------------------------------------------------------------
@@ -443,7 +438,8 @@ class TestWorktreeComments:
         with patch.object(orch, "_execute_task", new_callable=AsyncMock) as mock_exec, \
              patch.object(orch.task_mgr, "add_comment", wraps=orch.task_mgr.add_comment) as mock_comment:
             mock_exec.return_value = {"success": True, "output": "done"}
-            await orch.exec_task("tsk_abc123")
+            with pytest.raises(WorktreeIsolationError):
+                await orch.exec_task("tsk_abc123")
 
         failure_comments = [
             c for c in mock_comment.call_args_list

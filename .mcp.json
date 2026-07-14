@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "taskit": {
+      "command": "taskit-mcp",
+      "env": {
+        "TASKIT_URL": "http://localhost:9100"
+      }
+    },
+    "mobile": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@mobilenext/mobile-mcp@latest"
+      ]
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ]
+    }
+  }
+}

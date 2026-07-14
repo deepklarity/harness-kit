@@ -43,7 +43,7 @@ Data out: env dict + config file path for the target CLI + mobile_mcp_enabled co
 ## 2a. Mobile MCP: Config & Harness Injection
 
 **File**: `odin/src/odin/mcps/mobile_mcp/config.py`
-**Functions**: `get_tool_names()`, `get_server_fragment(harness_name)`
+**Functions**: `mobile_tool_names()`, `server_fragment(agent_name)`
 **Called by**: `_generate_mcp_config()` in orchestrator, harness `execute()` methods
 **Calls**: Nothing — returns static config dicts
 

@@ -1,0 +1,141 @@
+You are auditing a task executed by an AI agent.
+
+
+## CTX — proof artifact (`.proof/task-204/proof.md`)
+
+The worker writes the canonical, complete proof file to `.proof/task-204/proof.md`
+in the worktree (read-only worktree mount; `cat`, `grep`, `head` freely).
+Raw suite outputs sit beside it as `.proof/task-204/<name>.txt` — full output, no
+cap. Read **`.proof/task-204/proof.md` first** — it is the primary, authoritative
+source for what the worker claims and where it lives.
+
+For each acceptance criterion, choose complete vs minimal context: read
+the full proof file once, then grep the section you need. Do NOT re-run
+the verify suites to fill gaps — the worker already attached raw outputs
+under `.proof/task-204/`. The proof path carries no truncation or size cap; read
+the full file when a criterion needs the full chain of evidence.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Work efficiently: batch independent file reads/greps into a single step, and do NOT re-read a file or re-run a search you have already done — each extra tool call is a full model round-trip.
+- **REPORT FORMAT: ONE fenced JSON block, then optionally a markdown rendering.** Your first non-blank line MUST be a single ```json ... ``` fence containing a JSON object with at minimum a `verdict` key. After the fence you MAY also emit the legacy `### Quality Assessment / ### Verdict` sections as a human-readable rendering of the same JSON — the JSON block is the source of truth, the rendering is for the board UI.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.** This task may have been attempted by multiple agents or models previously. Comments are separated by "--- CURRENT ATTEMPT ---" when prior attempts exist. Use earlier history for understanding context only — do NOT penalize the current agent for failures, quota issues, or code quality problems from previous agents/models. Your verdict must reflect solely the current agent's work.
+
+## TASK UNDER REVIEW
+Title: Reflection reviewer model measurement — N>=5 per candidate (W5.5)
+Status: REVIEW
+Agent: opencode (zai-coding-plan/glm-5.2)
+Duration: N/Ams | Tokens: N/A
+
+## [CTX:description] Task Description
+Measure candidate reviewer models: run OFFLINE eval across candidates with N>=5 distinct real inputs, report parse%/agreement%/ERROR% per candidate, apply task 191 thresholds, recommend flip/keep/size-scale. Acceptance: N>=5 per candidate, table in proof, one-paragraph recommendation.
+
+## [CTX:execution_result] Execution Output
+Worker live-run artifacts:
+- eval_live_run.txt: 0 bytes (empty)
+- eval_live_stderr.txt: 0 bytes (empty)
+- eval_run/captures/: only 1 file present (zai-coding-plan/glm-5.2/task_185_merged.raw.txt) out of 27 planned candidate x fixture calls.
+- git status: nothing committed; HEAD unchanged.
+Worker's own status update quoted: 'Only 1/27 after 7 minutes... let me kill it'. The run was abandoned, never resumed.
+
+## [CTX:comments] Comments & Proof
+--- CURRENT ATTEMPT ---
+No .proof/task-204/proof.md was written. No per-candidate table (parse%, agreement%, ERROR%) exists in any file. No recommendation paragraph exists. The worker posted 'Completed successfully' but produced none of the acceptance-criteria artifacts.
+
+## [CTX:dependencies] Dependent Tasks
+Depends on task 191 (measurement harness).
+
+## [CTX:metadata] Task Metadata
+spec=sp_fable_w5 task_id=204 status=REVIEW prev_attempt=true
+
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers. The JSON block
+is the source of truth for the parser; the markdown is a convenience
+rendering the parser will ignore if both are present.
+
+### Required JSON contract
+
+Your first non-blank line MUST be a fenced JSON block:
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification, the same one you'd put after ### Verdict.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason. Then defects (file:line).",
+  "slop_detection": "Specific AI slop found, or 'None.'",
+  "improvements": "Bullet list of up to 5 actionable items (what, where, why). 'None.' if clean.",
+  "agent_optimization": "Description clarity / model tier / token efficiency / prompt improvement.",
+  "quota_failure": "QUOTA_FAILURE: <agent_name> if the current attempt hit a quota/rate limit; otherwise 'None.'.",
+  "fix_list": ["targeted", "fix", "items", "for", "rework"]
+}
+```
+
+Rules:
+- `verdict` MUST be exactly `PASS`, `NEEDS_WORK`, or `FAIL` (uppercase). A
+  bare word with no review content (just "PASS" alone, or a verdict
+  keyword buried in CLI noise) is treated as a reviewer failure — the
+  system will NOT honor it. The JSON object must be the FIRST thing you
+  emit, complete and parseable, or your review will not be processed.
+  Do NOT skip the structured JSON just because the verdict is obvious;
+  emit the JSON with full sections, even if the verdict is PASS with
+  nothing else to flag.
+- `summary` is the one-sentence justification. It appears on the board
+  as the verdict summary. The "Evidence rules" below apply to it.
+- `fix_list` is REQUIRED for `NEEDS_WORK`: name the exact artifact or
+  change needed so the rework is scoped, not a blind redo. Empty list
+  `[]` is fine for `PASS` and `FAIL`.
+- `quality_assessment`, `slop_detection`, `improvements`,
+  `agent_optimization`, `quota_failure` are strings; default to
+  `"None."` when there's nothing to report.
+- Do NOT emit anything before the opening ```json fence. No
+  preamble, no narration, no permission requests, no conversational
+  text. The parser uses the JSON block as the first content and
+  anything before it is treated as noise.
+
+### Verdict rubric (applies to `verdict` in the JSON)
+
+Choose from what the evidence PROVES. Each rework round costs a full VM
+boot, environment rebuild, and tokens — so FAIL and NEEDS_WORK must be
+earned by substance, never spent on process trivia or invented rules.
+
+- PASS — every acceptance criterion is verifiably met and the work is
+  correct, safe, and builds/runs. Minor style or proof-formatting nits
+  do NOT block a PASS; put them in `improvements`.
+- NEEDS_WORK — the work is substantially correct but has a fixable
+  gap: a missing or truncated proof artifact, an unmet non-critical
+  criterion, or a process slip that does not make the code wrong. Pair
+  EVERY NEEDS_WORK with a TARGETED fix list (the `fix_list` field in
+  the JSON, or a list of items under "### Actionable Improvements" in
+  the rendering — name the exact artifact or change needed) so the
+  rework is scoped, not a blind redo.
+- FAIL — reserved for work that is WRONG, UNSAFE, or UNVERIFIABLE: it breaks the build or a downstream integration, corrupts state, crashes the orchestrator, contradicts a stated acceptance criterion, or supplies no evidence that the core behavior works. Also use FAIL for quota/resource exhaustion (justification must mention "quota" or "rate limit") so the system can reassign to a different agent.
+
+Evidence rules — apply these BEFORE choosing a verdict:
+- CITE OR DROP. Any claimed rule/policy/convention violation MUST quote the exact rule text and name the file it lives in (e.g. CLAUDE.md: "Never run ANY git stash command"). If you cannot quote and locate the rule, it does not exist for this review — you may NOT lower the verdict for it; raise it in `improvements` at most. A cited rule only counts if its stated scope actually covers this situation (a rule scoped to "shared repos / concurrent sessions" is not violated by an action inside the task's own isolated worktree). If a rule violation affects the verdict, include that exact citation in the report text.
+- A truncated, malformed, or missing proof artifact is a REQUEST, not a verdict. Name the specific artifact you need and ask for it (NEEDS_WORK at most). It only drives FAIL when it leaves the CORE behavior genuinely unverifiable AND no other evidence (code you can read, build output, comments) establishes correctness.
+- Judge the SUBSTANCE of the best available evidence. Tasks may span
+  several attempts; earlier attempts' partial numbers or
+  contradictions with history are NOT defects of the current work.
+- Formatting/completeness of proof comments is NOT a verdict criterion
+  when the underlying acceptance criteria are verifiably met; mention
+  formatting issues in `improvements` instead.
+- Comments authored by a human operator (non-agent email) are
+  authoritative context — do not contradict them.
+- Do not demand artifacts the environment cannot produce (e.g. an
+  ODIN-STATUS block when the run was concluded by an operator).
+
+### Optional markdown rendering (after the JSON block)
+
+After the JSON fence you MAY emit the legacy sections as a human-readable rendering of the same content. The parser uses the JSON as the source of truth and ignores the rendering, so emitting it is purely for the board UI. The rendering is OPTIONAL — the JSON block is sufficient on its own. The legacy section names, in order, are:
+
+- `### Quality Assessment`
+- `### Slop Detection`
+- `### Actionable Improvements`
+- `### Agent Optimization`
+- `### Quota / Resource Failure`
+- `### Verdict`

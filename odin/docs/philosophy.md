@@ -52,6 +52,8 @@ AI output must meet the same quality bar as human-authored code. No boilerplate 
 ### 13. Human-First Legibility
 Dashboards, logs, and task boards are designed for human scanning first. Dense JSON or LLM-optimized formats are internal plumbing — what the user sees should be visual, scannable, and require minimal cognitive effort. When in doubt, optimize for the human eye, not the token window.
 
+This is a design discipline, not a styling pass: ground interfaces in accumulated UX and human-psychology knowledge (preattentive attributes, progressive disclosure, one-glance answers to the question the human actually has). "Theoretically functional" is not the bar — a view earns its place by measurably speeding up human information processing. Established forms (kanban, log tails) are defaults to challenge, not constraints: if a denser needs-attention stream processes a 100-task wave faster than columns, the columns lose.
+
 ### 14. Platform Agnostic
 Odin doesn't depend on any single AI provider. Agents are interchangeable behind a harness interface. If Claude goes down, swap to Gemini. If a new model launches, add a harness. The orchestration layer has zero provider lock-in. AI capabilities evolve monthly — the architecture assumes nothing about any provider is permanent.
 
@@ -71,6 +73,11 @@ Every phase of work — planning, execution, reflection — produces a trace. Th
 
 ### 19. Adaptive Intelligence
 The board is not just a record — it's a feedback loop. Execution data (success rates, failure reasons, rework frequency, cost per task) accumulates across runs. When Gemini Flash fails a task, Odin should be able to diagnose *why* — was context missing from the handover? Was the task too complex for the model tier? Was the prompt ambiguous? This diagnosis feeds back into future planning: adjust agent assignments, enrich task descriptions, add dependencies that were missing. Every run makes the next run smarter. The system evolves not by upgrading models, but by learning which agent fits which task shape.
+
+### 20. Compounding Amplifiers
+A conveyor belt does the same thing N times; an amplifier makes all N better. The environment agents work in — breadcrumbs, encoded design patterns, debug scripts, visualization, cost awareness, curated tests — is a compounding asset: every improvement to it upgrades every future task, human- or agent-executed, forever. Throughput work (dispatch, promotion, requeue) is the engine; engines don't compound — assets do. Once the engine runs unattended-enough, the environment is the bottleneck, and amplifier work dominates duty-removal work.
+
+Two rules keep this honest: amplifiers must prove they amplify (each ships with a measured before/after on real work — tokens spent, slop findings, rework cycles, human seconds-to-comprehension), and amplifier thinking starts from first principles (reimagine the flow from the root of the problem — "is this the right view/tool/channel at all?" — rather than bolting features onto the existing shape).
 
 ## The DAG Model
 
@@ -142,3 +149,4 @@ Each step is optional/repeatable. The human can:
 3. **Suggestive, not prescriptive.** Agent assignments and decompositions are defaults. Override freely.
 4. **Fail fast.** A failed task stops its dependents. Don't waste compute on doomed work.
 5. **Simple primitives, flexible composition.** Tasks + dependencies + waves. Complex workflows emerge from composition.
+6. **Amplifiers over throughput.** When choosing what to build next, prefer work that compounds (patterns, breadcrumbs, tooling, legibility) over work that only adds cycles.

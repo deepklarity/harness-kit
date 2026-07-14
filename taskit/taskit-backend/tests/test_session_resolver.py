@@ -131,3 +131,59 @@ class SessionResolverTests(APITestCase):
         info = resolve_session(self.task)
         self.assertEqual(info.session_type, SESSION_TYPE_TASK)
         self.assertFalse(info.live)
+
+
+class SandboxedRunResolutionTests(APITestCase):
+    """Celery runs odin with cwd = the task worktree, so live traces stream to
+    {worktree}/.odin/logs — not the board-root guess. Resolution order must be:
+    task.metadata['trace_file'] (odin records it at exec start) → board-root
+    log dir → derived worktree path."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.working_dir = Path(self.tmp.name)
+        self.root_logs = self.working_dir / ".odin" / "logs"
+        self.root_logs.mkdir(parents=True, exist_ok=True)
+        self.board = self.make_board(working_dir=str(self.working_dir))
+        self.spec = self.make_spec(self.board, odin_id="sp_test")
+        self.task = self.make_task(
+            self.board, spec=self.spec, status=TaskStatus.EXECUTING
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        super().tearDown()
+
+    def test_metadata_trace_file_is_preferred(self):
+        alt = self.working_dir / "anywhere.trace.jsonl"
+        alt.write_text('{"x": 1}\n')
+        self.task.metadata = {**(self.task.metadata or {}), "trace_file": str(alt)}
+        self.task.save(update_fields=["metadata"])
+        info = resolve_session(self.task)
+        self.assertEqual(info.jsonl_path, str(alt))
+        self.assertTrue(info.exists)
+        self.assertEqual(info.session_type, SESSION_TYPE_TASK)
+
+    def test_missing_metadata_path_falls_back_to_root(self):
+        self.task.metadata = {
+            **(self.task.metadata or {}),
+            "trace_file": str(self.working_dir / "gone.trace.jsonl"),
+        }
+        self.task.save(update_fields=["metadata"])
+        root = self.root_logs / f"task_{self.task.id}.trace.jsonl"
+        root.write_text('{"y": 2}\n')
+        info = resolve_session(self.task)
+        self.assertEqual(info.jsonl_path, str(root))
+
+    def test_worktree_trace_fallback_for_celery_runs(self):
+        wt_logs = (
+            self.working_dir / ".odin" / "worktrees" / "sp_test"
+            / str(self.task.id) / ".odin" / "logs"
+        )
+        wt_logs.mkdir(parents=True)
+        wt_trace = wt_logs / f"task_{self.task.id}.trace.jsonl"
+        wt_trace.write_text('{"z": 3}\n')
+        info = resolve_session(self.task)
+        self.assertEqual(info.jsonl_path, str(wt_trace))
+        self.assertTrue(info.exists)

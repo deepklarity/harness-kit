@@ -61,21 +61,33 @@ export function ManageMembersModal({ board, members, onClose, onDataChange }: Ma
         return false;
     }, [agents, originalAgents]);
 
+    // W10.4: the roster is DB-backed; not gated on ``odinInitialized``.
+    // New boards (UI-only, never ``odin init``ed) are the very boards
+    // that need this tab the most — the symptom was "fresh board has
+    // no enabled agents" and the fix lives in this dialog.
     const defaultTab = board.odinInitialized ? 'agents' : 'people';
 
     const loadAgents = useCallback(async () => {
-        if (!board.odinInitialized) return;
         setAgentsLoading(true);
         try {
             const result = await service.fetchBoardAgents(board.id);
             setAgents(result);
             setOriginalAgents(JSON.parse(JSON.stringify(result)));
-        } catch {
-            // Silent fail
+        } catch (err) {
+            // Surface the failure — silent blank is how the operator never
+            // notices when the roster is empty because of an upstream bug.
+            toast({
+                title: 'Failed to load agents',
+                description:
+                    err instanceof Error
+                        ? err.message
+                        : `Could not read /api/boards/${board.id}/agents/.`,
+                variant: 'destructive',
+            });
         } finally {
             setAgentsLoading(false);
         }
-    }, [board.id, board.odinInitialized, service]);
+    }, [board.id, service, toast]);
 
     const loadBoardMembers = useCallback(async () => {
         try {

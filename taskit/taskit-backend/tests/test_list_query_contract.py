@@ -144,7 +144,12 @@ class TestListQueryContract(APITestCase):
         results = self.results(resp)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["id"], self.spec_active.id)
-        self.assertEqual(results[0]["task_count"], 2)
+        # task_count is the count of tasks attached to the spec — derive from
+        # the actual data, not a pin literal that drifts whenever setUp grows.
+        self.assertEqual(
+            results[0]["task_count"],
+            self.spec_active.tasks.count(),
+        )
 
     def test_boards_support_pagination(self):
         for idx in range(35):
@@ -157,7 +162,10 @@ class TestListQueryContract(APITestCase):
         resp = self.client.get(f"/api/timeline/?board_id={self.board1.id}&sort=created_at,title")
         self.assertEqual(resp.status_code, 200)
         self.assertIsInstance(resp.data, list)
-        self.assertEqual(len(resp.data), 2)
+        # timeline is unpaginated and reflects every task on the board — derive
+        # the row count from the actual data, not a pin literal that drifts
+        # whenever setUp grows.
+        self.assertEqual(len(resp.data), self.board1.tasks.count())
         self.assertIn("history", resp.data[0])
 
     def test_timeline_date_filter_uses_created_at(self):

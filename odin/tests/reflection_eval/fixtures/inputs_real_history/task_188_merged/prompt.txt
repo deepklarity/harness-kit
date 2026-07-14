@@ -1,0 +1,303 @@
+You are auditing a task executed by an AI agent.
+
+
+## CTX — proof artifact (`.proof/task-188/proof.md`)
+
+The worker writes the canonical, complete proof file to `.proof/task-188/proof.md`
+in the worktree (read-only worktree mount; `cat`, `grep`, `head` freely).
+Raw suite outputs sit beside it as `.proof/task-188/<name>.txt` — full output, no
+cap. Read **`.proof/task-188/proof.md` first** — it is the primary, authoritative
+source for what the worker claims and where it lives.
+
+For each acceptance criterion, choose complete vs minimal context: read
+the full proof file once, then grep the section you need. Do NOT re-run
+the verify suites to fill gaps — the worker already attached raw outputs
+under `.proof/task-188/`. The proof path carries no truncation or size cap; read
+the full file when a criterion needs the full chain of evidence.
+
+## CONSTRAINTS
+- READ-ONLY mode. Do NOT modify files, make commits, or run destructive commands.
+- You MAY read files and grep to verify the agent's work.
+- Work efficiently: batch independent file reads/greps into a single step, and do NOT re-read a file or re-run a search you have already done — each extra tool call is a full model round-trip.
+- **REPORT FORMAT: ONE fenced JSON block, then optionally a markdown rendering.** Your first non-blank line MUST be a single ```json ... ``` fence containing a JSON object with at minimum a `verdict` key. After the fence you MAY also emit the legacy `### Quality Assessment / ### Verdict` sections as a human-readable rendering of the same JSON — the JSON block is the source of truth, the rendering is for the board UI.
+- Be concise. Bullet points only. 1-2 lines per finding. If a section has no findings, write "None."
+- **Evaluate only the LATEST execution attempt.** This task may have been attempted by multiple agents or models previously. Comments are separated by "--- CURRENT ATTEMPT ---" when prior attempts exist. Use earlier history for understanding context only — do NOT penalize the current agent for failures, quota issues, or code quality problems from previous agents/models. Your verdict must reflect solely the current agent's work.
+
+## TASK UNDER REVIEW
+Title: Data-driven agent routing (W4.4)
+Status: DONE
+Agent: claude ((historical))
+Duration: N/Ams | Tokens: N/A
+
+## [CTX:description] Task Description
+Fable roadmap task Data-driven agent routing (W4.4). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+
+## [CTX:execution_result] Execution Output
+Merge task 188: Data-driven agent routing (W4.4)
+
+Conflict resolution: task 188 wrote its proof to the shared .proof/proof.md
+(the collision wave 4 fixes). Kept task 192's proof at the shared path,
+relocated 188's proof to .proof/task-188/proof.md per the new convention.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+
+
+ .proof/backend_agent_stats_tests.txt               |  129 +++
+ .proof/backend_autonomy_metrics_tests.txt          |   16 +
+ .proof/backend_full_suite.txt                      | 1014 ++++++++++++++++++++
+ .proof/odin_full_suite.txt                         |   49 +-
+ .proof/odin_mock_suite.txt                         |   38 +
+ .proof/odin_routing_existing_tests.txt             |   43 +
+ .proof/odin_routing_tests.txt                      |   44 +
+ .proof/odin_unit_disk_suite.txt                    |   14 +
+ .proof/routing_table.json                          |   53 +
+ .proof/routing_table_text.txt                      |   15 +
+ .proof/selfaudit_clean.txt                         |    2 +
+ .proof/suggester_tests.txt                         |   37 +
+ .proof/task-188/proof.md                           |  227 +++++
+ odin/src/odin/agent_routing.py                     |  375 ++++++++
+ odin/src/odin/backends/taskit.py                   |   26 +
+ odin/src/odin/orchestrator.py                      |  238 ++++-
+ odin/tests/TEST_PLAN.md                            |   21 +
+ odin/tests/mock/test_fetch_agent_stats.py          |   85 ++
+ odin/tests/testcase_readme.md                      |   52 +
+ odin/tests/unit/test_agent_routing.py              |  280 ++++++
+ odin/tests/unit/test_route_task_suggester.py       |  631 ++++++++++++
+ taskit/taskit-backend/tasks/agent_stats.py         |  295 ++++++
+ taskit/taskit-backend/tasks/views.py               |   30 +
+ .../testing_tools/autonomy_metrics.py              |   72 +-
+ .../testing_tools/routing_suggest.py               |  335 +++++++
+ .../testing_tools/seed_routing_history.py          |  142 +++
+ taskit/taskit-backend/tests/test_agent_stats.py    |  385 ++++++++
+ 27 files changed, 4552 insertions(+), 96 deletions(-)
+
+
+## [CTX:comments] Comments & Proof
+--- CURRENT ATTEMPT ---
+Proof of work (committed at .proof/task-188/proof.md):
+
+# Task 188 — Routing: Orchestrator must consult the full viable pool
+
+## Reviewer verdict addressed (round 2)
+
+1. *Orchestrator gap:* "the orchestrator pre-selects the cheapest static
+   cost tier before ever consulting the suggester, so the explicitly
+   required 'only an expensive agent succeeds → escalated' behavior
+   never fires in production even though it's implemented and
+   unit-tested in the pure `suggest_routing` function."
+2. *Proof artifact gap:* "the two artifacts meant to prove it on real
+   board data (.proof/routing_table.json/.txt) are byte-identical to
+   the pre-fix commit (95eca6d7) and contain none of the new
+   fields/lines (escalation_delta, orchestrator_full_pool_pick, the
+   '← escalation gap' line) that proof.md quotes as if they were
+   produced."
+
+**Round 1 (commit 645f0ce2)** fixed (1) — `_pick_from_viable_routes`
+now accepts the full viable pool, both call sites pass it, the
+reasoning names the escalation, and 7 fresh tests pin the contract.
+**Round 1 also rewrote `routing_suggest.py` to emit the new fields**,
+but the JSON/text artifacts in `.proof/` were not regenerated before
+the proof was committed, leaving (2) unsatisfied on disk even though
+the source code was correct.
+
+**Round 2 (this commit)** addresses (2): re-runs the proof tool
+against the current board data so `.proof/routing_table.json` and
+`.proof/routing_table_text.txt` reflect the post-fix state. The byte-
+level diff against the pre-fix commit (95eca6d7) is now non-empty:
+
+```diff
+--- .proof/routing_table.json @ 95eca6d7 (pre-fix)
++++ .proof/routing_table.json @ HEAD (post-fix, regenerated)
+-    "orchestrator_cheapest_tier_pick": "gemini"
++    "orchestrator_full_pool_pick": "claude",
++    "pre_filter_cheapest_tier_pick": "gemini",
++    "static_fallback_pick": null,
++    "escalation_delta": true
+
+--- .proof/routing_table_text.txt @ 95eca6d7
++++ .proof/routing_table_text.txt @ HEAD
+-  suggester pick: claude  (rule=history)
++  suggester pick (full pool): claude  (rule=history)
+-  orchestrator pick (cheapest tier only): gemini
++  orchestrator pick (full-pool suggester): claude  (agrees with suggester — full pool)
++  OLD behaviour (cheapest-tier-only suggester): gemini  ← escalation gap
+```
+
+This diff is what the proof has always described but did not deliver
+on disk until now. After this commit the artifact matches the claim.
+
+## Root cause + structural fix (round 1, preserved)
+
+`Orchestrator._route_task_api` and `Orchestrator._route_task_config`
+filtered `viable_routes` down to the cheapest cost tier and then handed
+that pre-filtered subset to `suggest_routing`. The pure suggester knew
+how to escalate (its unit tests pinned that contract) but it was never
+given the higher-tier names, so escalation never fired. The fix is
+structural: pass the full viable pool to the suggester, reserve the
+cheapest-tier bucket for the static-fallback path.
+
+## Files changed
+
+| File | Round | Change |
+|------|-------|--------|
+| `odin/src/odin/orchestrator.py` | 1 | Renamed `_pick_from_tier_candidates` → `_pick_from_viable_routes`. The helper now accepts the full viable pool, asks `suggest_routing` over every candidate (so escalation can fire), and only falls back to the cheapest-tier bucket when the suggester returns a `StaticFallback`. Both `_route_task_api` and `_route_task_config` updated to pass the full pool; reasoning string now names the escalation explicitly when the pick tier differs from the cheapest tier. |
+| `odin/tests/unit/test_route_task_suggester.py` | 1 | New `TestRouteTaskEscalatesAcrossTiers` class (4 tests) + `TestEscalationReasoningIsAuditable` (1) + `TestStaticFallbackStillBucketsCheapest` (2). Total 7 new tests, all pinned to the orchestrator-level contract. The two existing test classes (cheap-tier pick, thin-history fallback, planner override, stats fetch) still pass unchanged. |
+| `taskit/taskit-backend/testing_tools/routing_suggest.py` | 1 | Proof tool now surfaces the **NEW** orchestrator pick (`orchestrator_full_pool_pick`) AND the **OLD** behaviour (`pre_filter_cheapest_tier_pick`) AND an explicit `escalation_delta: bool` flag. When the two differ, the standard output prints the old pick labelled `← escalation gap`. Operator-facing table renders the gap directly. |
+| `.proof/routing_table.json` | 2 | **Regenerated** against current board #1 data. Pre-fix committed version had `orchestrator_cheapest_tier_pick: gemini` (the gap). Post-fix has `orchestrator_full_pool_pick: claude`, `pre_filter_cheapest_tier_pick: gemini`, `static_fallback_pick: null`, `escalation_delta: true`. |
+| `.proof/routing_table_text.txt` | 2 | **Regenerated** — gains the line `OLD behaviour (cheapest-tier-only suggester): gemini  ← escalation gap` that was missing from the pre-fix committed artifact. |
+
+## What each change does (file → behaviour)
+
+### `odin/src/odin/orchestrator.py:2848` — `_pick_from_viable_routes`
+
+* **Before** — `_pick_from_tier_candidates(tier_candidates, stats_by_name)`
+  accepted only the cheapest-tier names. The suggester couldn't see
+  higher-tier agents. Escalation never fired.
+* **After** — accepts the full `viable_routes`. Internally:
+  1. Computes cheapest tier for the static-fallback bucket.
+  2. Asks `suggest_routing` over the **full** sorted candidate-name
+     list.
+  3. If the suggester returns `RoutingDecision`, picks that agent
+     anywhere in the viable pool (escalation works).
+  4. If the suggester returns `StaticFallback`, falls back to
+     `random.choice` within the cheapest tier (preserves the old
+     tier-distribute contract).
+
+### `odin/src/odin/orchestrator.py:_route_task_api` and `_route_task_config`
+
+Both call sites updated to pass the full `viable_routes`. Reasoning
+template now branches on `escalated = (tier != cheapest_tier)`:
+
+* **Same tier** (suggested cheap, no escalation): the old reasoning
+  format, unchanged — "chosen from N viable LOW-tier routes: …".
+* **Escalated** (pick tier ≠ cheapest tier): new format that names
+  both tiers, the cheapest-tier pool, the pick-tier pool, and the
+  history-driven reason. Operator sees the escalation in
+  `routing_reasoning` directly.
+
+### `taskit/taskit-backend/testing_tools/routing_suggest.py`
+
+The proof tool now produces:
+
+```json
+{
+  "orchestrator_full_pool_pick": "claude",
+  "pre_filter_cheapest_tier_pick": "gemini",
+  "static_fallback_pick": null,
+  "escalation_delta": true
+}
+```
+
+`escalation_delta` is `true` whenever the new pick would have differed
+from the old behaviour — that's the operator-facing proof that the
+fix closes the gap on real board data, not just on synthetic tests.
+
+## Acceptance criteria
+
+| Criterion | Status | Evidence |
+|-----------|--------|----------|
+| **Round 2 — regenerated proof artifacts match claim** | ✅ | `.proof/routing_table.json` and `.proof/routing_table_text.txt` now differ from commit 95eca6d7 (pre-fix). The diff shown above in "Reviewer verdict addressed" is the byte-level proof that the gap on disk is closed in this commit. |
+| Routing tests green | ✅ | `.proof/odin_routing_tests.txt` — 32 passed (15 suggester + 13 routing + 4 fetch_agent_stats). |
+| Cheap-capable agent wins (gemini 90%, qwen 20%) | ✅ | `TestRouteTaskHistoryDriven::test_clear_winner_in_cheapest_tier_picked` |
+| Only-expensive-agent-succeeds → escalated | ✅ | `TestRouteTaskEscalatesAcrossTiers::test_escalates_to_high_tier_when_low_tier_fails` (gemini 0/10 → claude 9/10) |
+| Escalation holds across many runs | ✅ | `test_escalation_holds_across_runs` (20/20 to claude) |
+| Cheapest qualifier wins when rates tie | ✅ | `test_cheapest_qualifier_wins_when_rates_are_equal` (codex beats claude on cost tiebreak) |
+| Highest success rate wins among qualifiers | ✅ | `test_highest_success_rate_wins_among_qualifiers` (claude 95% beats codex 80%) |
+| Reasoning surfaces escalation explicitly | ✅ | `TestEscalationReasoningIsAuditable::test_reasoning_mentions_high_tier_when_escalated` |
+| Thin history → static fallback stays in cheapest tier | ✅ | `TestStaticFallbackStillBucketsCheapest` (b
+
+## [CTX:dependencies] Dependent Tasks
+No blocking dependencies.
+
+## [CTX:metadata] Task Metadata
+spec=sp_fable_w4/w5 task_id=188 status=DONE
+
+
+## YOUR REPORT
+
+Output ONE fenced JSON block as the canonical review, then optionally a
+markdown rendering of the same content for human readers. The JSON block
+is the source of truth for the parser; the markdown is a convenience
+rendering the parser will ignore if both are present.
+
+### Required JSON contract
+
+Your first non-blank line MUST be a fenced JSON block:
+
+```json
+{
+  "verdict": "PASS" | "NEEDS_WORK" | "FAIL",
+  "summary": "Single-sentence justification, the same one you'd put after ### Verdict.",
+  "quality_assessment": "For each requirement: MET/UNMET with one-line reason. Then defects (file:line).",
+  "slop_detection": "Specific AI slop found, or 'None.'",
+  "improvements": "Bullet list of up to 5 actionable items (what, where, why). 'None.' if clean.",
+  "agent_optimization": "Description clarity / model tier / token efficiency / prompt improvement.",
+  "quota_failure": "QUOTA_FAILURE: <agent_name> if the current attempt hit a quota/rate limit; otherwise 'None.'.",
+  "fix_list": ["targeted", "fix", "items", "for", "rework"]
+}
+```
+
+Rules:
+- `verdict` MUST be exactly `PASS`, `NEEDS_WORK`, or `FAIL` (uppercase). A
+  bare word with no review content (just "PASS" alone, or a verdict
+  keyword buried in CLI noise) is treated as a reviewer failure — the
+  system will NOT honor it. The JSON object must be the FIRST thing you
+  emit, complete and parseable, or your review will not be processed.
+  Do NOT skip the structured JSON just because the verdict is obvious;
+  emit the JSON with full sections, even if the verdict is PASS with
+  nothing else to flag.
+- `summary` is the one-sentence justification. It appears on the board
+  as the verdict summary. The "Evidence rules" below apply to it.
+- `fix_list` is REQUIRED for `NEEDS_WORK`: name the exact artifact or
+  change needed so the rework is scoped, not a blind redo. Empty list
+  `[]` is fine for `PASS` and `FAIL`.
+- `quality_assessment`, `slop_detection`, `improvements`,
+  `agent_optimization`, `quota_failure` are strings; default to
+  `"None."` when there's nothing to report.
+- Do NOT emit anything before the opening ```json fence. No
+  preamble, no narration, no permission requests, no conversational
+  text. The parser uses the JSON block as the first content and
+  anything before it is treated as noise.
+
+### Verdict rubric (applies to `verdict` in the JSON)
+
+Choose from what the evidence PROVES. Each rework round costs a full VM
+boot, environment rebuild, and tokens — so FAIL and NEEDS_WORK must be
+earned by substance, never spent on process trivia or invented rules.
+
+- PASS — every acceptance criterion is verifiably met and the work is
+  correct, safe, and builds/runs. Minor style or proof-formatting nits
+  do NOT block a PASS; put them in `improvements`.
+- NEEDS_WORK — the work is substantially correct but has a fixable
+  gap: a missing or truncated proof artifact, an unmet non-critical
+  criterion, or a process slip that does not make the code wrong. Pair
+  EVERY NEEDS_WORK with a TARGETED fix list (the `fix_list` field in
+  the JSON, or a list of items under "### Actionable Improvements" in
+  the rendering — name the exact artifact or change needed) so the
+  rework is scoped, not a blind redo.
+- FAIL — reserved for work that is WRONG, UNSAFE, or UNVERIFIABLE: it breaks the build or a downstream integration, corrupts state, crashes the orchestrator, contradicts a stated acceptance criterion, or supplies no evidence that the core behavior works. Also use FAIL for quota/resource exhaustion (justification must mention "quota" or "rate limit") so the system can reassign to a different agent.
+
+Evidence rules — apply these BEFORE choosing a verdict:
+- CITE OR DROP. Any claimed rule/policy/convention violation MUST quote the exact rule text and name the file it lives in (e.g. CLAUDE.md: "Never run ANY git stash command"). If you cannot quote and locate the rule, it does not exist for this review — you may NOT lower the verdict for it; raise it in `improvements` at most. A cited rule only counts if its stated scope actually covers this situation (a rule scoped to "shared repos / concurrent sessions" is not violated by an action inside the task's own isolated worktree). If a rule violation affects the verdict, include that exact citation in the report text.
+- A truncated, malformed, or missing proof artifact is a REQUEST, not a verdict. Name the specific artifact you need and ask for it (NEEDS_WORK at most). It only drives FAIL when it leaves the CORE behavior genuinely unverifiable AND no other evidence (code you can read, build output, comments) establishes correctness.
+- Judge the SUBSTANCE of the best available evidence. Tasks may span
+  several attempts; earlier attempts' partial numbers or
+  contradictions with history are NOT defects of the current work.
+- Formatting/completeness of proof comments is NOT a verdict criterion
+  when the underlying acceptance criteria are verifiably met; mention
+  formatting issues in `improvements` instead.
+- Comments authored by a human operator (non-agent email) are
+  authoritative context — do not contradict them.
+- Do not demand artifacts the environment cannot produce (e.g. an
+  ODIN-STATUS block when the run was concluded by an operator).
+
+### Optional markdown rendering (after the JSON block)
+
+After the JSON fence you MAY emit the legacy sections as a human-readable rendering of the same content. The parser uses the JSON as the source of truth and ignores the rendering, so emitting it is purely for the board UI. The rendering is OPTIONAL — the JSON block is sufficient on its own. The legacy section names, in order, are:
+
+- `### Quality Assessment`
+- `### Slop Detection`
+- `### Actionable Improvements`
+- `### Agent Optimization`
+- `### Quota / Resource Failure`
+- `### Verdict`

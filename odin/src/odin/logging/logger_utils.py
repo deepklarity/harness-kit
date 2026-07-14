@@ -142,8 +142,13 @@ def setup_logger(name: str = "odin", log_dir: Optional[str] = None) -> logging.L
     # Derive file basename from logger name (e.g. "odin.orchestrator" -> "odin")
     basename = name.split(".")[0]
 
-    # Console Handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Console Handler — stderr, never stdout. Machine-readable output
+    # (`odin doctor --json`, any future --json flag) writes structured data to
+    # stdout; a console log on the same stream corrupts it (a leading INFO line
+    # makes `json.load(sys.stdin)` raise). Diagnostics belong on stderr per the
+    # stdout=data / stderr=logs convention, so `2>/dev/null` silences logs and
+    # stdout stays a clean data stream.
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.DEBUG)
 
     # File Handler with rotation

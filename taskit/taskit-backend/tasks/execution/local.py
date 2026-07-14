@@ -9,6 +9,8 @@ from django.conf import settings
 
 from .base import ExecutionStrategy, _terminate_pid
 from .utils import resolve_working_dir
+from .. import task_runs
+from ..similarity import post_twins_comment
 from ..utils.logger import logger
 
 
@@ -40,6 +42,16 @@ class LocalOdinStrategy(ExecutionStrategy):
         if md != (task.metadata or {}):
             task.metadata = md
             task.save(update_fields=["metadata"])
+        task_runs.start_run(task, run_token)
+
+        # Memory: surface the closest finished twins as starting context.
+        # Best-effort — a scoring failure must never block dispatch.
+        try:
+            post_twins_comment(task)
+        except Exception:
+            logger.error(
+                "Failed to post twins comment for task %s", task.id, exc_info=True,
+            )
 
         cmd = [cli_path, "exec", str(task.id)]
 
@@ -72,6 +84,7 @@ class LocalOdinStrategy(ExecutionStrategy):
             md["active_execution"] = active
             task.metadata = md
             task.save(update_fields=["metadata"])
+            task_runs.heartbeat_run(run_token, pid=proc.pid)
             logger.info(
                 "Odin subprocess started: PID=%s, log=%s", proc.pid, log_file
             )

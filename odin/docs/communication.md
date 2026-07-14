@@ -74,7 +74,7 @@ comment_type="proof", file_paths=["src/auth/handler.py", "tests/test_auth.py"]
 ## The Communication Stack
 
 ```
-Agent (claude, gemini, codex, qwen, ...)
+Agent (claude, gemini, codex, ...)
   │
   │  MCP tool calls (stdio transport)
   │

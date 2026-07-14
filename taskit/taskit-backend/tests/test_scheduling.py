@@ -181,7 +181,7 @@ class SchedulingTests(APITestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("starts_at_local", serializer.errors)
 
-    def test_hidden_scheduled_tasks_are_excluded_from_board_and_dashboard(self):
+    def test_scheduled_task_visibility_future_hidden_executed_shown(self):
         schedule = create_schedule(
             board=self.board,
             kind="RECURRING",
@@ -202,12 +202,20 @@ class SchedulingTests(APITestCase):
 
         release_due_schedules()
         task = Task.objects.get(schedule=schedule)
+
+        # Future occurrence (TODO, waiting for its moment) hides from
+        # the board — it lives on the Scheduling page.
+        task.status = TaskStatus.TODO
+        task.save(update_fields=["status"])
+        self.assertEqual(_exclude_hidden_scheduled_tasks(Task.objects.filter(board=self.board)).count(), 0)
+
+        # Executed occurrence is board history and MUST be visible
+        # (user report: the daily scrape run was invisible on kanban).
         task.status = TaskStatus.DONE
         task.save(update_fields=["status"])
-
         board_data = BoardDetailSerializer(self.board).data
-        self.assertEqual(board_data["tasks"], [])
-        self.assertEqual(_exclude_hidden_scheduled_tasks(Task.objects.filter(board=self.board)).count(), 0)
+        self.assertEqual(len(board_data["tasks"]), 1)
+        self.assertEqual(_exclude_hidden_scheduled_tasks(Task.objects.filter(board=self.board)).count(), 1)
 
     def test_reflection_pass_finalizes_run_at_testing_not_review(self):
         schedule = create_schedule(
@@ -392,32 +400,40 @@ class SchedulingTests(APITestCase):
         self.assertIn("timezone", resp.data)
 
     def test_timezone_only_update_preserves_wall_clock_time(self):
-        starts_at_local = datetime(2026, 4, 10, 9, 0)
-        schedule = create_schedule(
-            board=self.board,
-            kind="RECURRING",
-            timezone_name="UTC",
-            starts_at_local=starts_at_local,
-            template={
-                "title": "Timezone preserve",
-                "priority": "HIGH",
-                "assignee_id": self.user.id,
-            },
-            recurrence_rule={
-                "freq": "DAILY",
-                "interval": 1,
-            },
-            created_by=self.user.email,
-        )
+        from unittest.mock import patch
 
-        request = self.factory.patch(
-            f"/schedules/{schedule.id}/",
-            {"timezone": "America/New_York"},
-            format="json",
-        )
-        force_authenticate(request, user=self.user)
-        resp = ScheduleViewSet.as_view({"patch": "partial_update"})(request, pk=schedule.id)
-        self.assertEqual(resp.status_code, 200)
+        # Freeze "now" before the schedule's starts_at so next_run resolution
+        # is deterministic — a real wall-clock that has moved past the start
+        # would otherwise advance next_run to today, breaking the assertion.
+        starts_at_local = datetime(2026, 4, 10, 9, 0)
+        frozen_now = datetime(2026, 4, 1, 0, 0, tzinfo=dt_timezone.utc)
+
+        with patch("tasks.views.timezone.now", return_value=frozen_now):
+            schedule = create_schedule(
+                board=self.board,
+                kind="RECURRING",
+                timezone_name="UTC",
+                starts_at_local=starts_at_local,
+                template={
+                    "title": "Timezone preserve",
+                    "priority": "HIGH",
+                    "assignee_id": self.user.id,
+                },
+                recurrence_rule={
+                    "freq": "DAILY",
+                    "interval": 1,
+                },
+                created_by=self.user.email,
+            )
+
+            request = self.factory.patch(
+                f"/schedules/{schedule.id}/",
+                {"timezone": "America/New_York"},
+                format="json",
+            )
+            force_authenticate(request, user=self.user)
+            resp = ScheduleViewSet.as_view({"patch": "partial_update"})(request, pk=schedule.id)
+            self.assertEqual(resp.status_code, 200)
 
         schedule.refresh_from_db()
         self.assertEqual(schedule.timezone, "America/New_York")
@@ -528,3 +544,114 @@ class SchedulingTests(APITestCase):
         self.assertEqual(schedule.status, ScheduleStatus.ACTIVE)
         self.assertGreater(schedule.next_run_at_utc, timezone.now())
         self.assertEqual(schedule.runs.count(), 0)
+
+    def test_run_now_creates_task_and_manual_run_matching_template(self):
+        schedule = create_schedule(
+            board=self.board,
+            kind="RECURRING",
+            timezone_name="UTC",
+            starts_at_local=timezone.now() + timedelta(days=1),
+            template={
+                "title": "Run now task",
+                "description": "Manual fire",
+                "priority": "HIGH",
+                "assignee_id": self.user.id,
+                "model_name": "claude-sonnet",
+            },
+            recurrence_rule={"freq": "DAILY", "interval": 1},
+            created_by=self.user.email,
+        )
+        self.assertEqual(Task.objects.filter(schedule=schedule).count(), 0)
+
+        request = self.factory.post(f"/schedules/{schedule.id}/run_now", {}, format="json")
+        force_authenticate(request, user=self.user)
+        resp = ScheduleViewSet.as_view({"post": "run_now"})(request, pk=schedule.id)
+        self.assertEqual(resp.status_code, 200)
+
+        task = Task.objects.get(schedule=schedule)
+        self.assertEqual(task.status, TaskStatus.IN_PROGRESS)
+        self.assertEqual(task.title, "Run now task")
+        self.assertEqual(task.description, "Manual fire")
+        self.assertEqual(task.priority, "HIGH")
+        self.assertEqual(task.assignee_id, self.user.id)
+        self.assertEqual(task.model_name, "claude-sonnet")
+        self.assertEqual(task.board_id, self.board.id)
+        self.assertEqual(task.created_by, self.user.email)
+
+        self.assertEqual(schedule.runs.count(), 1)
+        run = schedule.runs.first()
+        self.assertEqual(run.status, ScheduleRunStatus.RELEASED)
+        self.assertEqual(run.task_id, task.id)
+        self.assertIn("manual", run.release_reason.lower())
+        self.assertIn(self.user.email, run.release_reason)
+        self.assertEqual(run.template_snapshot["title"], "Run now task")
+        self.assertEqual(task.current_schedule_run_id, run.id)
+        self.assertEqual(task.schedule_id, schedule.id)
+        self.assertEqual(resp.data["task_id"], task.id)
+        self.assertEqual(resp.data["run_id"], run.id)
+
+    def test_run_now_leaves_next_run_at_utc_untouched(self):
+        schedule = create_schedule(
+            board=self.board,
+            kind="RECURRING",
+            timezone_name="UTC",
+            starts_at_local=timezone.now() + timedelta(days=1),
+            template={"title": "Cron unaffected", "assignee_id": self.user.id},
+            recurrence_rule={"freq": "DAILY", "interval": 1},
+            created_by=self.user.email,
+        )
+        schedule.refresh_from_db()
+        before = schedule.next_run_at_utc
+
+        request = self.factory.post(f"/schedules/{schedule.id}/run_now", {}, format="json")
+        force_authenticate(request, user=self.user)
+        resp = ScheduleViewSet.as_view({"post": "run_now"})(request, pk=schedule.id)
+        self.assertEqual(resp.status_code, 200)
+
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.next_run_at_utc, before)
+
+    def test_run_now_double_trigger_returns_conflict(self):
+        schedule = create_schedule(
+            board=self.board,
+            kind="RECURRING",
+            timezone_name="UTC",
+            starts_at_local=timezone.now() + timedelta(days=1),
+            template={"title": "Double trigger", "assignee_id": self.user.id},
+            recurrence_rule={"freq": "DAILY", "interval": 1},
+            created_by=self.user.email,
+        )
+
+        request1 = self.factory.post(f"/schedules/{schedule.id}/run_now", {}, format="json")
+        force_authenticate(request1, user=self.user)
+        resp1 = ScheduleViewSet.as_view({"post": "run_now"})(request1, pk=schedule.id)
+        self.assertEqual(resp1.status_code, 200)
+
+        request2 = self.factory.post(f"/schedules/{schedule.id}/run_now", {}, format="json")
+        force_authenticate(request2, user=self.user)
+        resp2 = ScheduleViewSet.as_view({"post": "run_now"})(request2, pk=schedule.id)
+        self.assertEqual(resp2.status_code, 409)
+
+        self.assertEqual(schedule.runs.count(), 1)
+        self.assertEqual(Task.objects.filter(schedule=schedule).count(), 1)
+
+    def test_run_now_does_not_set_last_released_run(self):
+        schedule = create_schedule(
+            board=self.board,
+            kind="RECURRING",
+            timezone_name="UTC",
+            starts_at_local=timezone.now() + timedelta(days=1),
+            template={"title": "No bookkeeping", "assignee_id": self.user.id},
+            recurrence_rule={"freq": "DAILY", "interval": 1},
+            created_by=self.user.email,
+        )
+        schedule.refresh_from_db()
+        self.assertIsNone(schedule.last_released_run_id)
+
+        request = self.factory.post(f"/schedules/{schedule.id}/run_now", {}, format="json")
+        force_authenticate(request, user=self.user)
+        resp = ScheduleViewSet.as_view({"post": "run_now"})(request, pk=schedule.id)
+        self.assertEqual(resp.status_code, 200)
+
+        schedule.refresh_from_db()
+        self.assertIsNone(schedule.last_released_run_id)

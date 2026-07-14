@@ -25,7 +25,7 @@
         "smoke_output/ directory will be created if it doesn't exist"
       ],
       "full_output": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated `smoke_output/qwen_table.html` with a styled HTML table featuring a blue color theme (#2563eb header), 4 columns (Name, Role, Score, Notes), and 3 rows of fictional team member data with alternating row backgrounds.\n-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated `smoke_output/qwen_table.html` with a styled HTML table featuring a blue color theme (#2563eb header), 4 columns (Name, Role, Score, Notes), and 3 rows of fictional team member data with alternating row backgrounds.",
-      "working_dir": "/home/operator/work/tmp/harness-kit/odin/temp_test_dir",
+      "working_dir": "/home/user/harness-kit/odin/temp_test_dir",
       "tmux_session": "odin-192",
       "quota_snapshot": {
         "usage_pct": 0.0,
@@ -76,7 +76,7 @@
         "smoke_output/ directory will be created if it doesn't exist"
       ],
       "full_output": "-------\nODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated the file\n `smoke_output/gemini_table.html` containing an HTML table with a green color theme and fictional agent data.",
-      "working_dir": "/home/operator/work/tmp/harness-kit/odin/temp_test_dir",
+      "working_dir": "/home/user/harness-kit/odin/temp_test_dir",
       "tmux_session": "odin-193",
       "quota_snapshot": {
         "usage_pct": 6.7,
@@ -129,7 +129,7 @@
         "smoke_output/ directory will be created if it doesn't exist"
       ],
       "full_output": "I'll help you create the HTML table with a purple color theme. Let me start by posting a status update, then create the directory and file.\nNow I'll create the directory and the HTML file:\nLet me check the current directory and create the subdirectory correctly:\nGood! The `smoke_output/` directory already exists. Now I'll create the HTML file:\nPerfect! Now let me verify the file was created correctly:\nExcellent! Now I'll post the proof comment with the file path:\n`\u2605 Insight \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`\n**Purple color theme implementation**: The CSS uses a gradient header (`#7c3aed` to `#6d28d9`), alternating light purple row backgrounds (`#faf5ff` and `#f3e8ff`), and a hover state (`#e9d5ff`) to create visual hierarchy and interactivity. This follows a progressive disclosure pattern where the most important information (headers) gets the strongest color treatment.\n\n**HTML fragment structure**: The file is a valid HTML snippet (not a full page) that can be embedded in any HTML document. This modular approach is common in component-based web development and makes the file reusable across different contexts.\n\n**CSS box-shadow for depth**: The subtle shadow (`rgba(124, 58, 237, 0.15)`) creates visual separation from the background, improving readability without overwhelming the design.\n`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`\n\n-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated smoke_output/claude_table.html with purple-themed HTML table containing 3 fictional agent records with Name, Role, Score, and Notes columns using inline CSS styling.\n`\u2605 Insight \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`\n**Purple color theme implementation**: The CSS uses a gradient header (`#7c3aed` to `#6d28d9`), alternating light purple row backgrounds (`#faf5ff` and `#f3e8ff`), and a hover state (`#e9d5ff`) to create visual hierarchy and interactivity. This follows a progressive disclosure pattern where the most important information (headers) gets the strongest color treatment.\n\n**HTML fragment structure**: The file is a valid HTML snippet (not a full page) that can be embedded in any HTML document. This modular approach is common in component-based web development and makes the file reusable across different contexts.\n\n**CSS box-shadow for depth**: The subtle shadow (`rgba(124, 58, 237, 0.15)`) creates visual separation from the background, improving readability without overwhelming the design.\n`\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`\n\n-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated smoke_output/claude_table.html with purple-themed HTML table containing 3 fictional agent records with Name, Role, Score, and Notes columns using inline CSS styling.",
-      "working_dir": "/home/operator/work/tmp/harness-kit/odin/temp_test_dir",
+      "working_dir": "/home/user/harness-kit/odin/temp_test_dir",
       "tmux_session": "odin-194",
       "quota_snapshot": {
         "usage_pct": 12.0,
@@ -180,7 +180,7 @@
         "smoke_output/ directory will be created if it doesn't exist"
       ],
       "full_output": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated smoke_output directory and smoke_output/minimax_table.html containing an HTML fragment with an orange-themed table displaying 3 fictional MiniMax agent records with Name, Role, Score, and Notes columns.\n-------ODIN-STATUS-------",
-      "working_dir": "/home/operator/work/tmp/harness-kit/odin/temp_test_dir",
+      "working_dir": "/home/user/harness-kit/odin/temp_test_dir",
       "tmux_session": "odin-195",
       "quota_snapshot": {
         "usage_pct": 0.0,
@@ -231,7 +231,7 @@
         "smoke_output/ directory will be created if it doesn't exist"
       ],
       "full_output": "Creating `smoke_output/` and writing `smoke_output/codex_table.html` as an HTML fragment with the requested red-themed styled table. I\u2019ll then post a proof comment with the created file path.\nWriting the file now with inline CSS and the required table structure/content.\nPosting proof to TaskIt with the created file path, then I\u2019ll return the required ODIN status block.\n-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated `smoke_output/` and wrote `smoke_output/codex_table.html` as a valid HTML fragment containing the requested heading, red-themed styled 4-column table, and 3 fictional data rows. Posted proof to TaskIt with the created file path.",
-      "working_dir": "/home/operator/work/tmp/harness-kit/odin/temp_test_dir",
+      "working_dir": "/home/user/harness-kit/odin/temp_test_dir",
       "tmux_session": "odin-196",
       "quota_snapshot": {
         "usage_pct": 4.0,
@@ -282,7 +282,7 @@
         "smoke_output/ directory will be created if it doesn't exist"
       ],
       "full_output": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nCreated smoke_output/glm_table.html with teal-themed HTML table (Name, Role, Score, Notes columns) and 3 rows of fictional agent data",
-      "working_dir": "/home/operator/work/tmp/harness-kit/odin/temp_test_dir",
+      "working_dir": "/home/user/harness-kit/odin/temp_test_dir",
       "tmux_session": "odin-197",
       "quota_snapshot": {
         "usage_pct": 1.0,
@@ -346,7 +346,7 @@
         "Each file contains an HTML fragment with a <style> block, <h2> heading, and <table>"
       ],
       "full_output": "-------ODIN-STATUS-------\nSUCCESS\n-------ODIN-SUMMARY-------\nSuccessfully combined six\n individual HTML table files into a single, comprehensive HTML report (`smoke_output/report.html`) with embedded styles and a CSS quality rating summary.",
-      "working_dir": "/home/operator/work/tmp/harness-kit/odin/temp_test_dir",
+      "working_dir": "/home/user/harness-kit/odin/temp_test_dir",
       "tmux_session": "odin-198",
       "quota_snapshot": {
         "usage_pct": 6.7,

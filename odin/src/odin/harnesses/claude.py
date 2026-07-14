@@ -1,77 +1,19 @@
 """Claude Code CLI harness."""
 
 import asyncio
-import json
 import shlex
 import shutil
 import time
 from pathlib import Path
 from typing import AsyncIterator
 
-from odin.harnesses.base import BaseHarness, read_with_tee, read_with_trace, extract_text_from_stream, SUBPROCESS_STREAM_LIMIT, validate_odin_status
+from odin.harnesses.base import BaseHarness, read_with_tee, read_with_trace, extract_text_from_stream, extract_token_usage, SUBPROCESS_STREAM_LIMIT, terminate_subprocess, validate_odin_status, validate_odin_status_full
 from odin.harnesses.registry import register_harness
 from odin.models import AgentConfig, TaskResult
 
-
-def _extract_token_usage(raw_output: str) -> dict:
-    """Extract token usage from Claude stream-json output.
-
-    Handles two formats:
-    - modelUsage event (Claude Code CLI): aggregate usage in the final line
-      {"modelUsage":{"model-name":{"inputTokens":N,"outputTokens":M,...}}}
-    - step_finish events (opencode/kilo CLIs): per-step tokens summed
-      {"type":"step_finish","part":{"tokens":{"input":N,"output":M,...}}}
-
-    modelUsage is preferred when present (more accurate aggregate).
-    """
-    totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
-    model_usage_found = False
-
-    for line in raw_output.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-
-        # Claude Code CLI: final line has modelUsage with aggregate counts
-        model_usage = obj.get("modelUsage")
-        if isinstance(model_usage, dict):
-            agg_in = agg_out = agg_cache_read = agg_cache_write = 0
-            for model_data in model_usage.values():
-                if isinstance(model_data, dict):
-                    agg_in += model_data.get("inputTokens", 0)
-                    agg_out += model_data.get("outputTokens", 0)
-                    agg_cache_read += model_data.get("cacheReadInputTokens", 0)
-                    agg_cache_write += model_data.get("cacheCreationInputTokens", 0)
-            if agg_in or agg_out:
-                totals = {
-                    "input_tokens": agg_in,
-                    "output_tokens": agg_out,
-                    "cache_read_tokens": agg_cache_read,
-                    "cache_write_tokens": agg_cache_write,
-                }
-                model_usage_found = True
-            continue
-
-        # Fallback: step_finish events (opencode/kilo format)
-        if obj.get("type") != "step_finish":
-            continue
-        tokens = (obj.get("part") or {}).get("tokens") or (obj.get("result", {}) or {}).get("tokens", {})
-        if not tokens:
-            continue
-        if not model_usage_found:
-            totals["input_tokens"] += tokens.get("input", 0)
-            totals["output_tokens"] += tokens.get("output", 0)
-            cache = tokens.get("cache", {})
-            if cache:
-                totals["cache_read_tokens"] += cache.get("read", 0)
-                totals["cache_write_tokens"] += cache.get("write", 0)
-
-    totals["total_tokens"] = totals["input_tokens"] + totals["output_tokens"]
-    return totals if totals["total_tokens"] > 0 else {}
+# Back-compat alias — extraction logic now lives in base.py so orchestrator's
+# tmux execution path and other harnesses (e.g. codex.py) can share it.
+_extract_token_usage = extract_token_usage
 
 
 @register_harness("claude")
@@ -92,10 +34,26 @@ class ClaudeHarness(BaseHarness):
             cmd.extend(shlex.split(self.config.execute_args))
         if context.get("model"):
             cmd.extend(["--model", context["model"]])
+        max_turns = context.get("max_turns")
+        if max_turns:
+            cmd.extend(["--max-turns", str(max_turns)])
         if context.get("mcp_config"):
             cmd.extend(["--mcp-config", context["mcp_config"]])
         if context.get("mcp_allowed_tools"):
             cmd.extend(["--allowedTools", ",".join(context["mcp_allowed_tools"])])
+        # `--setting-sources` is OPT-IN via context. The reviewer passes
+        # `setting_sources="user"` to skip project/local `.claude/settings.*`
+        # discovery — the task worktree carries a `.claude/settings.local.json`
+        # with stale `permissions.allow` entries from prior operator
+        # sessions, and loading it triggers the "Ignoring N permissions.allow
+        # entries ... workspace has not been trusted" warning that pollutes
+        # the captured reviewer output (task 159: 4 reflections hard-ERRORed
+        # on this single line). Regular task execution does NOT set the flag,
+        # so project-level safety hooks (secrets/lock-file edit blocks) keep
+        # loading normally.
+        setting_sources = context.get("setting_sources")
+        if isinstance(setting_sources, str) and setting_sources.strip() and "--setting-sources" not in cmd:
+            cmd.extend(["--setting-sources", setting_sources.strip()])
         return cmd
 
     async def execute(self, prompt: str, context: dict) -> TaskResult:
@@ -105,6 +63,7 @@ class ClaudeHarness(BaseHarness):
         trace_file = context.get("trace_file")
         timeout_seconds = context.get("timeout_seconds", 300)
         timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
+        proc: asyncio.subprocess.Process | None = None
         try:
             cmd = self.build_execute_command(prompt, context)
             proc = await asyncio.create_subprocess_exec(
@@ -149,9 +108,20 @@ class ClaudeHarness(BaseHarness):
             meta = {"usage": usage} if usage else {}
             if proc.returncode == 0:
                 if context.get("validate_status", True):
-                    agent_success, agent_error = validate_odin_status(stdout_text)
+                    status = validate_odin_status_full(
+                        stdout_text,
+                        worktree_path=context.get("working_dir"),
+                    )
+                    agent_success, agent_error = status.as_legacy_tuple()
                 else:
                     agent_success, agent_error = True, None
+                    status = None
+                if status is not None and status.raw_block is not None:
+                    meta["malformed_status"] = {
+                        "raw_block": status.raw_block,
+                        "inferred": status.inferred,
+                        "inference_reason": status.inference_reason,
+                    }
                 return TaskResult(
                     success=agent_success,
                     output=stdout_text,
@@ -171,6 +141,8 @@ class ClaudeHarness(BaseHarness):
                 )
         except asyncio.TimeoutError:
             self._current_pid = None
+            if proc is not None:
+                await terminate_subprocess(proc)
             timeout_msg = (
                 f"Command timed out after {timeout_seconds}s"
                 if timeout_seconds and timeout_seconds > 0
@@ -222,6 +194,12 @@ class ClaudeHarness(BaseHarness):
             cmd.extend(["--mcp-config", context["mcp_config"]])
         if context.get("mcp_allowed_tools"):
             cmd.extend(["--allowedTools", ",".join(context["mcp_allowed_tools"])])
+        # Same opt-in contract as build_execute_command — interactive plan
+        # mode (used by `odin plan`) opts in via context["setting_sources"]
+        # if the operator wants the workspace-trust noise stripped.
+        setting_sources = context.get("setting_sources")
+        if isinstance(setting_sources, str) and setting_sources.strip() and "--setting-sources" not in cmd:
+            cmd.extend(["--setting-sources", setting_sources.strip()])
         return cmd
 
     async def is_available(self) -> bool:

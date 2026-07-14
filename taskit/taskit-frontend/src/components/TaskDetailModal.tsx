@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { Task, Member, Label, TaskComment, TaskIdeOptions } from '../types';
+import type { Task, Member, Label, TaskComment, TaskIdeOptions, Board } from '../types';
 import { collectDownstreamTaskIds } from '../utils/dagUtils';
 import { classifyStatus, formatDate, formatDuration, getStatusColor, formatMergeStatus, formatBranchDisplay, CopyButton } from '../utils/transformer';
 import { parseActor } from '../services/harness/HarnessTimeService';
@@ -32,7 +32,7 @@ import { TraceViewer } from './TraceViewer';
 import { TaskSessionView, type SessionMeta } from './TaskSessionView';
 import {
     Pencil, Search, Trash2, Eye, Code, FileText, FolderOpen,
-    GitBranch, Package, Terminal, User, ChevronRight, ChevronDown,
+    Terminal, User, ChevronRight, ChevronDown,
     HelpCircle, CornerDownRight, Send, ShieldCheck, Sparkles, Loader2,
     ZoomIn, ZoomOut, RotateCcw,
     Bot, Activity, ArrowLeft, Radio,
@@ -43,10 +43,17 @@ import { formatCost as formatCostDisplay } from '../utils/costEstimation';
 import type { ReflectionReport } from '../types';
 import { ReflectionModal } from './ReflectionModal';
 import { ReflectionReportViewer } from './ReflectionReportViewer';
+import { SimilarTasks } from './SimilarTasks';
+import { AssignmentReason } from './AssignmentReason';
+import { TaskActionHub } from './TaskActionHub';
+import { partitionComments } from '../utils/commentStream';
 import { useToast } from '@/hooks/use-toast';
 import { parseCommentBody } from '../utils/commentParser';
 import { parseFailureDetails } from '../utils/failureParser';
 import { IdeBadge, IdeSetupModal } from './IdeSetupModal';
+import { getDispatchBlockReason } from './dispatchBlock';
+import { DispatchBlockBanner } from './DispatchBlockBanner';
+import { TaskReworkBox } from './TaskReworkBox';
 
 interface TaskDetailModalProps {
     task: Task;
@@ -62,6 +69,13 @@ interface TaskDetailModalProps {
     availableLabels?: Label[];
     detailLoading?: boolean;
     onRefresh?: (taskId: string) => void;
+    /** Board the task lives on — used to grey out IN_PROGRESS when the task
+     *  has no spec and the board hasn't opted into project-root execution
+     *  (the backend refuses that PATCH; see tasks/views.py
+     *  _validate_dispatch_readiness). Optional so existing callers that
+     *  don't have board context yet keep working — the backend gate is the
+     *  source of truth either way. */
+    board?: Pick<Board, 'allowProjectRootExecution'> | null;
 }
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
@@ -90,7 +104,7 @@ function formatBudgetValue(hours: number | undefined): string {
 }
 
 export function TaskDetailModal({
-    task, onClose, allMembers, allTasks, memberMap, onUpdateAssignees, onUpdateTask, onSelectTask, availableStatuses, onDeleteTask, availableLabels, detailLoading, onRefresh
+    task, onClose, allMembers, allTasks, memberMap, onUpdateAssignees, onUpdateTask, onSelectTask, availableStatuses, onDeleteTask, availableLabels, detailLoading, onRefresh, board
 }: TaskDetailModalProps) {
     const service = useService();
     const { user: authUser } = useAuth();
@@ -293,13 +307,6 @@ export function TaskDetailModal({
         return map;
     }, [allTasks]);
 
-    // Compute tasks that this task blocks
-    const blockedTasks = useMemo(() => {
-        return allTasks?.filter(t =>
-            t.dependsOn?.includes(String(task.idShort)) || t.dependsOn?.includes(task.id)
-        ) || [];
-    }, [allTasks, task.idShort, task.id]);
-
     const boardTasks = useMemo(
         () => (allTasks || []).filter(t => t.boardId === task.boardId),
         [allTasks, task.boardId],
@@ -362,6 +369,30 @@ export function TaskDetailModal({
         }
     };
 
+    // Rework (task #259): one sentence on a shelved task dispatches a
+    // follow-up task. Rethrow on failure so the ReplyBox preserves the
+    // typed instruction instead of clearing it (matches the reply/comment
+    // boxes above, which keep the draft when the request fails).
+    const handleRework = async (instruction: string) => {
+        try {
+            const result = await service.reworkTask(task.id, instruction);
+            const newId = (result as { id?: string } | undefined)?.id;
+            toast({
+                title: 'Rework dispatched',
+                description: newId ? `Follow-up task #${newId} created.` : 'Follow-up task created.',
+            });
+            onRefresh?.(task.id);
+        } catch (e) {
+            console.error('Failed to rework task:', e);
+            toast({
+                title: 'Rework failed',
+                description: e instanceof Error ? e.message : 'Could not create a follow-up task.',
+                variant: 'destructive',
+            });
+            throw e;
+        }
+    };
+
     const handleSummarize = async () => {
         setIsSummarizing(true);
         setSummarizeError(null);
@@ -408,6 +439,13 @@ export function TaskDetailModal({
         }, pollInterval);
     };
 
+    // Region 6 — segregate the raw stream: human-relevant events vs raw
+    // agent/trace machine output (shown only when the toggle is on).
+    const { events: eventComments, machine: machineComments } = useMemo(
+        () => partitionComments(task.comments),
+        [task.comments],
+    );
+
     // Build a map of question_id -> reply comment for inline display
     const replyMap = useMemo(() => {
         const map = new Map<string, TaskComment>();
@@ -435,10 +473,14 @@ export function TaskDetailModal({
             return;
         }
 
+        // Machine output must never force the toggle open — on an executing
+        // task the newest comment is almost always a trace/debug dump, and
+        // auto-revealing it floods the default view (seen live). Skip the
+        // scroll-anchor for machine comments instead.
         const latestIsDebug = Array.isArray(latestComment.attachments)
             && latestComment.attachments.some(a => typeof a === 'string' && a.startsWith('debug:'));
         if (latestIsDebug && !showDebugComments) {
-            setShowDebugComments(true);
+            handledNotificationScrollRef.current = scrollKey;
             return;
         }
 
@@ -803,7 +845,7 @@ export function TaskDetailModal({
                 {sessionViewMode === 'session' ? (
                     <div className="flex-1 min-h-0 flex">
                         <TaskSessionView
-                            taskId={task.id}
+                            taskId={Number(task.id)}
                             onMetaChange={setSessionMeta}
                         />
                     </div>
@@ -822,7 +864,27 @@ export function TaskDetailModal({
                                             <Select value={editValue} onValueChange={setEditValue}>
                                                 <SelectTrigger className="flex-1 h-7 text-xs"><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    {availableStatuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                                                    {availableStatuses.map(s => {
+                                                        // Backend refuses PATCHing a specless task into
+                                                        // IN_PROGRESS unless the board opted into
+                                                        // project-root execution (no worktree to run
+                                                        // in otherwise) — grey the option out here so
+                                                        // the user sees why before the request bounces.
+                                                        const blocked = s === 'IN_PROGRESS' && !task.specId
+                                                            && board != null && board.allowProjectRootExecution === false;
+                                                        return (
+                                                            <SelectItem
+                                                                key={s}
+                                                                value={s}
+                                                                disabled={blocked}
+                                                                title={blocked
+                                                                    ? 'This task has no spec, so there is no worktree to execute in. Plan it into a spec, or enable project-root execution in board settings.'
+                                                                    : undefined}
+                                                            >
+                                                                {s}
+                                                            </SelectItem>
+                                                        );
+                                                    })}
                                                 </SelectContent>
                                             </Select>
                                             <Button size="sm" className="h-7 px-2 text-xs" onClick={handleSaveField}>OK</Button>
@@ -878,13 +940,23 @@ export function TaskDetailModal({
                                     })()}
                                     {(() => {
                                         const metadata = task.metadata as Record<string, unknown> | undefined;
+                                        const failureClass = metadata?.failure_class;
                                         const lastFailureType = metadata?.last_failure_type;
-                                        return (lastFailureType ? (
-                                            <Badge variant="outline" className="text-[9px] px-1 py-0 mt-1 bg-red-500/10 text-red-400 border-red-500/20">
-                                                {String(lastFailureType)}
-                                            </Badge>
-                                        ) : null) as React.ReactNode;
-                                    })()}
+                        return ((failureClass || lastFailureType) ? (
+                            <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                {failureClass ? (
+                                    <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 text-amber-400 border-amber-500/20">
+                                        {String(failureClass)}
+                                    </Badge>
+                                ) : null}
+                                {lastFailureType ? (
+                                    <Badge variant="outline" className="text-[9px] px-1 py-0 bg-red-500/10 text-red-400 border-red-500/20">
+                                        {String(lastFailureType)}
+                                    </Badge>
+                                ) : null}
+                            </div>
+                        ) : null) as React.ReactNode;
+                    })()}
                                     {(() => {
                                         const metadata = task.metadata as Record<string, unknown> | undefined;
                                         const failureDebug = metadata?.failure_debug;
@@ -898,13 +970,22 @@ export function TaskDetailModal({
                             )}
 
 
-                            {/* Pending Question Banner */}
-                            {!!task.metadata?.has_pending_question && (
-                                <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/20 mb-1">
-                                    <HelpCircle className="size-3.5 text-amber-500 animate-pulse shrink-0" />
-                                    <span className="text-[11px] font-medium text-amber-600">Agent waiting for reply</span>
-                                </div>
-                            )}
+                            {/* Dispatch Block Banner — the loud-skip stamp the backend
+                                leaves when the dispatch guardrail decides not to run
+                                this task (F43/F44). Without this the operator sees a
+                                stuck TODO/IN_PROGRESS task with no explanation. */}
+                            {(() => {
+                                const info = getDispatchBlockReason(task);
+                                return info ? (
+                                    <div className="mb-1">
+                                        <DispatchBlockBanner info={info} testId="dispatch-blocked-banner" />
+                                    </div>
+                                ) : null;
+                            })()}
+
+                            {/* Pending-question / parked state is now surfaced in the
+                                right-column action hub (region 2) with the question text
+                                and a reply box — no duplicate sidebar banner. */}
                             {isExecuting && (
                                 <div className="px-2 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 mb-1">
                                     <div className="flex items-center gap-2">
@@ -1010,6 +1091,14 @@ export function TaskDetailModal({
                                     </div>
                                 </div>
                             )}
+                            </CompactRow>
+
+                            {/* WHY line — single-row summary of why the router
+                                (or the human) picked this assignee. Em-dash when
+                                absent. Tooltip surfaces rule + cheaper alternatives
+                                + twin consensus so the operator can audit. */}
+                            <CompactRow label="Why">
+                                <AssignmentReason task={task} />
                             </CompactRow>
 
                             {/* Model — directly below assignee so changes are visible */}
@@ -1342,7 +1431,7 @@ export function TaskDetailModal({
                                         </CompactRow>
                                     )}
 
-                                    {execContext.cwd && (
+                                    {execContext.cwd && execContext.cwd !== execContext.worktreePath && (
                                         <CompactRow label="CWD" noBorder>
                                             <div className="flex items-center gap-1.5">
                                                 <span className="text-xs font-mono break-all">{execContext.cwd}</span>
@@ -1469,6 +1558,12 @@ export function TaskDetailModal({
                                     </div>
                                 </CollapsibleSection>
                             )}
+
+                            {/* Similar tasks — Memory twins + cost quote at dispatch.
+                                Structured data from the similarity service (never
+                                parsed from the comment). Always renders; em-dash
+                                when no twins or no quote yet. */}
+                            <SimilarTasks task={task} />
                         </div>
 
                         {/* Reflect + Delete — pinned at bottom of sidebar */}
@@ -1521,6 +1616,14 @@ export function TaskDetailModal({
                     {/* RIGHT COLUMN: Description & Timeline */}
                     <div className="flex-1 min-w-0 overflow-y-auto">
                         <div className="px-6 py-4">
+                        {/* Region 2 — Waiting on you: parked reply, TESTING→DONE, requeue.
+                            Pinned at the top so a block on the human is unmissable. */}
+                        <TaskActionHub
+                            task={task}
+                            onUpdateTask={onUpdateTask}
+                            onRefresh={onRefresh}
+                            authorEmail={authUser?.email}
+                        />
                         {/* Description */}
                         <div className="mb-8">
                             <div className="flex items-center justify-between mb-3">
@@ -1580,6 +1683,8 @@ export function TaskDetailModal({
                             )}
                         </div>
 
+                        <TaskReworkBox status={task.currentStatus} onRework={handleRework} />
+
                         {/* Reference Images */}
                         {task.referenceImages && task.referenceImages.length > 0 && (
                             <div className="mb-8 mt-6">
@@ -1609,6 +1714,19 @@ export function TaskDetailModal({
                             </div>
                         )}
 
+                        {/* Region 4 — Evidence: reviewer reflection reports, above
+                            the raw comment stream so proof-of-work reads before chatter. */}
+                        {reflections.length > 0 && (
+                            <div className="mb-8">
+                                <ReflectionReportViewer
+                                    reports={reflections}
+                                    onCancel={handleCancelReflection}
+                                    onDelete={handleDeleteReflection}
+                                    onViewDetail={(id) => window.open(`/reflections/${id}`, '_blank')}
+                                />
+                            </div>
+                        )}
+
                         <Separator className="mb-8" />
 
                         {/* Comments Section */}
@@ -1616,10 +1734,10 @@ export function TaskDetailModal({
                             <div>
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
-                                        Comments ({detailLoading ? '...' : task.comments.length})
+                                        Comments ({detailLoading ? '...' : eventComments.length})
                                     </h3>
                                     <div className="flex items-center gap-2">
-                                        {task.comments.some(c => Array.isArray(c.attachments) && c.attachments.some(a => typeof a === 'string' && a.startsWith('debug:'))) && (
+                                        {machineComments.length > 0 && (
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
@@ -1627,7 +1745,7 @@ export function TaskDetailModal({
                                                 onClick={() => setShowDebugComments(!showDebugComments)}
                                             >
                                                 <Terminal className="size-3" />
-                                                {showDebugComments ? 'Hide' : 'Show'} debug logs
+                                                {showDebugComments ? 'Hide' : 'Show'} machine output ({machineComments.length})
                                             </Button>
                                         )}
                                         <div className="flex flex-col items-end gap-0.5">
@@ -1658,14 +1776,7 @@ export function TaskDetailModal({
                                         </div>
                                     ) : (
                                         <>
-                                            {(showAllComments ? task.comments : task.comments.slice(-10))
-                                                .filter(c => {
-                                                    // Hide debug comments unless toggled
-                                                    if (!showDebugComments && Array.isArray(c.attachments) && c.attachments.some(a => typeof a === 'string' && a.startsWith('debug:'))) return false;
-                                                    // Hide replies that are shown inline under their question
-                                                    if (c.commentType === 'reply') return false;
-                                                    return true;
-                                                })
+                                            {(showAllComments ? eventComments : eventComments.slice(-10))
                                                 .map(comment => (
                                                 <CommentItem
                                                     key={comment.id}
@@ -1674,14 +1785,33 @@ export function TaskDetailModal({
                                                     replyComment={replyMap.get(comment.id)}
                                                 />
                                             ))}
-                                            {!showAllComments && task.comments.length > 10 && (
+                                            {!showAllComments && eventComments.length > 10 && (
                                                 <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground"
                                                     onClick={() => setShowAllComments(true)}>
-                                                    Show {task.comments.length - 10} older comments
+                                                    Show {eventComments.length - 10} older comments
                                                 </Button>
                                             )}
-                                            {task.comments.length === 0 && (
+                                            {eventComments.length === 0 && (
                                                 <p className="text-sm text-muted-foreground/50 italic">No comments yet.</p>
+                                            )}
+
+                                            {/* Machine output — raw agent/trace comments, segregated
+                                                behind the toggle so they never pollute the event stream. */}
+                                            {showDebugComments && machineComments.length > 0 && (
+                                                <div className="mt-4 pt-3 border-t border-dashed border-border/50 space-y-3">
+                                                    <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold text-muted-foreground/60">
+                                                        <Terminal className="size-3" />
+                                                        Machine output ({machineComments.length})
+                                                    </div>
+                                                    {machineComments.map(comment => (
+                                                        <CommentItem
+                                                            key={comment.id}
+                                                            comment={comment}
+                                                            onReply={(qId) => setReplyingTo(qId)}
+                                                            replyComment={replyMap.get(comment.id)}
+                                                        />
+                                                    ))}
+                                                </div>
                                             )}
                                         </>
                                     )}
@@ -1732,19 +1862,6 @@ export function TaskDetailModal({
                                     </Button>
                                 </div>
                             </div>
-                        )}
-
-                        {/* Reflections Section */}
-                        {reflections.length > 0 && (
-                            <>
-                                <Separator className="my-6" />
-                                <ReflectionReportViewer
-                                    reports={reflections}
-                                    onCancel={handleCancelReflection}
-                                    onDelete={handleDeleteReflection}
-                                    onViewDetail={(id) => window.open(`/reflections/${id}`, '_blank')}
-                                />
-                            </>
                         )}
 
                         <Separator className="my-6" />
