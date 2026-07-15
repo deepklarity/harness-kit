@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 
 from odin.harnesses import get_harness
-from odin.harnesses.base import extract_text_from_stream
+from odin.harnesses.base import extract_stream_summary, extract_text_from_stream, finish_reason_is_output_cap
 from odin.orchestrator import _truncate_trace
 
 logger = logging.getLogger("odin.reflection")
@@ -294,7 +294,10 @@ Rules:
 - Do NOT emit anything before the opening ```json fence. No
   preamble, no narration, no permission requests, no conversational
   text. The parser uses the JSON block as the first content and
-  anything before it is treated as noise.
+  anything before it is treated as noise. Emit the JSON block FIRST
+  so that if your output is truncated by the provider's token cap,
+  your verdict still survives — truncated prose after the JSON only
+  costs polish, not the verdict.
 
 ### Verdict rubric (applies to `verdict` in the JSON)
 
@@ -483,13 +486,17 @@ def _sanitize_reflection_output(raw_output: str) -> str:
 
     # If the CLI emitted retries/stack traces before the report, start at the
     # first report header. This preserves the actual review and drops provider
-    # noise such as Gemini 429 retry dumps.
-    header_match = re.search(
-        r"(?im)^(?:#{1,6}\s*)?(Quality Assessment|Slop Detection|Actionable Improvements|Agent Optimization|Quota / Resource Failure|Verdict)\s*$",
-        text,
-    )
-    if header_match:
-        text = text[header_match.start():]
+    # noise such as Gemini 429 retry dumps. BUT: when a JSON fence is present
+    # (the canonical JSON-first format), the JSON block comes BEFORE the
+    # markdown headers — stripping to the first header would discard the
+    # JSON verdict. Only strip when no JSON fence exists (task #346).
+    if not _JSON_FENCE_RE.search(text):
+        header_match = re.search(
+            r"(?im)^(?:#{1,6}\s*)?(Quality Assessment|Slop Detection|Actionable Improvements|Agent Optimization|Quota / Resource Failure|Verdict)\s*$",
+            text,
+        )
+        if header_match:
+            text = text[header_match.start():]
 
     # Some CLIs strip markdown heading markers in streamed text. Normalize bare
     # required headers back to markdown headings so the parser can section them.
@@ -596,13 +603,20 @@ def _download_screenshots(
     return paths
 
 
-def parse_reflection_report(raw_output: str) -> dict:
+def parse_reflection_report(raw_output: str, *, finish_reason: str | None = None) -> dict:
     """Parse structured agent output into report sections.
 
     Splits on ``### `` headers to extract named sections.
 
     Args:
         raw_output: Full text output from the reviewer agent.
+        finish_reason: Optional provider finish/stop reason. When it
+            indicates an output cap (truncation), a substantive output
+            with no parseable verdict is classified as REVIEWER_INFRA
+            instead of ERROR — the reviewer was working but ran out of
+            tokens before emitting the JSON block. REVIEWER_INFRA does
+            not count against the task's 3 strikes and triggers a fresh
+            reviewer retry. See task #346.
 
     Returns:
         Dict with keys: quality_assessment, slop_detection, improvements,
@@ -731,28 +745,58 @@ def parse_reflection_report(raw_output: str) -> dict:
             # is deliberately outside the backend's auto-advance set; the
             # task holds for operator triage or a reflection retry
             # instead of a blind rework loop.
-            result["verdict"] = "ERROR"
+            #
+            # Exception (task #346): if finish_reason indicates an output
+            # cap, the bare keyword appeared mid-reasoning before the
+            # reviewer was cut off — that's infra truncation, not a
+            # reviewer failure. REVIEWER_INFRA doesn't consume a strike
+            # and triggers a fresh-reviewer retry.
             head = raw_output.strip()[:500]
-            result["verdict_summary"] = (
-                f"Reviewer output unparseable (bare {fallback_match.group(1)} "
-                f"keyword, no structured review/fix list) — treating as reviewer "
-                f"failure, not a judgment of the work. Raw head: {head}"
-            )
+            if finish_reason and finish_reason_is_output_cap(finish_reason):
+                result["verdict"] = "REVIEWER_INFRA"
+                result["verdict_summary"] = (
+                    f"Reviewer output truncated (finish_reason={finish_reason}) — "
+                    f"no structured verdict extracted. Output head: {head}"
+                )
+            else:
+                result["verdict"] = "ERROR"
+                result["verdict_summary"] = (
+                    f"Reviewer output unparseable (bare {fallback_match.group(1)} "
+                    f"keyword, no structured review/fix list) — treating as reviewer "
+                    f"failure, not a judgment of the work. Raw head: {head}"
+                )
         else:
-            # No verdict anywhere ⇒ the REVIEWER failed (crashed harness, empty
-            # output, infra error) — that is not a judgment about the work.
-            # ERROR is deliberately outside the backend's auto-advance set
-            # (PASS merges; NEEDS_WORK/FAIL retry): the task stays in REVIEW
-            # for operator triage instead of looping rework on garbage
-            # (task #103, 2026-07-05: an msb boot error was coerced to
-            # NEEDS_WORK and drove a pointless retry). Embed the head of the
-            # raw output so the actual failure is visible on the board.
-            result["verdict"] = "ERROR"
+            # No verdict anywhere. Two cases (task #346):
+            #
+            # 1. If finish_reason indicates an output cap (truncation) and
+            #    the output has substantive content, this is REVIEWER_INFRA
+            #    — the reviewer was working but ran out of tokens before
+            #    the JSON block. Don't count as a strike; retry with a
+            #    fresh reviewer. Salvage the truncated reasoning in the
+            #    verdict_summary so a human sees what the reviewer said.
+            # 2. Otherwise, the REVIEWER failed (crashed harness, empty
+            #    output, infra error) — that is not a judgment about the
+            #    work. ERROR is deliberately outside the backend's
+            #    auto-advance set (PASS merges; NEEDS_WORK/FAIL retry):
+            #    the task stays in REVIEW for operator triage instead of
+            #    looping rework on garbage (task #103, 2026-07-05: an msb
+            #    boot error was coerced to NEEDS_WORK and drove a
+            #    pointless retry).
             head = raw_output.strip()[:500]
-            result["verdict_summary"] = (
-                "Reviewer failure — no verdict in output. "
-                + (f"Output head: {head}" if head else "The reviewer produced no output.")
-            )
+            if finish_reason and finish_reason_is_output_cap(finish_reason) and head:
+                result["verdict"] = "REVIEWER_INFRA"
+                result["verdict_summary"] = (
+                    f"Reviewer output truncated (finish_reason={finish_reason}) — "
+                    f"no verdict extracted. The reviewer produced reasoning "
+                    f"but ran out of tokens before the JSON block. "
+                    f"Output head: {head}"
+                )
+            else:
+                result["verdict"] = "ERROR"
+                result["verdict_summary"] = (
+                    "Reviewer failure — no verdict in output. "
+                    + (f"Output head: {head}" if head else "The reviewer produced no output.")
+                )
 
     return result
 
@@ -1153,6 +1197,18 @@ def reflect_task(
         elif Path(output_file).exists():
             raw_jsonl = Path(output_file).read_text()
 
+        # Extract stream summary (finish_reason, token counts) from the
+        # raw JSONL trace — task 330's extraction, now wired into reflect
+        # runs (task #346). When the reviewer hit an output cap, the
+        # finish_reason ("length", "max_tokens", etc.) is passed to the
+        # parser so a substantive-but-verdict-less output is classified
+        # as REVIEWER_INFRA instead of ERROR.
+        stream_summary: dict = {}
+        try:
+            stream_summary = extract_stream_summary(raw_jsonl) or {}
+        except Exception:
+            logger.debug("Stream summary extraction failed for reflection %s", report_id, exc_info=True)
+
         # 7. Parse and submit
         clean_output = _sanitize_reflection_output(result.output)
         if not result.success:
@@ -1167,10 +1223,19 @@ def reflect_task(
             _slog("reflection_failed", duration_ms=duration_ms, metadata={
                 "error": result.error or "Harness execution failed",
                 "token_usage": token_usage,
+                "finish_reason": stream_summary.get("finish_reason"),
             })
             return
 
-        parsed = parse_reflection_report(clean_output)
+        finish_reason = stream_summary.get("finish_reason")
+        parsed = parse_reflection_report(clean_output, finish_reason=finish_reason)
+
+        # Persist finish_reason on the report (inside token_usage, the
+        # run-metadata JSONField) so the infra trail is visible on the
+        # board without a model migration.
+        report_token_usage = dict(token_usage)
+        if finish_reason:
+            report_token_usage["finish_reason"] = finish_reason
 
         _patch_report({
             "status": "COMPLETED",
@@ -1184,12 +1249,13 @@ def reflect_task(
             "raw_output": clean_output[:10000],
             "execution_trace": _truncate_trace(raw_jsonl, 50000),
             "duration_ms": duration_ms,
-            "token_usage": token_usage,
+            "token_usage": report_token_usage,
         })
 
         _slog("reflection_completed", duration_ms=duration_ms, metadata={
             "verdict": parsed["verdict"],
             "token_usage": token_usage,
+            "finish_reason": finish_reason,
         })
 
         logger.info(

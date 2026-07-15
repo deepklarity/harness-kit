@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Download } from 'lucide-react';
 import { formatCost } from '../../utils/costEstimation';
 import { formatTokens } from '../../utils/transformer';
-import type { AnalyticsCostSummary, Board, ProviderQuota, FactorySnapshot, InboxSnapshot, LeagueRow } from '../../types';
+import type { AnalyticsCostSummary, Board, ProviderQuota, FactorySnapshot, InboxSnapshot } from '../../types';
 
 import { DateRangePicker } from './DateRangePicker';
 import { CostOverTimeChart } from './CostOverTimeChart';
@@ -16,6 +16,10 @@ import { TasksLandedChart } from './TasksLandedChart';
 import { NowStrip } from './NowStrip';
 import { InboxCompact } from './InboxCompact';
 import { LeagueTable } from './LeagueTable';
+import { ThroughputFunnel } from './ThroughputFunnel';
+import { PerSpecList } from './PerSpecList';
+import { ScheduledTasksList } from './ScheduledTasksList';
+import { AgentTasksDrilldown } from './AgentTasksDrilldown';
 import { exportAnalyticsCsv } from './csvExport';
 import { QuotaCards } from './QuotaCards';
 
@@ -84,12 +88,31 @@ export function StatsPage({ boards, onTaskClick }: StatsPageProps) {
 
     const [factory, setFactory] = useState<FactorySnapshot | null>(null);
     const [inbox, setInbox] = useState<InboxSnapshot | null>(null);
-    const [leagueRows, setLeagueRows] = useState<LeagueRow[]>([]);
-    const [leagueLoading, setLeagueLoading] = useState(false);
 
     const handleTaskClick = useCallback((taskId: string) => {
         onTaskClick?.(taskId);
     }, [onTaskClick]);
+
+    // W12.4: clicking an agent row opens the agent drilldown. The
+    // drilldown shows every task the agent has touched, filterable by
+    // board / status / spec, with each row linking to the task detail
+    // modal via ?taskId=<id>.
+    const handleAgentClick = useCallback((agent: string) => {
+        if (!agent || agent === 'unknown') return;
+        const params = new URLSearchParams(searchParams);
+        params.set('view', 'agent-tasks');
+        params.set('agent', agent);
+        setSearchParams(params, { replace: true });
+    }, [searchParams, setSearchParams]);
+
+    const handleBackFromDrilldown = useCallback(() => {
+        const params = new URLSearchParams(searchParams);
+        params.delete('view');
+        params.delete('agent');
+        params.delete('status');
+        params.delete('spec');
+        setSearchParams(params, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     useEffect(() => {
         setQuotaLoading(true);
@@ -140,26 +163,15 @@ export function StatsPage({ boards, onTaskClick }: StatsPageProps) {
 
     usePolling(loadNow, { enabled: !!boardFilter });
 
-    // League is also board-scoped (fetchLeague requires a numeric board id).
-    const loadLeague = useCallback(async () => {
-        if (!boardFilter) {
-            setLeagueRows([]);
-            return;
-        }
-        setLeagueLoading(true);
-        try {
-            const resp = await service.fetchLeague(boardFilter);
-            setLeagueRows(resp.rows);
-        } catch {
-            setLeagueRows([]);
-        } finally {
-            setLeagueLoading(false);
-        }
-    }, [service, boardFilter]);
-
-    useEffect(() => {
-        loadLeague();
-    }, [loadLeague]);
+    // League + per-spec + scheduled-tasks are now bundled in the
+    // cost-summary response (W12.4) — no separate fetch needed. The
+    // board-scoped fetchLeague path is kept for callers that still use
+    // it (the per-board /api/boards/<id>/league/ endpoint is the source
+    // of truth for the existing single-board view), but the StatsPage
+    // always renders the league rows from cost-summary so the
+    // All-Boards view can show them.
+    const leagueRows = data?.league?.rows ?? [];
+    const leagueLoading = loading && !data;
 
     const reviewPassRate = data && data.review_health.total_reviews > 0
         ? `${Math.round(((data.review_health.by_verdict.find(b => b.verdict === 'PASS')?.count ?? 0) / data.review_health.total_reviews) * 100)}%`
@@ -168,6 +180,9 @@ export function StatsPage({ boards, onTaskClick }: StatsPageProps) {
     const reworkTotal = data ? data.rework_breakdown.reduce((sum, b) => sum + b.tasks, 0) : 0;
     const reworkTasks = data ? data.rework_breakdown.filter(b => b.rounds !== '0').reduce((sum, b) => sum + b.tasks, 0) : 0;
     const reworkRate = data && reworkTotal > 0 ? `${Math.round((reworkTasks / reworkTotal) * 100)}%` : '—';
+
+    const drilldownAgent = searchParams.get('agent');
+    const drilldownView = searchParams.get('view') === 'agent-tasks' && drilldownAgent ? drilldownAgent : null;
 
     return (
         <div className="mx-auto max-w-[1200px] space-y-8 px-6 py-6">
@@ -220,73 +235,116 @@ export function StatsPage({ boards, onTaskClick }: StatsPageProps) {
                 <div className="text-sm text-destructive">{error}</div>
             )}
 
-            {/* NOW — operational pulse, board-scoped. */}
-            <div>
-                <ZoneHeading>Now</ZoneHeading>
-                {!boardFilter ? (
-                    <div className="rounded-md border border-border px-3 py-4 text-center text-sm text-muted-foreground">
-                        Select a board to view live activity
+            {drilldownView ? (
+                <AgentTasksDrilldown
+                    agent={drilldownView}
+                    boards={boards}
+                    boardFilter={boardFilter}
+                    searchParams={searchParams}
+                    onParamsChange={params => setSearchParams(params, { replace: true })}
+                    onTaskClick={handleTaskClick}
+                    onBack={handleBackFromDrilldown}
+                />
+            ) : (
+                <>
+                    {/* NOW — operational pulse, board-scoped. */}
+                    <div>
+                        <ZoneHeading>Now</ZoneHeading>
+                        {!boardFilter ? (
+                            <div className="rounded-md border border-border px-3 py-4 text-center text-sm text-muted-foreground">
+                                Select a board to view live activity
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                <NowStrip running={factory?.running ?? []} queues={factory?.queues ?? null} onTaskClick={handleTaskClick} memoryShares={factory?.memory_shares ?? null} />
+                                <InboxCompact inbox={inbox} onTaskClick={handleTaskClick} />
+                            </div>
+                        )}
                     </div>
-                ) : (
-                    <div className="space-y-3">
-                        <NowStrip running={factory?.running ?? []} queues={factory?.queues ?? null} onTaskClick={handleTaskClick} />
-                        <InboxCompact inbox={inbox} onTaskClick={handleTaskClick} />
-                    </div>
-                )}
-            </div>
 
-            {/* THROUGHPUT — landed rate + quality signals. */}
-            <div>
-                <ZoneHeading>Throughput</ZoneHeading>
-                {loading && !data ? (
-                    <div className="text-sm text-muted-foreground py-4">Loading…</div>
-                ) : (
-                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
-                        <TasksLandedChart data={data?.time_series ?? []} />
-                        <div className="grid grid-cols-2 gap-3 content-start lg:grid-cols-1">
-                            <StatTile value={reviewPassRate} label="Review pass rate" />
-                            <StatTile value={reworkRate} label="Rework / redo rate" />
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* COST & AGENTS. */}
-            <div>
-                <ZoneHeading>Cost &amp; Agents</ZoneHeading>
-                {loading && !data ? (
-                    <div className="text-sm text-muted-foreground py-4">Loading…</div>
-                ) : (
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-3 gap-3">
-                            <StatTile value={data ? formatCost(data.summary_kpis.total_spend) : '—'} label="Total spend" />
-                            <StatTile value={data ? formatCost(data.summary_kpis.avg_cost_per_task) : '—'} label="Avg cost / task" />
-                            <StatTile value={data ? formatTokens(data.summary_kpis.total_tokens) : '—'} label="Total tokens" />
-                        </div>
-
-                        <CostOverTimeChart data={data?.time_series ?? []} />
-
-                        <CostByModelChart data={data?.cost_by_model ?? []} />
-
-                        <div>
-                            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent league</h3>
-                            {!boardFilter ? (
-                                <div className="rounded-md border border-border px-3 py-4 text-center text-sm text-muted-foreground">
-                                    Select a board to see the agent league
+                    {/* THROUGHPUT — funnel + landed rate + quality signals. */}
+                    <div>
+                        <ZoneHeading>Throughput</ZoneHeading>
+                        {loading && !data ? (
+                            <div className="text-sm text-muted-foreground py-4">Loading…</div>
+                        ) : (
+                            <div className="space-y-4">
+                                <ThroughputFunnel data={data?.throughput_funnel ?? { total: 0, buckets: [] }} />
+                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+                                    <TasksLandedChart data={data?.time_series ?? []} />
+                                    <div className="grid grid-cols-2 gap-3 content-start lg:grid-cols-1">
+                                        <StatTile value={reviewPassRate} label="Review pass rate" />
+                                        <StatTile value={reworkRate} label="Rework / redo rate" />
+                                    </div>
                                 </div>
-                            ) : (
-                                <LeagueTable rows={leagueRows} loading={leagueLoading} hideTitle />
-                            )}
-                        </div>
+                            </div>
+                        )}
                     </div>
-                )}
-            </div>
 
-            {/* HEALTH — provider quotas. */}
-            <div>
-                <ZoneHeading>Health</ZoneHeading>
-                <QuotaCards data={quotaData} loading={quotaLoading} />
-            </div>
+                    {/* COST & AGENTS. */}
+                    <div>
+                        <ZoneHeading>Cost &amp; Agents</ZoneHeading>
+                        {loading && !data ? (
+                            <div className="text-sm text-muted-foreground py-4">Loading…</div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-3 gap-3">
+                                    <StatTile value={data ? formatCost(data.summary_kpis.total_spend) : '—'} label="Total spend" />
+                                    <StatTile value={data ? formatCost(data.summary_kpis.avg_cost_per_task) : '—'} label="Avg cost / task" />
+                                    <StatTile value={data ? formatTokens(data.summary_kpis.total_tokens) : '—'} label="Total tokens" />
+                                </div>
+
+                                <CostOverTimeChart data={data?.time_series ?? []} />
+
+                                <CostByModelChart data={data?.cost_by_model ?? []} />
+
+                                <div data-testid="agent-league-zone">
+                                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Agent league
+                                        {data?.league?.meta?.aggregate && (
+                                            <span className="ml-2 normal-case tracking-normal text-muted-foreground">
+                                                (all boards)
+                                            </span>
+                                        )}
+                                    </h3>
+                                    <LeagueTable
+                                        rows={leagueRows}
+                                        loading={leagueLoading}
+                                        hideTitle
+                                        onAgentClick={handleAgentClick}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* PER SPEC — one row per spec with cost + outcome counts. */}
+                    <div>
+                        <ZoneHeading>Per spec</ZoneHeading>
+                        {loading && !data ? (
+                            <div className="text-sm text-muted-foreground py-4">Loading…</div>
+                        ) : (
+                            <PerSpecList rows={data?.per_spec ?? []} />
+                        )}
+                    </div>
+
+                    {/* SCHEDULED — schedule runs with success/failure history. */}
+                    <div>
+                        <ZoneHeading>Scheduled</ZoneHeading>
+                        {loading && !data ? (
+                            <div className="text-sm text-muted-foreground py-4">Loading…</div>
+                        ) : (
+                            <ScheduledTasksList rows={data?.scheduled_tasks ?? []} />
+                        )}
+                    </div>
+
+                    {/* HEALTH — provider quotas. */}
+                    <div>
+                        <ZoneHeading>Health</ZoneHeading>
+                        <QuotaCards data={quotaData} loading={quotaLoading} />
+                    </div>
+                </>
+            )}
         </div>
     );
 }

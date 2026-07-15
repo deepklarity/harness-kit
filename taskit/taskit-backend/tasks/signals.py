@@ -234,3 +234,40 @@ def flag_unknown_user_attribution(sender, instance, created, **kwargs):
             "for comment %s",
             instance.id,
         )
+
+
+@receiver(post_save, sender="tasks.SpecComment")
+def resume_board_plan_on_human_reply(sender, instance, created, **kwargs):
+    """Resume a board-driven plan when a human replies to the gate questions.
+
+    Mirrors ``resume_merge_on_human_reply`` but for specs: when a spec has
+    ``metadata.board_plan_status == "awaiting_answers"`` and a non-agent
+    SpecComment lands, this dispatches
+    ``tasks.board_planner.resume_board_driven_plan`` — which runs
+    ``odin plan --board-resume`` to do task breakdown with the reply as
+    clarification answers.
+    """
+    if not created:
+        return
+
+    if _is_agent_or_system_author(instance.author_email):
+        return
+
+    from .models import Spec
+
+    try:
+        spec = Spec.objects.get(id=instance.spec_id)
+    except Spec.DoesNotExist:
+        return
+
+    meta = spec.metadata or {}
+    if meta.get("board_plan_status") != "awaiting_answers":
+        return
+
+    from .board_planner import resume_board_driven_plan
+
+    logger.info(
+        "[spec:%s] Human reply (%s) on board-driven plan awaiting answers — resuming",
+        spec.id, instance.author_email,
+    )
+    resume_board_driven_plan.delay(spec.id, instance.id)

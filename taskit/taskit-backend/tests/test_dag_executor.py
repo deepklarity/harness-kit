@@ -9,10 +9,15 @@ os.environ.setdefault("FIREBASE_AUTH_ENABLED", "False")
 from unittest.mock import patch, MagicMock
 import subprocess
 
+from django.test import override_settings
+
 from tests.base import APITestCase
+from tasks import sandbox_budget
 from tasks.models import ReflectionReport, ReflectionStatus, Task, TaskComment, TaskHistory, TaskStatus
 from tasks.dependencies import DepStatus, check_deps, get_failed_deps, get_unmet_deps, get_ready_tasks
 from tasks.dag_executor import poll_and_execute, execute_single_task, execute_reflection
+
+VM = sandbox_budget.DEFAULT_VM_MEM_MIB
 
 
 class CheckDepsTests(APITestCase):
@@ -489,7 +494,119 @@ class PollAndExecuteTests(APITestCase):
         self.assertNotIn("dispatch_blocked_reason", task.metadata)
         self.assertNotIn("dispatch_blocked_at", task.metadata)
 
+    # ── Task #353: dispatch_blocked stamp carries holder names ───────
 
+    @patch("tasks.dag_executor.execute_single_task")
+    @override_settings(SANDBOX_MEMORY_BUDGET_MIB=VM, DAG_EXECUTOR_MAX_CONCURRENCY=10)
+    def test_memory_budget_full_stamp_lists_holder_tasks(self, mock_exec):
+        """When the memory budget is full, the stamp names every holder so
+        the dispatch-blocked banner can render "held by task 344,
+        reflection on 346" instead of the bare "memory budget full" code.
+
+        Same fixture: one EXECUTING + one RUNNING reflection, budget full.
+        """
+        from tasks import dag_executor as dex
+        mock_exec.delay.return_value.id = "fake-celery-id-full"
+        holder = self.make_task(
+            self.board, title="Holder exec", status=TaskStatus.EXECUTING,
+            metadata={"active_execution": {"mem_mib": VM}},
+        )
+        reflected = self.make_task(self.board, title="Reflected",
+                                   status=TaskStatus.REVIEW)
+        report = ReflectionReport.objects.create(
+            task=reflected, reviewer_agent="claude", reviewer_model="m",
+            status=ReflectionStatus.RUNNING,
+        )
+        blocked = self.make_task(
+            self.board, title="Blocked", status=TaskStatus.IN_PROGRESS,
+            assignee=self.user, depends_on=[],
+        )
+
+        poll_and_execute()
+
+        blocked.refresh_from_db()
+        self.assertEqual(blocked.metadata.get("dispatch_blocked_reason"),
+                         "memory_budget_full")
+        blocked_by = blocked.metadata.get("dispatch_blocked_blocked_by") or []
+        ids = {h["task_id"] for h in blocked_by}
+        self.assertIn(holder.id, ids)
+        self.assertIn(reflected.id, ids)
+        # Reflection entries mark their kind so the banner can render
+        # "reflection on 346" rather than another "held by 346".
+        kinds = {h["kind"] for h in blocked_by}
+        self.assertIn("reflection", kinds)
+        reflection_entry = next(h for h in blocked_by if h["kind"] == "reflection")
+        self.assertEqual(reflection_entry["report_id"], report.id)
+        # Holders across boards share the same accounting source as
+        # compute_reserved_mib (the dispatcher primitive).
+        self.assertEqual(
+            sandbox_budget.compute_reserved_mib(),
+            VM + VM,
+        )
+        # Sanity: the same call goes through the dag_executor module too —
+        # proves both surfaces reach the same DB query.
+        self.assertEqual(dex.compute_reserved_mib(), VM + VM)
+
+    @patch("tasks.dag_executor.execute_single_task")
+    @override_settings(SANDBOX_MEMORY_BUDGET_MIB=VM, DAG_EXECUTOR_MAX_CONCURRENCY=10)
+    def test_memory_budget_full_repeated_stamp_refreshes_holder_list(self, mock_exec):
+        """Rework round 2: a task held at memory_budget_full must show the
+        CURRENT holder list, not the snapshot from the last poll.
+
+        Without the fix, ``_set_dispatch_blocked_reason`` short-circuits when
+        the reason is unchanged — so once a holder releases and a different
+        task becomes the new blocker, the banner keeps the OLD holder
+        names. That is the operator-facing lie the reviewer caught on
+        task 348 ("Not dispatched" while it was already executing) and the
+        broader case where the holder list drifted stale between polls.
+        """
+        from tasks.dag_executor import _set_dispatch_blocked_reason
+        from tasks.sandbox_budget import memory_share_holders
+        original = self.make_task(
+            self.board, title="Original holder",
+            status=TaskStatus.EXECUTING,
+            metadata={"active_execution": {"mem_mib": VM}},
+        )
+        blocked = self.make_task(
+            self.board, title="Blocked", status=TaskStatus.IN_PROGRESS,
+            assignee=self.user, depends_on=[],
+            # Pre-seed the stamp with the OLD holder list — exactly the
+            # stale state we want to repair on the next poll: the task
+            # is held at memory_budget_full, but the holder list in
+            # metadata points at a task that has long since released.
+            metadata={
+                "dispatch_blocked_reason": "memory_budget_full",
+                "dispatch_blocked_at": "2026-07-14T19:00:00Z",
+                "dispatch_blocked_blocked_by": [{
+                    "task_id": original.id,
+                    "task_title": original.title,
+                    "kind": "execution",
+                    "mem_mib": VM,
+                }],
+            },
+        )
+
+        # Original holder releases, a NEW task becomes the blocker.
+        original.status = TaskStatus.REVIEW
+        original.save(update_fields=["status"])
+        replacement = self.make_task(
+            self.board, title="Replacement holder",
+            status=TaskStatus.EXECUTING,
+            metadata={"active_execution": {"mem_mib": VM}},
+        )
+
+        # Same-reason re-stamp: the holder list must be refreshed.
+        _set_dispatch_blocked_reason(
+            blocked, "memory_budget_full",
+            blocked_by=memory_share_holders(),
+        )
+        blocked.refresh_from_db()
+        refreshed = blocked.metadata.get("dispatch_blocked_blocked_by") or []
+        ids = {h["task_id"] for h in refreshed}
+        self.assertIn(replacement.id, ids,
+                      "same-reason stamp must replace the stale holder list")
+        self.assertNotIn(original.id, ids,
+                         "released holder must NOT linger in the refreshed list")
 class ExecuteSingleTaskTests(APITestCase):
     """Tests for the execute_single_task Celery task.
 

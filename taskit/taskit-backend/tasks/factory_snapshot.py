@@ -7,6 +7,17 @@ Backs ``GET /boards/<id>/factory/`` (tasks/views.py) so a dashboard
 widget or CLI status check hits one endpoint instead of stitching
 together task/run, error-ledger, and story queries separately.
 
+Task #353 adds a ``memory_shares`` block — the GLOBAL memory-share
+accounting the operator-facing views rely on. Same primitive the
+dispatcher uses (``sandbox_budget.memory_share_summary()`` with no
+board arg), so the surface and the gate share a single source of truth.
+The holder list is GLOBAL by design: the dispatch gate holds at the
+global budget pool (executions + reflections across every board), so a
+board-scoped view at this layer would let the badge lie when a
+reflection on another board is what actually holds the fourth share.
+Queues, running tasks, recent merges, and open errors stay board-scoped
+— those genuinely belong to the board — but memory shares don't.
+
 Mirrors the separation-of-concerns pattern used by
 ``tasks/board_story.py`` — a plain builder function here, a thin view
 action in ``tasks/views.py``.
@@ -17,6 +28,7 @@ from .errors import group_by_signature
 from .board_story import build_board_story
 from .kanban_ordering import get_statuses_for_column
 from .models import ErrorEvent, MergeAttempt, Task, TaskRun, TaskRunState, TaskStatus
+from .sandbox_budget import memory_share_summary
 
 OPEN_ERRORS_LIMIT = 20
 RECENT_MERGES_LIMIT = 10
@@ -88,9 +100,9 @@ def build_factory_snapshot(board) -> dict:
     """Assemble the factory snapshot for a board.
 
     Returns a dict with ``board_id``, ``board_name``, ``running``,
-    ``queues``, ``recent_merges``, ``open_errors``, and ``story``. All
-    keys are always present, even when the underlying collections are
-    empty.
+    ``queues``, ``memory_shares``, ``recent_merges``, ``open_errors``,
+    and ``story``. All keys are always present, even when the underlying
+    collections are empty.
     """
     running_runs = (
         TaskRun.objects.filter(task__board=board, state=TaskRunState.RUNNING)
@@ -100,6 +112,15 @@ def build_factory_snapshot(board) -> dict:
     running = [_serialize_running(run) for run in running_runs]
 
     queues = _queue_counts(board)
+
+    # Task #353: GLOBAL memory-share accounting read from the same
+    # primitives the dispatcher uses, so the "3 executing + 1 review = 4/4
+    # memory shares" line the UI renders cannot drift from the gate.
+    # No `board=` filter — the dispatcher holds at the global budget pool
+    # (executions + reflections across every board), so a board-scoped view
+    # at this layer would let the badge lie when a reflection on another
+    # board is what actually holds the fourth share.
+    memory_shares = memory_share_summary()
 
     recent_merges_qs = (
         MergeAttempt.objects.filter(task__board=board)
@@ -125,6 +146,7 @@ def build_factory_snapshot(board) -> dict:
         "board_name": board.name,
         "running": running,
         "queues": queues,
+        "memory_shares": memory_shares,
         "recent_merges": recent_merges,
         "open_errors": open_errors,
         "story": story,

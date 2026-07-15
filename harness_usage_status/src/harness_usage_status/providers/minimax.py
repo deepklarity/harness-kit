@@ -146,11 +146,34 @@ class MiniMaxProvider(BaseProvider):
                 # misleading 0/0 (the reported bug) — 0/0 reads as
                 # "quota exhausted" when it actually means "nothing to
                 # report".
+                # Count-based quota fields are all zero on this plan shape,
+                # but the API still reports percentage-based windows:
+                # current_interval_remaining_percent per model. 5 means 5%
+                # LEFT (95% used). Use the busiest model's window — that is
+                # the number a human needs to see before a run dies mid-wave.
+                pct_models = [
+                    m for m in model_remains
+                    if m.get("current_interval_remaining_percent") is not None
+                ]
+                if pct_models:
+                    busiest = min(
+                        pct_models,
+                        key=lambda m: m.get("current_interval_remaining_percent", 100),
+                    )
+                    remaining = float(busiest.get("current_interval_remaining_percent", 100))
+                    return UsageInfo(
+                        provider=self.name,
+                        plan="Coding Plan",
+                        unit="%",
+                        usage_pct=round(100.0 - remaining, 1),
+                        raw=data,
+                    )
+                # Truly nothing to report — say so rather than a misleading 0/0.
                 return UsageInfo(
                     provider=self.name,
                     plan="Coding Plan",
                     unit="prompts",
-                    raw=data,
+                    raw={**data, "error": "MiniMax reported no quota windows for this account"},
                 )
 
             total_remaining = sum(

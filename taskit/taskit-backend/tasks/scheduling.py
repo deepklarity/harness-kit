@@ -24,6 +24,23 @@ WEEKDAY_INDEX = {
     "MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4, "SAT": 5, "SUN": 6,
 }
 
+# Metadata keys tied to a SPECIFIC execution/worktree, written by the
+# executor at runtime. They must never propagate from a schedule template
+# into a freshly minted task: a stale ``trace_file`` (or ``active_execution``,
+# ``subprocess_pid``, …) makes the stale-execution reaper read a dead run's
+# trace and reap the newborn task at birth. Legitimate template-only keys
+# (e.g. ``origin``) pass through untouched. Shared with the spec-clone path
+# in views.py so the definition of "execution-scoped" stays in one place.
+EXECUTION_SCOPED_METADATA_KEYS = frozenset({
+    "branch", "worktree_path", "working_dir", "merge_status",
+    "started_at", "tmux_session", "last_duration_ms", "full_output",
+    "taskit_id", "diff_stat", "subprocess_pid", "trace_file",
+    "output_file", "active_execution", "worktree_status", "worktree_error",
+    "last_failure_type", "last_failure_reason", "last_failure_origin",
+    "failure_class",
+    "escalation_history", "escalation_count", "escalation_max",
+})
+
 
 @dataclass
 class ScheduleTemplate:
@@ -231,52 +248,38 @@ def build_schedule_template(template_data: dict) -> ScheduleTemplate:
     )
 
 
-def materialize_task_from_schedule(schedule: TaskSchedule, run: TaskScheduleRun | None, created_by: str, reuse_existing: bool = False) -> Task:
+def _dated_title(schedule: TaskSchedule, run: TaskScheduleRun | None) -> str:
+    if schedule.kind == ScheduleKind.RECURRING and run is not None:
+        local_dt = run.scheduled_for_utc.astimezone(_zone(schedule.timezone))
+        return f"{schedule.template_title} \u2014 {local_dt.strftime('%Y-%m-%d')}"
+    return schedule.template_title
+
+
+def materialize_task_from_schedule(schedule: TaskSchedule, run: TaskScheduleRun | None, created_by: str) -> Task:
     assignee = User.objects.filter(pk=schedule.template_assignee_id).first() if schedule.template_assignee_id else None
     spec = Spec.objects.filter(pk=schedule.template_spec_id).first() if schedule.template_spec_id else None
-    task = schedule.materialized_task if reuse_existing and schedule.materialized_task_id else None
-    if task is None:
-        task = Task.objects.create(
-            board=schedule.board,
-            title=schedule.template_title,
-            description=schedule.template_description,
-            priority=schedule.template_priority,
-            status=TaskStatus.IN_PROGRESS,
-            created_by=created_by,
-            assignee=assignee,
-            spec=spec,
-            dev_eta_seconds=schedule.template_dev_eta_seconds,
-            depends_on=schedule.template_depends_on or [],
-            metadata=schedule.template_metadata or {},
-            model_name=schedule.template_model_name,
-            schedule=schedule,
-            current_schedule_run=run,
-        )
-        task.kanban_position = move_task(task, target_status=task.status, target_index=0)
-        task.save(update_fields=["kanban_position"])
-    else:
-        task.title = schedule.template_title
-        task.description = schedule.template_description
-        task.priority = schedule.template_priority
-        task.assignee = assignee
-        task.spec = spec
-        task.dev_eta_seconds = schedule.template_dev_eta_seconds
-        task.depends_on = schedule.template_depends_on or []
-        task.metadata = schedule.template_metadata or {}
-        task.model_name = schedule.template_model_name
-        task.current_schedule_run = run
-        old_status = task.status
-        task.status = TaskStatus.IN_PROGRESS
-        task.kanban_position = move_task(task, target_status=TaskStatus.IN_PROGRESS, target_index=0)
-        task.save()
-        TaskHistory.objects.create(
-            task=task,
-            schedule_run=run,
-            field_name="status",
-            old_value=old_status,
-            new_value=TaskStatus.IN_PROGRESS,
-            changed_by="system@taskit",
-        )
+    clean_metadata = {
+        k: v for k, v in (schedule.template_metadata or {}).items()
+        if k not in EXECUTION_SCOPED_METADATA_KEYS
+    }
+    task = Task.objects.create(
+        board=schedule.board,
+        title=_dated_title(schedule, run),
+        description=schedule.template_description,
+        priority=schedule.template_priority,
+        status=TaskStatus.IN_PROGRESS,
+        created_by=created_by,
+        assignee=assignee,
+        spec=spec,
+        dev_eta_seconds=schedule.template_dev_eta_seconds,
+        depends_on=schedule.template_depends_on or [],
+        metadata=clean_metadata,
+        model_name=schedule.template_model_name,
+        schedule=schedule,
+        current_schedule_run=run,
+    )
+    task.kanban_position = move_task(task, target_status=task.status, target_index=0)
+    task.save(update_fields=["kanban_position"])
     if schedule.template_label_ids:
         task.labels.set(Label.objects.filter(id__in=schedule.template_label_ids))
     return task
@@ -345,7 +348,6 @@ def release_schedule_occurrence(
     scheduled_for_utc: datetime,
     created_by: str,
     release_reason: str,
-    reuse_existing: bool,
     now: datetime,
 ) -> tuple[TaskScheduleRun, Task | None, str]:
     """Create/claim the TaskScheduleRun for one occurrence and materialize its task.
@@ -364,6 +366,11 @@ def release_schedule_occurrence(
     owns cron bookkeeping (advancing next_run_at_utc, setting last_released_run,
     completing one-time schedules), so a manual run can leave the cron cadence
     untouched.
+
+    Every release — recurring or one-time — mints a FRESH task. The
+    schedule's ``materialized_task`` pointer is updated to track the most
+    recently released task so the overlap guard can prevent two occurrences
+    from running simultaneously.
 
     Sets schedule.materialized_task in memory when first materialized; the
     caller is responsible for persisting the schedule. Returns a tuple
@@ -386,34 +393,16 @@ def release_schedule_occurrence(
     if not created and run.status != ScheduleRunStatus.PENDING_RELEASE:
         return run, run.task, "already"
 
-    task = schedule.materialized_task
-    if reuse_existing and task and task.status in TERMINAL_CANCELED_STATUSES:
-        # CANCELED is terminal — do NOT auto-revive on the next occurrence
-        # (the operator canceled the task). Mark the run CANCELED so the
-        # audit trail is unambiguous; re-enabling means canceling the
-        # schedule or un-canceling the task by hand. (Carried over from
-        # the pre-refactor cron path, c3b710f8.)
-        run.status = ScheduleRunStatus.CANCELED
-        run.result_summary = (
-            f"Skipped: task {task.id} is CANCELED — schedule does not "
-            "auto-revive a canceled task."
-        )
-        run.finished_at_utc = now
-        run.save(update_fields=["status", "result_summary", "finished_at_utc"])
-        return run, task, "canceled"
-
-    if reuse_existing and task and task.status in ACTIVE_OVERLAP_STATUSES:
+    prev_task = schedule.materialized_task
+    if prev_task and prev_task.status in ACTIVE_OVERLAP_STATUSES:
         run.status = ScheduleRunStatus.SKIPPED_OVERLAP
-        run.result_summary = f"Skipped because task {task.id} is still active."
+        run.result_summary = f"Skipped because task {prev_task.id} is still active."
         run.finished_at_utc = now
         run.save(update_fields=["status", "result_summary", "finished_at_utc"])
-        return run, task, "overlap"
+        return run, prev_task, "overlap"
 
-    task = materialize_task_from_schedule(
-        schedule, run, created_by=created_by, reuse_existing=reuse_existing,
-    )
-    if not schedule.materialized_task_id:
-        schedule.materialized_task = task
+    task = materialize_task_from_schedule(schedule, run, created_by=created_by)
+    schedule.materialized_task = task
     run.task = task
     run.status = ScheduleRunStatus.RELEASED
     run.released_at_utc = now
@@ -451,7 +440,6 @@ def release_due_schedules(now: datetime | None = None) -> int:
                 scheduled_for_utc=schedule.next_run_at_utc,
                 created_by=schedule.created_by,
                 release_reason="Released by schedule due time.",
-                reuse_existing=schedule.kind == ScheduleKind.RECURRING,
                 now=now,
             )
             if outcome == "already":

@@ -33,4 +33,9 @@ urlpatterns = [
     path("runtime/stop/", views.runtime_stop),
     path("analytics/cost-summary/", analytics.cost_summary),
     path("analytics/quota-status/", analytics.quota_status),
+    path(
+        "agents/<str:agent_name>/tasks/",
+        views.agent_tasks,
+        name="agent-tasks",
+    ),
 ] + router.urls

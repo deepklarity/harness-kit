@@ -20,7 +20,7 @@ Master index for all documentation in the harness-kit monorepo.
 ## Current contents
 
 ### breadcrumb_analysis/
-20 flow traces covering Odin lifecycle + supporting systems. See `breadcrumb_analysis/_INDEX.md` for full list and symptom quick-nav.
+21 flow traces covering Odin lifecycle + supporting systems. See `breadcrumb_analysis/_INDEX.md` for full list and symptom quick-nav.
 
 ### solutions/
 2 compounded learnings. Browse by directory.

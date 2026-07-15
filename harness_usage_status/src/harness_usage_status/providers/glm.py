@@ -183,8 +183,10 @@ class GLMProvider(BaseProvider):
                 primary = five_hour[0] if five_hour else max(
                     tokens_limits, key=lambda x: x.get("percentage", 0)
                 )
-                # percentage is already on a 0-100 scale
-                usage_pct = primary.get("percentage", 0)
+                # percentage is already on a 0-100 scale.
+                # A *missing* key means the API didn't report usage —
+                # surface as None (no data), never a misleading 0.
+                usage_pct = primary.get("percentage")
                 unit = "tokens"
                 reset_ts = primary.get("nextResetTime")
                 if reset_ts:

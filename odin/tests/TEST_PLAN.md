@@ -465,6 +465,17 @@ override layer when history is thin or absent (Default First).
 
 ## Reflection
 
+- [x] Rework directive: NEEDS_WORK/FAIL finding leads the prompt under "Fix this first — the reviewer's finding" `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_single_needs_work_reflection`
+- [x] Rework directive: operator status_update notes since the last reflection are bundled with the finding `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_rework_finding_and_operator_comment_lead`
+- [x] Rework directive: operator REPLY comments since the last reflection are bundled with the finding `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_reply_after_reflection_bundled_in_rework_directive`
+- [x] Rework directive: pre-reflection replies stay in Q&A, not promoted into the directive `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_reply_before_reflection_stays_in_qa`
+- [x] Rework directive: status_update AND reply posted after the same reflection both lead `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_status_update_reply_both_lead_when_both_posted_after_reflection`
+- [x] Rework directive: pre-reflection operator note stays in Human Notes, not in fix-first `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_operator_comment_before_reflection_stays_in_human_notes`
+- [x] Rework directive: FAIL reflection included alongside NEEDS_WORK `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_fail_reflection_included`
+- [x] Rework directive: PASS reflection excluded from rework block `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_pass_reflection_excluded`
+- [x] Rework directive: earlier review rounds follow the latest as context `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_multiple_reflections_latest_leads`
+- [x] Rework directive: budget enforced at MAX_CONTEXT_CHARS `[simple]` — `unit/test_build_task_context.py::TestBuildTaskContext::test_budget_enforcement_truncates`
+
 - [x] Reflection prompt contains read-only instruction `[simple]` — `unit/test_reflection.py::TestBuildReflectionPrompt::test_prompt_contains_readonly_instruction`
 - [x] Reflection prompt includes task context `[simple]` — `unit/test_reflection.py::TestBuildReflectionPrompt::test_prompt_includes_task_title_and_description`
 - [x] Reflection prompt includes execution output `[simple]` — `unit/test_reflection.py::TestBuildReflectionPrompt::test_prompt_includes_execution_output`

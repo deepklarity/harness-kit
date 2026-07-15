@@ -27,6 +27,9 @@ Taxonomy (derived from the historical failure inventory in
     crash              — subprocess crash, unhandled exception
     cancelled          — user-initiated stop
     model_unavailable  — model not supported / invalid request
+    error_loop         — provider retry loop detected in trace tail
+    review_cap         — reflection reviews rejected the work 3 times
+    auth_failure       — alias for env_missing from the auth-side detector
     unknown            — fallback (never guess)
 """
 
@@ -58,6 +61,8 @@ FAILURE_CLASSES = frozenset({
     "cancelled",
     "model_unavailable",
     "error_loop",
+    "review_cap",
+    "auth_failure",
     "unknown",
 })
 
@@ -165,6 +170,13 @@ def classify_failure(metadata: Dict[str, Any]) -> str:
     # 1. Explicit user cancellation — unambiguous.
     if ftype == "cancelled":
         return "cancelled"
+
+    # 1b. Reflection-cap (3 strikes) — only stamped explicitly by the
+    # reflection-cap writer in ``views``. The tagger preserves it on a
+    # pass-through so a re-classification never relabels a "review_cap"
+    # as a generic "crash" just because the reason text shifted.
+    if ftype == "review_cap":
+        return "review_cap"
 
     # 2. Worktree isolation failure — unambiguous type.
     if ftype == "missing_worktree":

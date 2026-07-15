@@ -658,6 +658,7 @@ class TaskItBackend(BoardBackend):
         model: str,
         effective_input: str,
         success: bool,
+        token_usage: dict | None = None,
     ) -> None:
         """POST planning trace to /specs/:id/planning_result/."""
         taskit_pk = self._resolve_spec_pk(spec_id)
@@ -672,6 +673,8 @@ class TaskItBackend(BoardBackend):
             "effective_input": effective_input,
             "success": success,
         }
+        if token_usage:
+            payload["token_usage"] = token_usage
         resp = self._client.post(f"/specs/{taskit_pk}/planning_result/", json=payload)
         _raise_for_status(resp)
         logger.info(
@@ -716,6 +719,93 @@ class TaskItBackend(BoardBackend):
         current_meta.update(metadata_patch)
         resp = self._client.patch(
             f"/specs/{taskit_pk}/",
+            json={"metadata": current_meta},
+        )
+        _raise_for_status(resp)
+
+    def post_spec_comment_by_pk(
+        self,
+        spec_pk: int,
+        content: str,
+        comment_type: str = "status_update",
+        author_email: str = "",
+        author_label: str = "",
+        attachment_ids: list | None = None,
+    ) -> dict:
+        """POST a SpecComment directly by spec PK.
+
+        Used by the board-driven planner to post gate questions and planning
+        updates to the spec thread.  ``attachment_ids`` links previously
+        uploaded file attachments (see :meth:`upload_spec_attachment`) to the
+        new comment.
+        """
+        payload: dict = {"content": content, "comment_type": comment_type}
+        if author_email:
+            payload["author_email"] = author_email
+        if author_label:
+            payload["author_label"] = author_label
+        if attachment_ids:
+            payload["attachment_ids"] = attachment_ids
+        resp = self._client.post(f"/specs/{spec_pk}/comments/", json=payload)
+        _raise_for_status(resp)
+        logger.info(
+            "Posted spec comment on spec_pk=%s type=%s", spec_pk, comment_type,
+        )
+        return resp.json()
+
+    def upload_spec_attachment(
+        self,
+        spec_pk: int,
+        file_path: str,
+        author_email: str = "agent@odin.agent",
+    ) -> dict:
+        """Upload a file as a spec attachment via ``POST /specs/:id/attachments/``.
+
+        Returns the created attachment dict (includes ``id`` and ``url``).
+        The attachment is orphan (``comment=None``) until linked to a comment
+        via ``attachment_ids`` in :meth:`post_spec_comment_by_pk`.
+        """
+        from pathlib import Path
+
+        p = Path(file_path)
+        with p.open("rb") as fh:
+            files = {"files": (p.name, fh, "text/html")}
+            data = {"author_email": author_email}
+            resp = self._client.post(
+                f"/specs/{spec_pk}/attachments/", files=files, data=data,
+            )
+        _raise_for_status(resp)
+        result = resp.json()
+        logger.info(
+            "Uploaded spec attachment on spec_pk=%s: %s", spec_pk, p.name,
+        )
+        return result if isinstance(result, list) else [result]
+
+    def get_spec_comments_by_pk(self, spec_pk: int) -> list:
+        """GET all SpecComments for a spec by PK."""
+        resp = self._client.get(f"/specs/{spec_pk}/comments/")
+        _raise_for_status(resp)
+        return _unwrap_list(resp.json())
+
+    def get_spec_odin_id_by_pk(self, spec_pk: int) -> Optional[str]:
+        """GET /specs/:id/ and return its odin_id, primed into the pk cache."""
+        resp = self._client.get(f"/specs/{spec_pk}/")
+        _raise_for_status(resp)
+        odin_id = resp.json().get("odin_id")
+        if odin_id:
+            self._spec_pk_cache[odin_id] = spec_pk
+        return odin_id
+
+    def update_spec_metadata_by_pk(
+        self, spec_pk: int, metadata_patch: dict,
+    ) -> None:
+        """Merge additional keys into a spec's metadata by PK."""
+        resp = self._client.get(f"/specs/{spec_pk}/")
+        _raise_for_status(resp)
+        current_meta = resp.json().get("metadata", {}) or {}
+        current_meta.update(metadata_patch)
+        resp = self._client.patch(
+            f"/specs/{spec_pk}/",
             json={"metadata": current_meta},
         )
         _raise_for_status(resp)

@@ -22,7 +22,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from .execution_processing import compute_usage_from_trace
-from .models import Board, MergeAttempt, ReflectionReport, Task
+from .models import Board, MergeAttempt, ReflectionReport, Spec, Task
 from .pricing import estimate_task_cost
 from .views import _apply_date_range, _parse_multi_values
 
@@ -90,6 +90,9 @@ def quota_status(request):
         logger.exception("Failed to load harness_usage_status config/providers")
         return Response([])
 
+    now = timezone.now()
+    now_iso = now.isoformat()
+
     async def _fetch_all():
         results = []
         for name, provider in providers.items():
@@ -97,6 +100,7 @@ def quota_status(request):
                 usage = await provider.get_usage()
                 status = await provider.get_status()
                 usage.compute_pct()
+                raw = usage.raw or {}
                 results.append({
                     "provider": usage.provider,
                     "plan": usage.plan,
@@ -107,6 +111,8 @@ def quota_status(request):
                     "unit": usage.unit,
                     "reset_date": usage.reset_date.isoformat() if usage.reset_date else None,
                     "state": status.state.value if status.state else None,
+                    "error": raw.get("error"),
+                    "last_fetched": now_iso,
                     "raw": usage.raw,
                 })
             except Exception:
@@ -154,6 +160,8 @@ def cost_summary(request):
     cost_data = _build_task_cost_data(tasks)
     task_ids = [t.id for t in tasks]
     reflection_data = _build_reflection_cost_data(task_ids)
+    merge_cost = _build_merge_cost(task_ids)
+    plan_cost = _build_plan_cost(tasks)
 
     board_ids_in_data = {d["board_id"] for d in cost_data if d.get("board_id")}
     if board_ids:
@@ -170,8 +178,17 @@ def cost_summary(request):
     # CLI script agree to the digit.
     autonomy = _compute_autonomy_rollup(tasks, board_ids)
 
+    # W12.4 stats-rebuild sections: throughput funnel, league, per_spec,
+    # scheduled_tasks. All four are mutually exclusive + exhaustive so
+    # the bucket counts add to the denominator exactly (the bug the
+    # user reported: 66% pass + 15% rework with 19% missing).
+    throughput_funnel = compute_throughput_funnel(tasks)
+    league = _build_league_section(board_ids)
+    per_spec = _build_per_spec_rollup(board_ids)
+    scheduled_tasks = _build_scheduled_tasks_rollup(board_ids)
+
     return Response({
-        "summary_kpis": _compute_summary_kpis(cost_data, reflection_data),
+        "summary_kpis": _compute_summary_kpis(cost_data, reflection_data, plan_cost, merge_cost),
         "time_series": _aggregate_time_series(cost_data, granularity),
         "cost_by_model": _aggregate_by_model(cost_data),
         "cost_by_board": _aggregate_by_board(cost_data, board_names),
@@ -185,6 +202,10 @@ def cost_summary(request):
         "per_agent_rollup": _per_agent_rollup(cost_data, tasks),
         "merge_health": _merge_health_breakdown(task_ids),
         "review_health": _review_health_breakdown(task_ids),
+        "throughput_funnel": throughput_funnel,
+        "league": league,
+        "per_spec": per_spec,
+        "scheduled_tasks": scheduled_tasks,
         "meta": {
             "task_count": len(tasks),
             "granularity": granularity,
@@ -259,20 +280,72 @@ def _build_reflection_cost_data(task_ids):
     return records
 
 
-def _compute_summary_kpis(cost_data, reflection_data):
-    """Top-level KPI numbers."""
+def _build_merge_cost(task_ids):
+    """Sum merge-agent costs from MergeAttempt rows for the given tasks."""
+    if not task_ids:
+        return 0.0
+    total = 0.0
+    for agent_model, token_usage in MergeAttempt.objects.filter(
+        task_id__in=task_ids,
+    ).values_list("agent_model", "token_usage"):
+        usage = token_usage or {}
+        cost = estimate_task_cost(
+            agent_model,
+            usage.get("input_tokens") or None,
+            usage.get("output_tokens") or None,
+        ) if agent_model else None
+        if cost is not None:
+            total += cost
+    return total
+
+
+def _build_plan_cost(tasks):
+    """Sum plan costs from spec planning_trace metadata.
+
+    Each task carries a ``spec_id``; we collect the distinct specs and
+    read ``planning_trace.token_usage`` + ``planning_trace.model`` from
+    each. Uses the same ``estimate_task_cost`` as every other category
+    so /stats and the spec page agree to the digit.
+    """
+    spec_ids = {t.spec_id for t in tasks if t.spec_id}
+    if not spec_ids:
+        return 0.0
+    total = 0.0
+    for spec_meta in Spec.objects.filter(id__in=spec_ids).values_list("metadata", flat=True):
+        trace = (spec_meta or {}).get("planning_trace") or {}
+        usage = trace.get("token_usage") or {}
+        model = trace.get("model")
+        if model and usage:
+            cost = estimate_task_cost(
+                model,
+                usage.get("input_tokens") or None,
+                usage.get("output_tokens") or None,
+            )
+            if cost is not None:
+                total += cost
+    return total
+
+
+def _compute_summary_kpis(cost_data, reflection_data, plan_cost=0.0, merge_cost=0.0):
     total_spend = sum(d["cost"] or 0 for d in cost_data)
     total_tokens = sum(d["total_tokens"] for d in cost_data)
     task_count = len(cost_data)
     tasks_with_cost = [d for d in cost_data if d["cost"] is not None and d["cost"] > 0]
     avg_cost = (total_spend / len(tasks_with_cost)) if tasks_with_cost else 0
     reflection_cost = sum(d["cost"] or 0 for d in reflection_data)
+    # total_spend means ALL money: plan + build + review + merge. The
+    # frontend and CSV read this one number — nobody recomputes it.
+    build_spend = total_spend
+    total_spend = build_spend + plan_cost + reflection_cost + merge_cost
     return {
         "total_spend": round(total_spend, 4),
+        "build_spend": round(build_spend, 4),
         "total_tokens": total_tokens,
         "task_count": task_count,
         "avg_cost_per_task": round(avg_cost, 4),
         "reflection_cost": round(reflection_cost, 4),
+        "plan_cost": round(plan_cost, 4),
+        "merge_cost": round(merge_cost, 4),
     }
 
 
@@ -793,3 +866,243 @@ def _per_agent_rollup(cost_data, tasks):
 # Module-level `_extract_agent` is defined near the top of this file —
 # single source of truth shared by the cost_by_agent chart and the
 # per-agent rollup.
+
+
+# ---------------------------------------------------------------------------
+# W12.4 stats-rebuild helpers
+# ---------------------------------------------------------------------------
+
+
+# Throughput funnel bucket order. The order is the visual order on the
+# stats page and the canonical denominator ordering — sum to 100% top
+# to bottom.
+FUNNEL_BUCKETS = ("pass", "rework", "fail", "in_flight")
+
+
+def compute_throughput_funnel(tasks):
+    """Partition a task list into 4 mutually exclusive, exhaustive buckets.
+
+    The funnel replaces the prior review_pass + rework_rate pair, which
+    didn't share a denominator and could show 66% pass + 15% rework
+    with 19% silently missing. After this helper every view sums to
+    100% on a visible denominator.
+
+    Buckets:
+      pass       — DONE tasks with metadata.rework_count == 0 (clean
+                   landing, no rework)
+      rework     — DONE tasks with metadata.rework_count > 0 (landed
+                   but had to be redone at least once)
+      fail       — FAILED tasks (terminal failure; not counted as rework
+                   even if they were retried, because rework is
+                   specifically about "landed after redos")
+      in_flight  — every other status (BACKLOG, TODO, IN_PROGRESS,
+                   EXECUTING, REVIEW, TESTING, CANCELED, plus DONE
+                   tasks with no rework metadata and FAILED without
+                   any capture — defensive)
+
+    The function takes a list of Task-like objects (id, status,
+    metadata) so callers can pass ORM querysets, plain lists, or test
+    fixtures without changing the math.
+    """
+    counts = {b: 0 for b in FUNNEL_BUCKETS}
+    for t in tasks:
+        status = (getattr(t, "status", "") or "").upper()
+        meta = getattr(t, "metadata", None) or {}
+        rework = int(meta.get("rework_count", 0) or 0)
+
+        if status == "DONE":
+            if rework > 0:
+                counts["rework"] += 1
+            else:
+                counts["pass"] += 1
+        elif status == "FAILED":
+            counts["fail"] += 1
+        else:
+            counts["in_flight"] += 1
+
+    total = sum(counts.values())
+    if total == 0:
+        return {
+            "total": 0,
+            "buckets": [
+                {"bucket": b, "count": 0, "pct": 0.0} for b in FUNNEL_BUCKETS
+            ],
+        }
+
+    # Round each pct to whole numbers and patch the largest bucket to
+    # absorb the rounding residual so the visible percentages sum to
+    # exactly 100. The bucket counts always sum to total exactly — the
+    # rounding is purely a display concern.
+    raw = [(b, counts[b], (counts[b] / total) * 100.0) for b in FUNNEL_BUCKETS]
+    rounded = [(b, c, round(p)) for (b, c, p) in raw]
+    residual = 100 - sum(p for (_, _, p) in rounded)
+    if residual != 0 and rounded:
+        # Pick the bucket with the largest fractional remainder whose
+        # rounding error is in the right direction.
+        idx = max(
+            range(len(rounded)),
+            key=lambda i: (
+                abs(raw[i][2] - rounded[i][2]),
+                rounded[i][1],
+            ),
+        )
+        rounded[idx] = (rounded[idx][0], rounded[idx][1], rounded[idx][2] + residual)
+
+    return {
+        "total": total,
+        "buckets": [
+            {"bucket": b, "count": c, "pct": float(p)}
+            for (b, c, p) in rounded
+        ],
+    }
+
+
+def _build_league_section(board_ids):
+    """Per-(agent, model) league rollup, scoped to one board or all boards.
+
+    For the single-board view this matches the data shape of the
+    existing /api/boards/<id>/league/ endpoint. For the All-Boards
+    view (board_ids empty or contains many ids) it aggregates across
+    every board so the page can render the same league table the
+    operator sees on a single board.
+
+    The per-board path delegates to ``tasks.league.compute_league_for_board``
+    so the response shape, sorting, and operator-takeover rules stay
+    identical — the only difference is whether the scope is one board
+    or all of them.
+    """
+    from .league import compute_league_for_board
+
+    if board_ids and len(board_ids) == 1:
+        try:
+            board = Board.objects.get(pk=board_ids[0])
+        except Board.DoesNotExist:
+            board = None
+        rows = compute_league_for_board(board=board)
+        return {
+            "rows": [r.to_dict() for r in rows],
+            "meta": {
+                "task_count": sum(r.tasks_landed for r in rows),
+                "board_id": board_ids[0] if board else None,
+                "since_spec": None,
+                "aggregate": False,
+            },
+        }
+
+    # All-boards (or no single-board scope) — aggregate.
+    rows = compute_league_for_board(board=None)
+    return {
+        "rows": [r.to_dict() for r in rows],
+        "meta": {
+            "task_count": sum(r.tasks_landed for r in rows),
+            "board_id": None,
+            "since_spec": None,
+            "aggregate": True,
+        },
+    }
+
+
+def _build_per_spec_rollup(board_ids):
+    """One row per spec, sorted newest-first, with cost + outcome counts.
+
+    Reuses ``compute_spec_cost_summary`` so the per-spec cost number
+    matches the spec-detail endpoint (single source of truth). The
+    outcome counts (done_count, failed_count, in_flight_count) are
+    added so the operator can see at a glance which specs are landing
+    cleanly vs. spinning their wheels, without drilling into each
+    spec's story.
+    """
+    from .models import Spec
+    from .pricing import compute_spec_cost_summary
+
+    specs_qs = Spec.objects.select_related("board").order_by("-created_at")
+    if board_ids:
+        specs_qs = specs_qs.filter(board_id__in=board_ids)
+
+    rows = []
+    for spec in specs_qs:
+        tasks = list(spec.tasks.all())
+        if not tasks:
+            continue
+        cost = compute_spec_cost_summary(tasks)
+        done_count = sum(1 for t in tasks if (t.status or "").upper() == "DONE")
+        failed_count = sum(1 for t in tasks if (t.status or "").upper() == "FAILED")
+        in_flight_count = len(tasks) - done_count - failed_count
+        rows.append({
+            "odin_id": spec.odin_id,
+            "title": spec.title,
+            "board_id": spec.board_id,
+            "board_name": spec.board.name if spec.board_id else None,
+            "task_count": len(tasks),
+            "done_count": done_count,
+            "failed_count": failed_count,
+            "in_flight_count": in_flight_count,
+            "total_cost_usd": cost.get("total_cost_usd", 0.0),
+            "total_tokens": cost.get("total_tokens", 0),
+            "created_at": spec.created_at.isoformat() if spec.created_at else None,
+        })
+    return rows
+
+
+def _build_scheduled_tasks_rollup(board_ids):
+    """Per-schedule rollup with run history success/failure counts.
+
+    Surfaces the same data the operator gets on the schedules page
+    but compacted: one row per schedule with run_count, success_count,
+    and failure_count so a portfolio owner can scan the All-Boards
+    view and see which cron-style tasks are healthy.
+    """
+    from .models import ScheduleRunStatus, TaskSchedule
+
+    qs = TaskSchedule.objects.select_related("board").order_by(
+        "-created_at",
+    )
+    if board_ids:
+        qs = qs.filter(board_id__in=board_ids)
+
+    rows = []
+    for sched in qs:
+        runs = list(sched.runs.all())
+        if not runs:
+            rows.append({
+                "id": sched.id,
+                "template_title": sched.template_title,
+                "template_kind": sched.kind,
+                "status": sched.status,
+                "board_id": sched.board_id,
+                "board_name": sched.board.name if sched.board_id else None,
+                "run_count": 0,
+                "success_count": 0,
+                "failure_count": 0,
+                "next_run_at_utc": (
+                    sched.next_run_at_utc.isoformat()
+                    if sched.next_run_at_utc else None
+                ),
+                "created_at": sched.created_at.isoformat() if sched.created_at else None,
+            })
+            continue
+        success_count = sum(
+            1 for r in runs
+            if r.status == ScheduleRunStatus.COMPLETED_SUCCESS
+        )
+        failure_count = sum(
+            1 for r in runs
+            if r.status == ScheduleRunStatus.COMPLETED_FAILED
+        )
+        rows.append({
+            "id": sched.id,
+            "template_title": sched.template_title,
+            "template_kind": sched.kind,
+            "status": sched.status,
+            "board_id": sched.board_id,
+            "board_name": sched.board.name if sched.board_id else None,
+            "run_count": len(runs),
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "next_run_at_utc": (
+                sched.next_run_at_utc.isoformat()
+                if sched.next_run_at_utc else None
+            ),
+            "created_at": sched.created_at.isoformat() if sched.created_at else None,
+        })
+    return rows

@@ -221,13 +221,21 @@ def post_twins_comment(task, *, author_email="odin+memory@system", author_label=
     one. The estimate is also stamped on `task.metadata["estimate"]` so
     DONE / auto-promotion paths can pair it with the actual cost.
 
-    Idempotent per dispatch: guarded by `metadata.active_execution.run_token`
-    so a retried/duplicate call for the same dispatch never double-posts,
-    while a later re-dispatch (new run_token, e.g. rework) gets a fresh
-    comment. Returns [] and posts nothing when there is no history — the
-    caller (executor dispatch path) treats that as a silent no-op. With
-    no twins there is no quote to post, and we never invent one.
+    Idempotent in two layers:
+
+    1. Per dispatch — `metadata.active_execution.run_token` guards a
+       repeated call for the same dispatch (a Celery double-fire).
+    2. Per content — a retry whose board history didn't change produces a
+       byte-identical card, so it is suppressed by ``has_identical_comment``.
+       The card re-posts only when the twin set actually changes (a new
+       finished relative, a moved assignee), not on every attempt.
+
+    Returns [] and posts nothing when there is no history — the caller
+    (executor dispatch path) treats that as a silent no-op. With no twins
+    there is no quote to post, and we never invent one.
     """
+    from .comment_dedup import has_identical_comment
+
     metadata = task.metadata or {}
     run_token = (metadata.get("active_execution") or {}).get("run_token")
     if run_token and metadata.get("twins_posted_for_run_token") == run_token:
@@ -245,6 +253,15 @@ def post_twins_comment(task, *, author_email="odin+memory@system", author_label=
 
     from .estimation import compute_estimate, stamp_estimate
     estimate = compute_estimate(twins)
+    body = format_twins_comment(twins, estimate=estimate)
+
+    # A retry that changed nothing on the board produces the same card —
+    # don't bury the page under copies. Re-stamp the estimate (it is
+    # derived from the same twins) but skip the duplicate post.
+    if has_identical_comment(task, body, author_label=author_label):
+        stamp_estimate(task, estimate)
+        return twins
+
     stamp_estimate(task, estimate)
 
     from .models import CommentType, TaskComment
@@ -254,7 +271,7 @@ def post_twins_comment(task, *, author_email="odin+memory@system", author_label=
         schedule_run=task.current_schedule_run,
         author_email=author_email,
         author_label=author_label,
-        content=format_twins_comment(twins, estimate=estimate),
+        content=body,
         comment_type=CommentType.STATUS_UPDATE,
     )
     return twins

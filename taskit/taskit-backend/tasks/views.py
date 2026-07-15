@@ -34,23 +34,25 @@ from .rework import ReworkValidationError, compose_rework_task
 from .spec_story import build_spec_story
 from .models import (
     Board, BoardMembership, CommentAttachment, CommentType, Label,
-    ReflectionReport, ReflectionStatus, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
+    ReflectionReport, ReflectionStatus, ScheduleKind, ScheduleStatus, Spec, SpecComment, SpecCommentAttachment, Task,
     TaskComment, TaskHistory, TaskRunState, TaskSchedule, TaskScheduleRun, TaskStatus, User, UserRole, UserSetting,
     SystemSetting,
 )
 from . import task_runs
-from .db import is_locked_error
+from .db import is_locked_error, retry_on_locked
 from .audit_presets import load_presets
 from .scheduling import (
     ACTIVE_OVERLAP_STATUSES,
     compute_schedule_next_run,
     create_schedule,
+    EXECUTION_SCOPED_METADATA_KEYS,
     maybe_finalize_schedule_run,
     parse_local_datetime,
     local_to_utc,
     release_schedule_occurrence,
     rebind_local_datetime,
     ScheduleValidationError,
+    TERMINAL_SUCCESS_STATUSES,
 )
 from .state_transitions import is_cancel_transition_allowed
 from .ide import detect_supported_ides, get_supported_ide
@@ -78,6 +80,7 @@ from .serializers import (
     RoutingAgentSerializer,
     ReworkTaskSerializer,
     SpecCommentSerializer,
+    SpecCommentAttachmentSerializer,
     CreateTaskSerializer,
     ExecutionResultSerializer,
     LabelSerializer,
@@ -126,6 +129,11 @@ WEEKDAY_KEYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 REFLECTION_PREFERRED_AGENTS = ["gemini", "codex", "claude"]
 
+# Max automatic retries for REVIEWER_INFRA (truncated review output).
+# Does NOT count against the 3-strike NEEDS_WORK/FAIL limit — infra
+# retries are free because the reviewer never actually judged the work.
+# After this many infra retries, the task parks in REVIEW for manual triage.
+REVIEWER_INFRA_RETRY_CAP = 2
 
 def _reflection_agent_hint_for_model(model_name):
     model = (model_name or "").lower()
@@ -140,6 +148,7 @@ def _reflection_agent_hint_for_model(model_name):
     if model.startswith("minimax-coding-plan/"):
         return "minimax"
     return None
+
 
 
 def _model_name(entry):
@@ -549,11 +558,16 @@ def _clear_stop_guards(metadata):
     metadata.pop("pending_stop_reason", None)
 
 
-def _trigger_auto_reflection(task):
+def _trigger_auto_reflection(task, exclude_reviewers=frozenset()):
     """Create a ReflectionReport and dispatch the Celery task if no active reflection exists.
 
     Called when a task transitions to REVIEW — mirrors the pattern used for
     auto-execution on IN_PROGRESS (explicit call in the view, not a signal).
+
+    ``exclude_reviewers`` is a set of ``(agent_name, model_name)`` tuples to
+    skip during reviewer selection. Used by the REVIEWER_INFRA retry path to
+    prefer a fresh reviewer — the truncated reviewer may simply truncate
+    again on the same task (task #346).
     """
     if task.skip_reflection or task.board.skip_reflection:
         source = "task" if task.skip_reflection else f"board {task.board_id}"
@@ -572,7 +586,17 @@ def _trigger_auto_reflection(task):
         )
         return
 
-    reviewer_agent, reviewer_model, selection_reason = select_reviewer_by_context_size(task, board=task.board)
+    reviewer_agent, reviewer_model, selection_reason = select_reviewer_by_context_size(
+        task, board=task.board, exclude_reviewers=exclude_reviewers,
+    )
+    if not reviewer_agent or not reviewer_model:
+        if exclude_reviewers:
+            # Fresh-reviewer preference eliminated all candidates. Fall
+            # back to any available reviewer — retrying with the same one
+            # is better than skipping the review entirely (task #346).
+            reviewer_agent, reviewer_model, selection_reason = select_reviewer_by_context_size(
+                task, board=task.board,
+            )
     if not reviewer_agent or not reviewer_model:
         logger.info(
             "[task:%s] Skipping auto-reflection: no reviewer agent (%s) is available — dispatching merge+advance directly",
@@ -1397,7 +1421,7 @@ def user_ide_settings(request):
             raise ValidationError({"preferred_ide_id": "IDE is not currently detected on this system."})
 
     settings_obj.preferred_ide_id = preferred_ide_id
-    settings_obj.save(update_fields=["preferred_ide_id", "updated_at"])
+    _save_with_retry(settings_obj, update_fields=["preferred_ide_id", "updated_at"])
     return Response(UserSettingSerializer(settings_obj).data)
 
 
@@ -1702,16 +1726,29 @@ def _apply_date_range(qs, query_params, field_name, from_key, to_key):
     return qs
 
 
-def _exclude_hidden_scheduled_tasks(qs):
+def _exclude_hidden_scheduled_tasks(qs, hide_terminal_recurring=True):
     # Only FUTURE occurrences hide from the board (they live on the
     # Scheduling page until they fire). Once a scheduled task has run,
     # it is board history like any other task — hiding executed runs
     # made the daily ops invisible on kanban (user report, task 301).
-    return qs.exclude(
+    qs = qs.exclude(
         schedule_id__isnull=False,
         schedule__status__in=[ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED],
         status__in=[TaskStatus.BACKLOG, TaskStatus.TODO],
     )
+    # Board hygiene: terminal tasks (DONE/TESTING) from RECURRING schedules
+    # collapse into the schedule's run history. With fresh-task-per-release
+    # each daily run mints its own task — without this filter months of
+    # finished daily tasks would drown the kanban. The tasks still exist
+    # (accessible by id, via the schedule's runs, or through an explicit
+    # status filter); they're just not pinned to the board listing.
+    if hide_terminal_recurring:
+        qs = qs.exclude(
+            schedule_id__isnull=False,
+            schedule__kind=ScheduleKind.RECURRING,
+            status__in=TERMINAL_SUCCESS_STATUSES,
+        )
+    return qs
 
 
 def _parse_sort_tokens(sort_raw, allowed_fields, default_tokens):
@@ -2912,7 +2949,6 @@ class ScheduleViewSet(viewsets.ModelViewSet):
                 scheduled_for_utc=now,
                 created_by=created_by,
                 release_reason=f"Manual run requested by {created_by}.",
-                reuse_existing=schedule.kind == ScheduleKind.RECURRING,
                 now=now,
             )
 
@@ -2928,10 +2964,9 @@ class ScheduleViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_409_CONFLICT,
                 )
 
-            # Persist the materialized_task link the helper set in memory (so the
-            # next double-trigger sees it) without touching cron bookkeeping:
-            # only this field is saved -- next_run_at_utc / last_released_run /
-            # status are left exactly as they were.
+            # release_schedule_occurrence always mints a fresh task now, so
+            # materialized_task always changes -- persist it without touching
+            # cron bookkeeping (next_run_at_utc / last_released_run / status).
             if schedule.materialized_task_id != materialized_before:
                 schedule.save(update_fields=["materialized_task"])
 
@@ -3300,6 +3335,76 @@ def _reposition_best_effort(task, target_status):
         return int(task.kanban_position or 0)
 
 
+@retry_on_locked(max_retries=3, base_delay=0.05)
+def _persist_task_update(task, histories):
+    """Persist a task PATCH (save + history bulk_create) atomically.
+
+    Same backstop ``move_task`` has: the whole write is one atomic block
+    retried on a transient ``database is locked``. Without this, a brief
+    writer collision on PATCH /tasks/<id>/ surfaced as a 500 to operators
+    and agents dispatching several tasks at once (task #364). ``save`` and
+    ``bulk_create`` are one unit so the task row and its history never
+    diverge — on a lock the transaction rolls back and both retry cleanly.
+    """
+    with transaction.atomic():
+        task.save()
+        if histories:
+            TaskHistory.objects.bulk_create(histories)
+
+
+@retry_on_locked(max_retries=3, base_delay=0.05)
+def _create_task_comment(task, *, schedule_run=None, attachment_ids=None, **fields):
+    """Create a task comment (and link any uploaded attachments) atomically,
+    retried on a transient ``database is locked`` (task #364).
+
+    The comment row and the attachment link are one unit: a lock on either
+    rolls both back and the retry is clean (no orphan comment, no duplicate).
+    """
+    with transaction.atomic():
+        comment = TaskComment.objects.create(
+            task=task, schedule_run=schedule_run, **fields,
+        )
+        if attachment_ids:
+            CommentAttachment.objects.filter(
+                id__in=attachment_ids, task=task, comment__isnull=True,
+            ).update(comment=comment)
+        return comment
+
+
+@retry_on_locked(max_retries=3, base_delay=0.05)
+def _save_with_retry(instance, **save_kwargs):
+    """Retry a single model save on a transient ``database is locked``.
+
+    The generic backstop for operator-facing single-row writes (e.g. the
+    IDE-settings endpoint) that don't need the atomic bulk_create pairing
+    of ``_persist_task_update`` (task #364).
+    """
+    instance.save(**save_kwargs)
+
+
+@retry_on_locked(max_retries=3, base_delay=0.05)
+def _update_executor_max_concurrency(value):
+    return SystemSetting.objects.update_or_create(
+        key="executor_max_concurrency",
+        defaults={"value": value},
+    )
+
+
+@retry_on_locked(max_retries=3, base_delay=0.05)
+def _persist_label_change(task, *, m2m_change=None):
+    """Apply an M2M label change (and any history row written inside the
+    callable) in one atomic block, retried on a transient
+    ``database is locked`` (task #364).
+
+    The M2M write and the history write happen inside the same atomic
+    block so a lock on either rolls both back and the retry is clean (no
+    phantom history row, no half-applied label set).
+    """
+    with transaction.atomic():
+        if m2m_change is not None:
+            m2m_change(task)
+
+
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     pagination_class = StandardPagination
@@ -3311,7 +3416,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             .prefetch_related("labels", "reflections")
             .annotate(comment_count=Count("comments"))
         )
-        qs = _exclude_hidden_scheduled_tasks(qs)
+        qs = _exclude_hidden_scheduled_tasks(qs, hide_terminal_recurring=self.action == "list")
 
         board_ids = _parse_multi_values(query_params, "board_id", aliases=("board",))
         if board_ids:
@@ -3675,8 +3780,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             task.metadata = dict(task.metadata or {})
             _clear_stop_guards(task.metadata)
 
-        task.save()
-        TaskHistory.objects.bulk_create(histories)
+        _persist_task_update(task, histories)
 
         if histories:
             for h in histories:
@@ -3816,23 +3920,25 @@ class TaskViewSet(viewsets.ModelViewSet):
             assignee=assignee, model_name=task.model_name or default_model,
         )
         old_assignee = str(task.assignee_id) if task.assignee_id else ""
-
+        histories = []
         if old_assignee != str(assignee.id):
-            TaskHistory.objects.create(
-                task=task, schedule_run=task.current_schedule_run, field_name="assignee_id",
+            histories.append(TaskHistory(
+                task=task, schedule_run=task.current_schedule_run,
+                field_name="assignee_id",
                 old_value=old_assignee, new_value=str(assignee.id),
                 changed_by=ser.validated_data["updated_by"],
-            )
+            ))
 
         task.assignee = assignee
         if default_model:
-            TaskHistory.objects.create(
-                task=task, schedule_run=task.current_schedule_run, field_name="model_name",
+            histories.append(TaskHistory(
+                task=task, schedule_run=task.current_schedule_run,
+                field_name="model_name",
                 old_value="", new_value=default_model,
                 changed_by=ser.validated_data["updated_by"],
-            )
+            ))
             task.model_name = default_model
-        task.save()
+        _persist_task_update(task, histories)
 
         # Auto-add assignee to board
         _ensure_board_membership(task.board, assignee)
@@ -3859,16 +3965,17 @@ class TaskViewSet(viewsets.ModelViewSet):
         ser.is_valid(raise_exception=True)
 
         old_assignee = str(task.assignee_id) if task.assignee_id else ""
-
+        histories = []
         if old_assignee:
-            TaskHistory.objects.create(
-                task=task, schedule_run=task.current_schedule_run, field_name="assignee_id",
+            histories.append(TaskHistory(
+                task=task, schedule_run=task.current_schedule_run,
+                field_name="assignee_id",
                 old_value=old_assignee, new_value="",
                 changed_by=ser.validated_data["updated_by"],
-            )
+            ))
 
         task.assignee = None
-        task.save()
+        _persist_task_update(task, histories)
 
         return Response(_task_response(task.id))
 
@@ -3880,16 +3987,18 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         old_labels = json.dumps(sorted(task.labels.values_list("id", flat=True)))
         labels = Label.objects.filter(id__in=ser.validated_data["label_ids"])
-        task.labels.add(*labels)
-        new_labels = json.dumps(sorted(task.labels.values_list("id", flat=True)))
 
-        if old_labels != new_labels:
-            TaskHistory.objects.create(
-                task=task, schedule_run=task.current_schedule_run, field_name="labels",
-                old_value=old_labels, new_value=new_labels,
-                changed_by=ser.validated_data["updated_by"],
-            )
-
+        def _record_and_apply(t):
+            t.labels.add(*labels)
+            new = json.dumps(sorted(t.labels.values_list("id", flat=True)))
+            if old_labels != new:
+                TaskHistory.objects.create(
+                    task=t, schedule_run=t.current_schedule_run,
+                    field_name="labels",
+                    old_value=old_labels, new_value=new,
+                    changed_by=ser.validated_data["updated_by"],
+                )
+        _persist_label_change(task, m2m_change=_record_and_apply)
         return Response(_task_response(task.id))
 
     @action(detail=True, methods=["delete"], url_path="labels", url_name="remove-labels")
@@ -3900,16 +4009,18 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         old_labels = json.dumps(sorted(task.labels.values_list("id", flat=True)))
         labels = Label.objects.filter(id__in=ser.validated_data["label_ids"])
-        task.labels.remove(*labels)
-        new_labels = json.dumps(sorted(task.labels.values_list("id", flat=True)))
 
-        if old_labels != new_labels:
-            TaskHistory.objects.create(
-                task=task, schedule_run=task.current_schedule_run, field_name="labels",
-                old_value=old_labels, new_value=new_labels,
-                changed_by=ser.validated_data["updated_by"],
-            )
-
+        def _record_and_apply(t):
+            t.labels.remove(*labels)
+            new = json.dumps(sorted(t.labels.values_list("id", flat=True)))
+            if old_labels != new:
+                TaskHistory.objects.create(
+                    task=t, schedule_run=t.current_schedule_run,
+                    field_name="labels",
+                    old_value=old_labels, new_value=new,
+                    changed_by=ser.validated_data["updated_by"],
+                )
+        _persist_label_change(task, m2m_change=_record_and_apply)
         return Response(_task_response(task.id))
 
     @action(detail=True, methods=["get"])
@@ -3983,12 +4094,12 @@ class TaskViewSet(viewsets.ModelViewSet):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         attachment_ids = data.pop("attachment_ids", [])
-        comment = TaskComment.objects.create(task=task, schedule_run=task.current_schedule_run, **data)
-        # Link uploaded file attachments (screenshots) to this comment
-        if attachment_ids:
-            CommentAttachment.objects.filter(
-                id__in=attachment_ids, task=task, comment__isnull=True,
-            ).update(comment=comment)
+        comment = _create_task_comment(
+            task,
+            schedule_run=task.current_schedule_run,
+            attachment_ids=attachment_ids,
+            **data,
+        )
         logger.info(
             "Comment on task %s by %s: %s",
             task.id, comment.author_label or comment.author_email, comment.content[:100],
@@ -4315,22 +4426,25 @@ class TaskViewSet(viewsets.ModelViewSet):
             )
         task.metadata = task_metadata
 
-        task.save()
-        TaskHistory.objects.bulk_create(histories)
+        _persist_task_update(task, histories)
 
         # Mistakes ledger (task #223): a terminal FAILED (not requeued away)
         # is distilled to one line. Idempotent per run_token.
         if task.status == TaskStatus.FAILED:
             record_execution_mistake(task, run_token=incoming_run_token)
 
-        # 6. Create comment
-        TaskComment.objects.create(
-            task=task,
-            author_email=updated_by,
-            author_label=exec_result.get("agent", ""),
-            content=comment_text,
-            comment_type=CommentType.STATUS_UPDATE,
-        )
+        # 6. Create comment (suppressed when byte-identical to the last one —
+        # a retried execution_result POST must not duplicate the verdict line
+        # (task #360); creation retries on a locked database (task #364)).
+        from .comment_dedup import has_identical_comment
+        if not has_identical_comment(task, comment_text, author_email=updated_by):
+            _create_task_comment(
+                task,
+                author_email=updated_by,
+                author_label=exec_result.get("agent", ""),
+                content=comment_text,
+                comment_type=CommentType.STATUS_UPDATE,
+            )
 
         spec_ctx = f", spec={task.spec_id}" if task.spec_id else ""
         logger.important(
@@ -4699,15 +4813,80 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
             # future similar tasks carry the warning. Idempotent per report.
             record_reflection_mistake(report)
             if task.status == TaskStatus.REVIEW:
+                # Only genuine verdicts count toward the 3-strike limit.
+                # ERROR (reviewer failure) and REVIEWER_INFRA (truncated
+                # output) are infra, not judgments — they must not inflate
+                # the count (task #346: 1 infra + 2 NEEDS_WORK wrongly
+                # FAILED the task on the 2nd NEEDS_WORK).
                 completed_count = ReflectionReport.objects.filter(
                     task=task, status=ReflectionStatus.COMPLETED,
+                ).exclude(
+                    verdict__in=["ERROR", "REVIEWER_INFRA"],
                 ).count()
 
                 if completed_count >= 3:
-                    # 3 strikes — fail the task (no merge; branch preserved for inspection)
+                    # 3 strikes — fail the task (no merge; branch preserved for inspection).
+                    # Task #359: the banner must describe the cap, not a stale
+                    # failure_type left over from an earlier execution. The
+                    # previous shape of this block did NOT touch metadata, so
+                    # the frontend banner kept showing whichever reason an
+                    # earlier EXECUTING run had stamped (task #356 showed a
+                    # 3-day-old stale reap). The cap is the cause now — stamp
+                    # it explicitly and overwrite the previous metadata.
+                    from .failure_messages import (
+                        humanize_failure_reason,
+                        suggested_action_for_metadata,
+                        write_failure_metadata,
+                    )
+
                     old_status = task.status
                     task.status = TaskStatus.FAILED
-                    task.save(update_fields=["status"])
+
+                    metadata = dict(task.metadata or {})
+                    # The latest report's verdict_summary is the most useful
+                    # hook for the human-readable reason — the reviewer said
+                    # *why* they rejected the work this round.
+                    latest_summary = (report.verdict_summary or "").strip() if report else ""
+                    reason_parts = [
+                        f"The reviewer rejected this work three times in a row"
+                        f" ({verdict} on attempt {completed_count}).",
+                    ]
+                    if latest_summary:
+                        reason_parts.append(f"Latest reviewer note: {latest_summary}")
+                    reason_parts.append(
+                        "Read the latest reviewer's note before retrying.",
+                    )
+                    raw_reason = " ".join(reason_parts)
+                    human_reason = humanize_failure_reason(
+                        raw_reason,
+                        failure_type="review_cap",
+                        failure_class="review_cap",
+                        failure_origin="taskit_views",
+                    )
+                    write_failure_metadata(
+                        metadata,
+                        failure_type="review_cap",
+                        failure_reason=human_reason,
+                        failure_origin="taskit_views",
+                        failure_class="review_cap",
+                    )
+                    # Stamp the policy metadata so the audit trail mirrors
+                    # what apply_failure_policy would have written for any
+                    # other HUMAN class. We don't dispatch through the policy
+                    # engine here because the cap already has a richer,
+                    # plain-English comment and the HUMAN policy would only
+                    # add a generic audit note on top — the operator reads
+                    # the rich comment first.
+                    metadata["policy_class"] = "review_cap"
+                    metadata["policy_action"] = "human"
+                    metadata["policy_at"] = timezone.now().isoformat()
+                    task.metadata = metadata
+                    task.kanban_position = move_task(
+                        task, target_status=TaskStatus.FAILED, target_index=None,
+                    )
+                    task.save(update_fields=[
+                        "status", "kanban_position", "metadata", "last_updated_at",
+                    ])
                     TaskHistory.objects.create(
                         task=task,
                         schedule_run=task.current_schedule_run,
@@ -4716,12 +4895,23 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                         new_value=TaskStatus.FAILED,
                         changed_by="system@taskit",
                     )
+                    suggested_action = suggested_action_for_metadata(metadata)
+                    # The suggested action already leads with the cause
+                    # ("The reviewer rejected this work three times…");
+                    # the comment just needs to add the verdict + attempt
+                    # context that is unique to this run and point at the
+                    # next step.
+                    attempt_label = f" ({verdict} on attempt {completed_count})"
+                    comment_body = (
+                        f"Review cap reached{attempt_label}. "
+                        f"{suggested_action}"
+                    )
                     TaskComment.objects.create(
                         task=task,
                         schedule_run=task.current_schedule_run,
                         author_email="system@taskit",
                         author_label="system",
-                        content="Task failed after 3 reflection attempts without passing.",
+                        content=comment_body,
                         comment_type=CommentType.STATUS_UPDATE,
                     )
                     maybe_finalize_schedule_run(task, TaskStatus.FAILED)
@@ -4783,7 +4973,21 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                     # Send back for another execution attempt
                     old_status = task.status
                     task.status = TaskStatus.IN_PROGRESS
-                    task.save(update_fields=["status"])
+                    # Task #353: scrub any stale dispatch_blocked_reason stamp
+                    # left by a previous gate BEFORE saving the new status.
+                    # If the gate below re-holds the task, _set_* will re-stamp
+                    # with the live holder list. Without this clear, the
+                    # banner shows "memory budget full" on a task that has
+                    # just been requeued and dispatched.
+                    task_metadata = dict(task.metadata or {})
+                    for stale_key in (
+                        "dispatch_blocked_reason",
+                        "dispatch_blocked_at",
+                        "dispatch_blocked_blocked_by",
+                    ):
+                        task_metadata.pop(stale_key, None)
+                    task.metadata = task_metadata
+                    task.save(update_fields=["status", "metadata"])
                     TaskHistory.objects.create(
                         task=task,
                         schedule_run=task.current_schedule_run,
@@ -4809,8 +5013,13 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                         executing_count = Task.objects.filter(
                             status=TaskStatus.EXECUTING,
                         ).count()
-                        from .dag_executor import _set_dispatch_blocked_reason
-                        from .sandbox_budget import default_vm_mem_mib, spawn_fits
+                        from .dag_executor import (
+                            _clear_dispatch_blocked_reason,
+                            _set_dispatch_blocked_reason,
+                        )
+                        from .sandbox_budget import (
+                            default_vm_mem_mib, memory_share_holders, spawn_fits,
+                        )
                         if executing_count >= max_concurrency:
                             _set_dispatch_blocked_reason(task, "concurrency_cap_reached")
                             logger.info(
@@ -4821,12 +5030,25 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                             # Memory budget gate — mirrors poll_and_execute: a
                             # rework spawn that would exceed the shared global
                             # budget waits in line instead of booting into swap.
-                            _set_dispatch_blocked_reason(task, "memory_budget_full")
+                            # Holder list comes from the same primitive the
+                            # dispatcher uses, so the banner names the same
+                            # tasks the badge / factory / /factory do.
+                            _set_dispatch_blocked_reason(
+                                task,
+                                "memory_budget_full",
+                                blocked_by=memory_share_holders(),
+                            )
                             logger.info(
                                 "Rework task %s held queued: memory budget full",
                                 task.id,
                             )
                         else:
+                            # Gate didn't hold → make sure no stale stamp is
+                            # still hanging on. The save above already cleared
+                            # the metadata key, but defence-in-depth costs
+                            # nothing and survives a future refactor that
+                            # reaches this branch without first saving.
+                            _clear_dispatch_blocked_reason(task)
                             from .execution import get_strategy
                             strategy = get_strategy()
                             if strategy:
@@ -4835,6 +5057,57 @@ class ReflectionReportViewSet(viewsets.GenericViewSet):
                                     task.id, verdict,
                                 )
                                 strategy.trigger(task)
+
+        # Auto-retry: REVIEWER_INFRA verdict (truncated review output) does
+        # NOT count against the 3-strike limit. The reviewer ran out of
+        # tokens before emitting a verdict — that's infra, not a judgment.
+        # Retry with a fresh reviewer up to REVIEWER_INFRA_RETRY_CAP times,
+        # then park for manual triage. (Task #346: reflection 360 on task
+        # 342 had real reasoning but no JSON verdict — the whole review
+        # run's tokens were spent for nothing.)
+        if (
+            new_status == "COMPLETED"
+            and verdict == "REVIEWER_INFRA"
+        ):
+            task = report.task
+            task.refresh_from_db(fields=["status", "metadata"])
+            if task.status == TaskStatus.REVIEW:
+                metadata = dict(task.metadata or {})
+                infra_count = int(metadata.get("reviewer_infra_retry_count", 0))
+                if infra_count < REVIEWER_INFRA_RETRY_CAP:
+                    metadata["reviewer_infra_retry_count"] = infra_count + 1
+                    task.metadata = metadata
+                    task.save(update_fields=["metadata"])
+                    logger.info(
+                        "[task:%s] REVIEWER_INFRA (truncated review) — "
+                        "triggering fresh reflection retry %d/%d",
+                        task.id, infra_count + 1, REVIEWER_INFRA_RETRY_CAP,
+                    )
+                    _trigger_auto_reflection(
+                        task,
+                        exclude_reviewers=frozenset({
+                            (report.reviewer_agent, report.reviewer_model),
+                        }),
+                    )
+                else:
+                    TaskComment.objects.create(
+                        task=task,
+                        schedule_run=task.current_schedule_run,
+                        author_email="system@taskit",
+                        author_label="system",
+                        content=(
+                            f"Reviewer output truncated {infra_count} times "
+                            f"(infra retry cap {REVIEWER_INFRA_RETRY_CAP} reached). "
+                            f"Task left in REVIEW for manual triage — the reviewer "
+                            f"kept running out of tokens before emitting a verdict."
+                        ),
+                        comment_type=CommentType.STATUS_UPDATE,
+                    )
+                    logger.warning(
+                        "[task:%s] REVIEWER_INFRA retry cap (%d) reached — "
+                        "leaving in REVIEW for manual triage",
+                        task.id, REVIEWER_INFRA_RETRY_CAP,
+                    )
 
         return Response(ReflectionReportSerializer(report).data)
 
@@ -5019,12 +5292,25 @@ class SpecViewSet(viewsets.ModelViewSet):
         spec.save(update_fields=["status"])
         return Response(SpecSerializer(spec).data)
 
-    def retrieve(self, request, *args, **kwargs):
-        spec = get_object_or_404(
-            Spec.objects.prefetch_related("tasks__assignee", "tasks__labels", "comments"),
-            pk=kwargs["pk"],
-        )
-        return Response(SpecSerializer(spec).data)
+    @action(detail=True, methods=["post"], url_path="request-board-plan")
+    def request_board_plan(self, request, pk=None):
+        """Trigger board-driven planning: dispatches a Celery task that runs
+        ``odin plan --board-driven`` in the worker sandbox.
+
+        The gate questions, summary, and preview land as SpecComments
+        (comment_type=QUESTION / STATUS_UPDATE). A human replies via
+        POST /specs/:id/comments/, which triggers the resume phase.
+        """
+        spec = self.get_object()
+        meta = dict(spec.metadata or {})
+        meta["board_plan_status"] = "requested"
+        spec.metadata = meta
+        spec.status = Spec.STATUS_PLANNING
+        spec.save()
+
+        from .board_planner import run_board_driven_plan
+        run_board_driven_plan.delay(spec.id)
+        return Response({"status": "ok", "spec_id": spec.id})
 
     def update(self, request, *args, **kwargs):
         spec = self.get_object()
@@ -5088,8 +5374,10 @@ class SpecViewSet(viewsets.ModelViewSet):
     def clone(self, request, pk=None):
         from django.db import transaction
 
-        # Keys in metadata that are tied to a specific execution/worktree
-        # and must NOT carry over to the clone.
+        # Spec-only keys tied to a specific execution/worktree that must NOT
+        # carry over to the clone. Task-level execution keys are shared with
+        # the schedule-materialize path via EXECUTION_SCOPED_METADATA_KEYS so
+        # "execution-scoped" has one definition across the codebase.
         SPEC_METADATA_STRIP_KEYS = {
             "branch", "worktree_path", "planning_trace", "pr_url",
             "finalized_at",
@@ -5147,7 +5435,7 @@ class SpecViewSet(viewsets.ModelViewSet):
             for task in tasks:
                 clean_task_metadata = {
                     k: v for k, v in (task.metadata or {}).items()
-                    if k not in TASK_METADATA_STRIP_KEYS
+                    if k not in EXECUTION_SCOPED_METADATA_KEYS
                 }
 
                 new_task = Task.objects.create(
@@ -5208,6 +5496,8 @@ class SpecViewSet(viewsets.ModelViewSet):
             "duration_ms": d["duration_ms"],
             "success": d["success"],
         }
+        if d.get("token_usage"):
+            spec_meta["planning_trace"]["token_usage"] = d["token_usage"]
         if d.get("effective_input"):
             spec_meta["planning_trace"]["effective_input"] = d["effective_input"][:5000]
         spec.metadata = spec_meta
@@ -5248,17 +5538,78 @@ class SpecViewSet(viewsets.ModelViewSet):
 
         return Response(SpecSerializer(spec).data)
 
-    @action(detail=True, methods=["get"], url_path="comments")
+    @action(detail=True, methods=["get", "post"], url_path="comments")
     def comments(self, request, pk=None):
-        """List comments for a spec."""
+        """List or create comments for a spec.
+
+        POST creates a SpecComment — used by humans to reply to board-driven
+        planning gate questions, and by odin to post planning updates.
+        Accepts ``attachment_ids`` to link previously-uploaded file
+        attachments (see the ``attachments`` action) to the new comment.
+        """
         spec = get_object_or_404(Spec, pk=pk)
+        if request.method == "POST":
+            data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+            attachment_ids = data.pop("attachment_ids", [])
+            ser = SpecCommentSerializer(data=data)
+            ser.is_valid(raise_exception=True)
+            comment = SpecComment.objects.create(spec=spec, **ser.validated_data)
+            if attachment_ids:
+                SpecCommentAttachment.objects.filter(
+                    id__in=attachment_ids, spec=spec, comment__isnull=True,
+                ).update(comment=comment)
+            return Response(
+                SpecCommentSerializer(comment, context={"request": request}).data,
+                status=status.HTTP_201_CREATED,
+            )
         qs = SpecComment.objects.filter(spec=spec)
         page = self.paginate_queryset(qs)
         if page is not None:
             return self.get_paginated_response(
-                SpecCommentSerializer(page, many=True).data
+                SpecCommentSerializer(page, many=True, context={"request": request}).data
             )
-        return Response(SpecCommentSerializer(qs, many=True).data)
+        return Response(SpecCommentSerializer(qs, many=True, context={"request": request}).data)
+
+    MAX_SPEC_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10 MB
+
+    @action(detail=True, methods=["post"], url_path="attachments")
+    def attachments(self, request, pk=None):
+        """Upload a file attachment on a spec (e.g. plan preview HTML).
+
+        Files are stored as :class:`SpecCommentAttachment` rows with
+        ``comment=None`` (orphan).  Pass the returned ``id`` in the
+        ``attachment_ids`` list when POSTing a spec comment to link the file
+        to that comment.
+        """
+        spec = get_object_or_404(Spec, pk=pk)
+        files = request.FILES.getlist("files")
+        if not files:
+            return Response(
+                {"detail": "No files provided. Include one or more 'files' in the upload."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        for f in files:
+            if f.size > self.MAX_SPEC_ATTACHMENT_SIZE:
+                return Response(
+                    {"detail": f"File '{f.name}' exceeds 10 MB limit."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        author_email = request.data.get("author_email", "agent@odin.agent")
+        created = []
+        for f in files:
+            attachment = SpecCommentAttachment.objects.create(
+                spec=spec,
+                file=f,
+                original_filename=f.name,
+                content_type=f.content_type or "application/octet-stream",
+                file_size=f.size,
+                uploaded_by=author_email,
+            )
+            created.append(attachment)
+        serializer = SpecCommentAttachmentSerializer(
+            created, many=True, context={"request": request}
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def finalize(self, request, pk=None):
@@ -6119,7 +6470,14 @@ def manage_preset(request):
 
 @api_view(["GET"])
 def executor_capacity(request):
-    """Return running task count and max concurrency limit."""
+    """Return running task count and max concurrency limit.
+
+    Task #353: also surfaces the global memory-share accounting so the
+    app header can render the truthful "3 executing + 1 review = 4/4
+    memory shares" line. Same primitive the dispatcher gates on —
+    `memory_share_summary()` reads `compute_reserved_mib`/`get_budget_mib`
+    directly — so the badge and the gate can never drift.
+    """
     try:
         setting = SystemSetting.objects.get(key="executor_max_concurrency")
         max_concurrency = setting.value
@@ -6132,10 +6490,24 @@ def executor_capacity(request):
     dummy_setting = SystemSetting(key="executor_max_concurrency", value=max_concurrency)
     suggested_max = dummy_setting.get_suggested_max()
 
+    from .sandbox_budget import memory_share_summary
+    memory_shares = memory_share_summary()
+
     return Response({
         "running": running_count,
         "max": max_concurrency,
         "suggested_max": suggested_max,
+        # Task #353: honest share split from the same accounting the
+        # dispatcher uses. `executing` mirrors `running` for backwards
+        # compat; the new fields expose the cross-kind breakdown so the
+        # badge can render "3+1/4" instead of "3/4".
+        "executing": memory_shares["executing_count"],
+        "reflecting": memory_shares["reflecting_count"],
+        "shares_in_use": memory_shares["shares_in_use"],
+        "memory_budget_mib": memory_shares["budget_mib"],
+        "memory_reserved_mib": memory_shares["reserved_mib"],
+        "memory_max_shares": memory_shares["max_shares"],
+        "memory_share_holders": memory_shares["holders"],
     })
 
 
@@ -6179,14 +6551,134 @@ def executor_max_concurrency(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    setting, created = SystemSetting.objects.update_or_create(
-        key="executor_max_concurrency",
-        defaults={"value": value},
-    )
+    setting, created = _update_executor_max_concurrency(value)
 
     suggested_max = setting.get_suggested_max()
 
     return Response({
         "value": setting.value,
         "suggested_max": suggested_max,
+    })
+
+
+# ── W12.4 agent-league drilldown ────────────────────────────────────
+
+
+@api_view(["GET"])
+def agent_tasks(request, agent_name):
+    """List every task an agent has touched, with board/spec/status filters.
+
+    Used by the stats page's agent-league drilldown: clicking an
+    agent row in the league table navigates here with the agent name,
+    and the page renders a clickable task list (each row links to
+    the task detail modal via ``?taskId=<id>``).
+
+    Match strategy: the agent short name (``plan`` from
+    ``plan+opus@odin.agent``, ``claude`` from ``claude@odin.agent``,
+    or a User.name match) — the league table's bucket name. This is
+    the same extraction the league and per-agent rollup already use,
+    so the drilldown lands on the same population of tasks the
+    operator just clicked.
+
+    Query params:
+      board_id — restrict to one board
+      spec_id  — restrict to one spec
+      status   — restrict to one status (e.g. DONE)
+      limit    — max rows (default 50, hard cap 200)
+
+    Response shape: ``{"tasks": [{"task_id", "title", "status",
+    "board_id", "board_name", "spec_id", "spec_title", "agent_name",
+    "model_name"}, ...], "meta": {"agent": ..., "count": ...}}``
+    """
+    from .agent_stats import _extract_agent_name
+
+    agent_name = (agent_name or "").strip()
+    if not agent_name:
+        return Response(
+            {"detail": "Agent name is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    board_id = request.query_params.get("board_id") or request.query_params.get("board")
+    spec_id = request.query_params.get("spec_id") or request.query_params.get("spec")
+    status_filter = request.query_params.get("status")
+    try:
+        limit = int(request.query_params.get("limit") or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 200))
+
+    qs = Task.objects.select_related("board", "spec", "assignee")
+
+    if board_id:
+        try:
+            qs = qs.filter(board_id=int(board_id))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "board_id must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    if spec_id:
+        try:
+            qs = qs.filter(spec_id=int(spec_id))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "spec_id must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    if status_filter:
+        qs = qs.filter(status=status_filter.upper())
+
+    # Match assignee.name OR assignee.email local-part OR created_by
+    # email local-part — the operator might have created a task
+    # outside the agent harness, and the created_by email still
+    # carries the agent identity (e.g. plan+opus@odin.agent).
+    candidates = list(qs.filter(
+        Q(assignee__name__iexact=agent_name)
+        | Q(assignee__email__istartswith=f"{agent_name}+")
+        | Q(assignee__email__iexact=f"{agent_name}@odin.agent")
+        | Q(created_by__istartswith=f"{agent_name}+")
+        | Q(created_by__iexact=f"{agent_name}@odin.agent")
+    ).order_by("-last_updated_at", "-id")[:limit])
+
+    rows = []
+    for task in candidates:
+        # Resolve the agent short name from the assignee email first,
+        # fall back to created_by. Same vocabulary the league uses so
+        # the drilldown rows line up with the league bucket the
+        # operator clicked.
+        agent_email = (
+            getattr(task.assignee, "email", None)
+            if task.assignee_id else None
+        ) or task.created_by
+        resolved = _extract_agent_name(agent_email) if agent_email else "unknown"
+        rows.append({
+            "task_id": task.id,
+            "title": task.title,
+            "status": task.status,
+            "board_id": task.board_id,
+            "board_name": task.board.name if task.board_id else None,
+            "spec_id": task.spec_id,
+            "spec_title": task.spec.title if task.spec_id else None,
+            "agent_name": resolved,
+            "model_name": task.model_name or "",
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "last_updated_at": (
+                task.last_updated_at.isoformat()
+                if task.last_updated_at else None
+            ),
+        })
+
+    return Response({
+        "tasks": rows,
+        "meta": {
+            "agent": agent_name,
+            "count": len(rows),
+            "board_id": int(board_id) if board_id else None,
+            "spec_id": int(spec_id) if spec_id else None,
+            "status": status_filter.upper() if status_filter else None,
+            "limit": limit,
+        },
     })

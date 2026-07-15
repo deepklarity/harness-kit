@@ -27,28 +27,45 @@ DRY_RUN = "--dry-run" in sys.argv
 CREATED_BY = os.environ.get("ODIN_OPERATOR_EMAIL", "operator@harness.kit")
 SPEC_ODIN_ID = "sp_fable_w9"
 
-EASE_WHY = """WHY (Ease of use bucket, 3/10 — user priority track): only the kit's
-builders can switch it on. Doctor and quickstart exist; this wave completes
-the stranger's path."""
+EASE_WHY = """## What is wrong today
+Only the people who built this kit can switch it on. A stranger who clones
+the repo hits a wall before they reach a working board. The doctor and the
+quickstart exist; this wave carries a first-timer the rest of the way."""
 
-MOON_WHY = """WHY (Moonshots bucket, 2/10 — user priority track): the flow works; the
-interfaces must amplify. Mission control v1 is a floor."""
+MOON_WHY = """## What is wrong today
+The kit works end to end, but the screens a human watches are a floor, not
+a finished place to work. A person still has to leave the page to answer
+the things waiting on them, and the kit's way of working isn't portable to
+any other repo yet."""
 
+# This script already ran (its spec exists — see the sys.exit guard in
+# main()), so it stays here as the emergency-fallback shape for a future
+# wave script. The TITLES and the opening "What is wrong today" lines
+# follow docs/task_brief_template.md: plain sentences a person would say
+# out loud, no bucket labels or scores (Ease 3/10, Moonshot, Trust …), and
+# the wave code only as a trailing tag. A copy inherits that convention.
+# The Scope and Acceptance headings below are the old wave-9 names; when
+# you write a new wave, use the template's section headings (What to do,
+# Where a human sees it, Done means, Prove it) instead. The canonical
+# Standing rules block lives there — paste it, don't rewrite it.
 COMMON_FOOTER = """
-## Working protocol (applies to every fable task)
-- First principles: fix the CAUSE, not the symptom.
-- Follow test-first waves (root CLAUDE.md): failing tests before implementation.
-- Attach proof to `.proof/task-<id>/proof.md` in your worktree and post a
-  summary comment. Do NOT commit `.proof/` — it uploads to the board on pass.
-- odin already runs you on an isolated task branch inside a worktree — do NOT
-  create or switch branches, never run `odin init`, never write under .odin/.
-- Never use git stash in shared contexts. Never edit files outside your worktree.
+## Standing rules
+- Fix the cause, not the symptom. If your fix only covers this one case,
+  look one level up.
+- Write the failing test before the fix or feature.
+- Put your evidence in .proof/task-<id>/proof.md inside your workspace and
+  post a short comment pointing at it. Don't commit the .proof folder —
+  the system uploads it to the task for you. Only capture a test run's
+  output after the run has finished.
+- You are already on your own branch in your own workspace. Don't create
+  or switch branches, and don't touch anything outside your workspace.
+- Never use git stash.
 """
 
 TASKS = [
     dict(
         key="install",
-        title="Ease: one-command install — clone to green doctor in one line (W9.1)",
+        title="Install the kit from clone to a green doctor in one command (W9.1)",
         agent="glm", model="zai-coding-plan/glm-5.2", depends=[],
         description=f"""{EASE_WHY}
 
@@ -76,7 +93,7 @@ TASKS = [
     ),
     dict(
         key="codex-only",
-        title="Ease: the codex-only reality test — run the quickstart with one provider and fix what breaks (W9.2)",
+        title="Run the quickstart with a single provider and fix what breaks (W9.2)",
         agent="minimax", model="minimax-coding-plan/MiniMax-M3", depends=[],
         description=f"""{EASE_WHY}
 
@@ -106,12 +123,12 @@ empirically, as a first-timer would.
     ),
     dict(
         key="new-project",
-        title="Ease+Powers: hk new-project — point the kit at an external repo in one command (W9.3)",
+        title="Point the kit at an outside repo in one command (W9.3)",
         agent="claude", model="claude-sonnet-5", depends=[],
         description=f"""{EASE_WHY}
 
-Also the Project-powers opener (1/10): the kit only knows how to build
-itself. This command is how it meets its first outside repo.
+This is also the first time the kit meets a repo it did not build itself.
+That one command is the handshake.
 
 ## Scope
 1. `odin new-project <path-or-url>` (or `hk new-project` if a wrapper name
@@ -137,7 +154,7 @@ itself. This command is how it meets its first outside repo.
     ),
     dict(
         key="inbox",
-        title="Moonshot: mission control v2 — the inbox: everything waiting on you, answerable in place (W9.4)",
+        title="Build the inbox where everything waiting on you gets answered in place (W9.4)",
         agent="claude", model="claude-sonnet-5", depends=[],
         description=f"""{MOON_WHY}
 
@@ -171,7 +188,7 @@ waiting on a human lives, answerable without leaving the page.
     ),
     dict(
         key="rework-conversation",
-        title="Moonshot: rework by conversation — one sentence on any shelved task becomes a dispatched follow-up (W9.5)",
+        title="Turn one sentence on a shelved task into a follow-up the kit sends out (W9.5)",
         agent="claude", model="claude-sonnet-5", depends=["inbox"],
         description=f"""{MOON_WHY}
 
@@ -206,13 +223,13 @@ and dispatches it. The human never writes a brief.
     ),
     dict(
         key="preset-parity",
-        title="Presets curated + exported as portable hk- skills — one source, two doorways (W9.6)",
+        title="Curate the presets and export them as portable skills (W9.6)",
         agent="claude", model="claude-sonnet-5", depends=[],
-        description=f"""WHY (Audits 4/10 + Ease 3/10 + the humans seat 5/10 — user directive):
-presets (board doorway) and hk- skills (session doorway) are the same
-operational knowledge, drifted apart: 27 presets, ~20 skills, overlapping
-but unaligned. Curate once, export everywhere — the kits taste becomes
-portable to any repo it works on.
+        description=f"""## What is wrong today
+The board presets and the hk- skills are the same know-how, drifted apart:
+about 27 presets and 20 skills that overlap but don't line up. A person has
+to learn the kit's way of working twice. Curate once, export everywhere,
+and that way of working travels to any repo the kit touches.
 
 ## Scope
 1. CURATE the preset library (data/task_presets.json) against

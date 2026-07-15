@@ -531,3 +531,247 @@ class TestReflectionListAll(APITestCase):
         resp = self.client.get("/reflections/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data[0]["task_title"], "Task A")
+
+
+class TestReviewerInfraRetry(APITestCase):
+    """REVIEWER_INFRA verdict: truncated review output should not consume a
+    reflection strike and should retry with a fresh reviewer automatically.
+
+    Task #346: reflection 360 on task 342 had real reasoning but no JSON verdict
+    because the output was cut off. The report went ERROR and the whole review
+    run's tokens were spent for nothing. REVIEWER_INFRA fixes this by:
+    1. Not counting against the task's 3 strikes
+    2. Triggering a fresh auto-reflection with a new reviewer
+    3. Having a cap (REVIEWER_INFRA_RETRY_CAP=2) to prevent infinite loops
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.board = self.make_board()
+        self.task = self.make_task(self.board, status=TaskStatus.REVIEW)
+        User.objects.get_or_create(
+            email="claude@odin.agent",
+            defaults={
+                "name": "Claude",
+                "role": UserRole.AGENT,
+                "available_models": [
+                    {"name": "claude-sonnet-4-5-20250929", "is_default": True},
+                ],
+            },
+        )
+
+    def _make_running_report(self):
+        return ReflectionReport.objects.create(
+            task=self.task,
+            reviewer_agent="codex",
+            reviewer_model="codex-reviewer",
+            requested_by="system@taskit",
+            status=ReflectionStatus.RUNNING,
+        )
+
+    @patch("tasks.dag_executor.execute_reflection.delay")
+    def test_reviewer_infra_does_not_consume_strike(self, mock_delay):
+        """PATCH with verdict=REVIEWER_INFRA should NOT move the task to
+        FAILED even after 3 completed reports — infra retries don't count
+        toward the 3-strike limit."""
+        report = self._make_running_report()
+        # Pre-create 2 prior COMPLETED NEEDS_WORK reports (2 strikes)
+        for i in range(2):
+            ReflectionReport.objects.create(
+                task=self.task,
+                reviewer_agent="claude",
+                reviewer_model="claude-opus-4-8",
+                requested_by="system@taskit",
+                status=ReflectionStatus.COMPLETED,
+                verdict="NEEDS_WORK",
+                verdict_summary=f"Strike {i+1}",
+            )
+        # Now a REVIEWER_INFRA report — should NOT be the 3rd strike
+        resp = self.client.patch(
+            f"/reflections/{report.id}/",
+            {
+                "status": "COMPLETED",
+                "verdict": "REVIEWER_INFRA",
+                "verdict_summary": "Reviewer output truncated (finish_reason=length).",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.task.refresh_from_db()
+        # Task should still be in REVIEW, NOT FAILED
+        self.assertEqual(self.task.status, TaskStatus.REVIEW)
+
+    @patch("tasks.dag_executor.execute_reflection.delay")
+    def test_reviewer_infra_triggers_fresh_reflection(self, mock_delay):
+        """PATCH with verdict=REVIEWER_INFRA should create a new PENDING
+        reflection report with a fresh reviewer."""
+        report = self._make_running_report()
+        resp = self.client.patch(
+            f"/reflections/{report.id}/",
+            {
+                "status": "COMPLETED",
+                "verdict": "REVIEWER_INFRA",
+                "verdict_summary": "Reviewer output truncated (finish_reason=length).",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        # A new PENDING report should have been created
+        new_reports = ReflectionReport.objects.filter(
+            task=self.task, status=ReflectionStatus.PENDING,
+        )
+        self.assertEqual(new_reports.count(), 1)
+        # The fresh reviewer should be different from the truncated one
+        new_report = new_reports.first()
+        self.assertNotEqual(new_report.reviewer_agent, "codex")
+        # Celery dispatch should have been called for the new report
+        mock_delay.assert_called_once_with(new_report.id)
+
+    @patch("tasks.dag_executor.execute_reflection.delay")
+    def test_reviewer_infra_cap_prevents_infinite_retry(self, mock_delay):
+        """After REVIEWER_INFRA_RETRY_CAP retries, no new reflection should
+        be created — the task stays in REVIEW for manual triage."""
+        from tasks.views import REVIEWER_INFRA_RETRY_CAP
+        # Simulate cap already reached
+        self.task.metadata = dict(self.task.metadata or {})
+        self.task.metadata["reviewer_infra_retry_count"] = REVIEWER_INFRA_RETRY_CAP
+        self.task.save(update_fields=["metadata"])
+
+        report = self._make_running_report()
+        resp = self.client.patch(
+            f"/reflections/{report.id}/",
+            {
+                "status": "COMPLETED",
+                "verdict": "REVIEWER_INFRA",
+                "verdict_summary": "Reviewer output truncated (finish_reason=length).",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        # No new PENDING report should have been created
+        new_reports = ReflectionReport.objects.filter(
+            task=self.task, status=ReflectionStatus.PENDING,
+        )
+        self.assertEqual(new_reports.count(), 0)
+        # Task should still be in REVIEW for manual triage
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, TaskStatus.REVIEW)
+
+    @patch("tasks.dag_executor.execute_reflection.delay")
+    def test_reviewer_infra_posts_comment(self, mock_delay):
+        """REVIEWER_INFRA should post a reflection comment so the operator
+        sees the truncated review on the board."""
+        report = self._make_running_report()
+        resp = self.client.patch(
+            f"/reflections/{report.id}/",
+            {
+                "status": "COMPLETED",
+                "verdict": "REVIEWER_INFRA",
+                "verdict_summary": "Reviewer output truncated (finish_reason=length).",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        comment = TaskComment.objects.filter(
+            task=self.task, comment_type="reflection",
+        ).first()
+        self.assertIsNotNone(comment)
+        self.assertIn("REVIEWER_INFRA", comment.content)
+
+    @patch("tasks.dag_executor.execute_reflection.delay")
+    def test_prior_reviewer_infra_does_not_inflate_strike_count(self, mock_delay):
+        """A prior REVIEWER_INFRA report must NOT count toward the 3-strike
+        limit when a later NEEDS_WORK verdict arrives.
+
+        Without this guard, 1 REVIEWER_INFRA + 2 NEEDS_WORK would wrongly
+        FAIL the task on the 2nd NEEDS_WORK — the infra report inflated
+        completed_count to 3 even though only 2 genuine verdicts existed.
+        """
+        # Pre-create: 1 REVIEWER_INFRA + 1 NEEDS_WORK (both completed)
+        ReflectionReport.objects.create(
+            task=self.task,
+            reviewer_agent="claude",
+            reviewer_model="claude-opus-4-8",
+            requested_by="system@taskit",
+            status=ReflectionStatus.COMPLETED,
+            verdict="REVIEWER_INFRA",
+            verdict_summary="Reviewer output truncated.",
+        )
+        ReflectionReport.objects.create(
+            task=self.task,
+            reviewer_agent="claude",
+            reviewer_model="claude-opus-4-8",
+            requested_by="system@taskit",
+            status=ReflectionStatus.COMPLETED,
+            verdict="NEEDS_WORK",
+            verdict_summary="Strike 1.",
+        )
+        # Now a 2nd NEEDS_WORK — with the bug, count=3 (INFRA+NW+NW) → FAILED.
+        # With the fix, count=2 (NW+NW only) → retry (IN_PROGRESS).
+        report = self._make_running_report()
+        resp = self.client.patch(
+            f"/reflections/{report.id}/",
+            {
+                "status": "COMPLETED",
+                "verdict": "NEEDS_WORK",
+                "verdict_summary": "Strike 2.",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.task.refresh_from_db()
+        # Only 2 genuine NEEDS_WORK strikes — task must NOT be FAILED.
+        self.assertNotEqual(
+            self.task.status, TaskStatus.FAILED,
+            "REVIEWER_INFRA inflated the strike count — task should retry, "
+            "not fail, with only 2 genuine NEEDS_WORK verdicts.",
+        )
+
+    @patch("tasks.dag_executor.execute_reflection.delay")
+    def test_reviewer_infra_retry_excludes_truncated_reviewer(self, mock_delay):
+        """REVIEWER_INFRA retry must pick a DIFFERENT reviewer when one is
+        available — re-picking the same truncated reviewer would likely
+        produce another truncation on the same task."""
+        # Second available reviewer
+        User.objects.get_or_create(
+            email="gemini@odin.agent",
+            defaults={
+                "name": "Gemini",
+                "role": UserRole.AGENT,
+                "available_models": [{"name": "gemini-2.5-pro"}],
+            },
+        )
+        # Deterministic order: claude first, gemini second
+        self.board.reviewer_order = [
+            {"agent_name": "claude", "model_name": "claude-sonnet-4-5-20250929"},
+            {"agent_name": "gemini", "model_name": "gemini-2.5-pro"},
+        ]
+        self.board.save(update_fields=["reviewer_order"])
+        # Truncated report was from claude (the topmost reviewer)
+        report = ReflectionReport.objects.create(
+            task=self.task,
+            reviewer_agent="claude",
+            reviewer_model="claude-sonnet-4-5-20250929",
+            requested_by="system@taskit",
+            status=ReflectionStatus.RUNNING,
+        )
+        resp = self.client.patch(
+            f"/reflections/{report.id}/",
+            {
+                "status": "COMPLETED",
+                "verdict": "REVIEWER_INFRA",
+                "verdict_summary": "Reviewer output truncated.",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        new_report = ReflectionReport.objects.filter(
+            task=self.task, status=ReflectionStatus.PENDING,
+        ).first()
+        self.assertIsNotNone(new_report)
+        # Fresh reviewer must be different from the truncated one
+        self.assertNotEqual(
+            new_report.reviewer_agent, "claude",
+            "REVIEWER_INFRA retry re-picked the same truncated reviewer "
+            "instead of trying a fresh one.",
+        )

@@ -24,7 +24,9 @@ const MACHINE_CONTENT_PREFIXES = [
 ];
 
 export function isMachineComment(comment: TaskComment): boolean {
-    if (comment.commentType === 'debug') return true;
+    // CommentType doesn't list 'debug', but the backend may emit it; keep the
+    // defensive check (cast, not removal) so such comments still bucket as noise.
+    if (comment.commentType === ('debug' as TaskComment['commentType'])) return true;
     const content = (comment.content ?? '').trimStart();
     if (MACHINE_CONTENT_PREFIXES.some(p => content.startsWith(p))) return true;
     const attachments = comment.attachments;

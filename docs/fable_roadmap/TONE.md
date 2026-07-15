@@ -57,6 +57,11 @@ A few habits that follow from this:
   If a design template or a styling guide pulls toward headline-writing,
   this file overrides it.
 - Read it out loud once before you commit. If you trip on a sentence, fix it.
+- A task title is something you could say to a teammate out loud. If it
+  needs a system word to make sense — "reap", "materialize",
+  "fingerprint" — it fails this test even if every other rule here is
+  followed.
+- Read it out loud once before you commit. If you trip on a sentence, fix it.
 
 Anyone on the team, anywhere in the world, should read our docs and feel
 like a person is talking to them. That's the test.

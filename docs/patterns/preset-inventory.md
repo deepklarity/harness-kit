@@ -270,7 +270,8 @@ spec:
     task_template:
       title_prefix: "<ID>:"           # e.g. "SLOP-NNN:" or "AUDIT-NNN:"
       description_template: |
-        WHY (<bucket>, <score/10>): <bucket-why-snippet>
+        ## What is wrong today
+        <bucket-why-snippet — plain sentence, name the area in passing, no score>
 
         Finding: <summary>
         Evidence: <file/script/output pointer>
@@ -464,7 +465,8 @@ spec:
     task_template:
       title_prefix: "AUDIT-{date}-"
       description_template: |
-        WHY (<bucket>, <score/10>): <bucket WHY snippet>
+        ## What is wrong today
+        <bucket WHY snippet — plain sentence, no score>
 
         Finding: <summary>
         Evidence: <file/script/output pointer>
@@ -647,8 +649,9 @@ spec:
     task_template:
       title_prefix: "SLOP-{NNN}-"
       description_template: |
-        WHY (Trust, 7/10): the kit must not lie or panic; hygiene findings that
-        erode the verification signal teach the human to ignore the kit.
+        ## What is wrong today
+        The kit must not lie or panic. Hygiene findings that erode the
+        verification signal teach the human to ignore the kit. (This is trust work.)
 
         Priority: P<0-4>
         Category: <category>

@@ -55,6 +55,12 @@ export function AssignmentReason({ task }: Props) {
 
     const tooltipText = tooltipLines.length > 0 ? tooltipLines.join('\n') : null;
 
+    // A WHY line that says "Override —" tells the operator nothing — the
+    // badge with no reason is noise. Hide the whole row when there is no
+    // reason sentence to read. (WHY is a descriptive field, not a metric
+    // card; the never-hide-metrics rule covers tokens/cost/duration.)
+    if (!ar?.reason) return null;
+
     return (
         <div
             data-testid="assignment-reason-row"

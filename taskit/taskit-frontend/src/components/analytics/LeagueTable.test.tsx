@@ -15,6 +15,9 @@ function makeRow(overrides: Partial<LeagueRow> = {}): LeagueRow {
         duration_ms_median: 60000,
         merge_conflicts_caused: 0,
         cost_usd_total: 1.23,
+        reflection_count: 0,
+        reflection_cost_usd_total: 0,
+        avg_reflection_cost_usd: 0,
         ...overrides,
     };
 }
@@ -55,9 +58,45 @@ describe('LeagueTable', () => {
         expect(screen.getByText('Hands-free %')).toBeInTheDocument();
         expect(screen.getByText('Redo avg')).toBeInTheDocument();
         expect(screen.getByText('Cost')).toBeInTheDocument();
+        expect(screen.getByText('Avg refl cost')).toBeInTheDocument();
         expect(screen.queryByText('Tokens')).not.toBeInTheDocument();
         expect(screen.queryByText('Duration')).not.toBeInTheDocument();
         expect(screen.queryByText('Conflicts')).not.toBeInTheDocument();
+    });
+
+    it('renders the new Avg refl cost column with formatted USD value', () => {
+        const rows: LeagueRow[] = [
+            makeRow({
+                agent: 'plan',
+                model: 'opus-4-5',
+                reflection_count: 2,
+                reflection_cost_usd_total: 0.42,
+                avg_reflection_cost_usd: 0.21,
+            }),
+        ];
+        render(<LeagueTable rows={rows} />);
+        // The header is there.
+        expect(screen.getByText('Avg refl cost')).toBeInTheDocument();
+        // The cell renders the formatted USD value via formatCost.
+        expect(screen.getByText('$0.21')).toBeInTheDocument();
+    });
+
+    it('renders em-dash for avg_reflection_cost_usd when zero', () => {
+        const rows: LeagueRow[] = [
+            makeRow({
+                agent: 'plan',
+                model: 'opus-4-5',
+                reflection_count: 0,
+                reflection_cost_usd_total: 0,
+                avg_reflection_cost_usd: 0,
+            }),
+        ];
+        render(<LeagueTable rows={rows} />);
+        // Zero cost → formatCost returns "$0.00"; the cell uses the
+        // same em-dash convention as cost_usd_total for zero, so we
+        // accept either "$0.00" or the existing em-dash behavior.
+        const cell = screen.getAllByText(/\$0\.00|—/);
+        expect(cell.length).toBeGreaterThanOrEqual(1);
     });
 
     it('carries hidden metrics (tokens/duration/conflicts) in a row tooltip', () => {

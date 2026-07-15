@@ -822,6 +822,11 @@ class OdinCLI:
         skip_reflection: bool = False,
         direct: bool = False,
         no_gate: bool = False,
+        board_driven: bool = False,
+        board_resume: bool = False,
+        board_spec_pk: Optional[int] = None,
+        board_spec_id: Optional[str] = None,
+        reply_file: Optional[str] = None,
     ):
         """Decompose a spec into sub-tasks and suggest agent assignments.
 
@@ -909,42 +914,91 @@ class OdinCLI:
 
         gate_callback = lambda c: _gate_interaction(c, console)
 
-        try:
-            if quiet:
-                # Quiet mode implies auto — spinner, no streaming
-                console.print("[bold]Decomposing and planning...[/bold]")
-                with console.status("[bold green]Planning..."):
+        # ── Board-driven mode: post gate questions, exit early ──────────
+        if board_driven:
+            try:
+                with console.status("[bold green]Running clarification gate..."):
                     spec_id, tasks = asyncio.run(
-                        orch.plan(spec, spec_file=spec_file, mode="quiet", quick=quick, skip_reflection=skip_reflection, gate=gate, gate_callback=gate_callback)
+                        orch.plan(
+                            spec, spec_file=spec_file, mode="quiet",
+                            quick=quick, skip_reflection=skip_reflection,
+                            gate=True, gate_callback=None,
+                            board_driven=True, board_spec_pk=board_spec_pk,
+                        )
                     )
-            elif auto:
-                from odin.harnesses.base import extract_text_from_line
+            except Exception as exc:
+                console.print(f"\n[bold red]Board-driven plan failed:[/bold red] {exc}")
+                orch.mark_planning_failed()
+                raise SystemExit(1)
 
-                def _stream_chunk(chunk: str) -> None:
-                    text = extract_text_from_line(chunk)
-                    if text:
-                        sys.stdout.write(text)
-                        sys.stdout.flush()
+            console.print(
+                f"\n[bold green]Board-driven gate posted.[/bold green] "
+                f"Spec [cyan]{spec_id}[/cyan]"
+            )
+            console.print("[dim]Questions posted to the spec. Awaiting human reply.[/dim]")
+            return
 
-                planning_agent = cfg.forced_base_provider or cfg.base_agent
-                console.print(f"[bold]Planning with {planning_agent}...[/bold]\n")
-                spec_id, tasks = asyncio.run(
-                    orch.plan(spec, spec_file=spec_file, mode="auto", stream_callback=_stream_chunk, quick=quick, skip_reflection=skip_reflection, gate=gate, gate_callback=gate_callback)
-                )
-                # Ensure a newline after streamed output
-                sys.stdout.write("\n")
-            else:
-                # Interactive mode (default): tmux session with agent
-                # --direct skips tmux (for web UI / PTY contexts)
-                if gate:
-                    console.print("[bold]Analyzing spec before planning...[/bold]")
-                spec_id, tasks = asyncio.run(
-                    orch.plan(spec, spec_file=spec_file, mode="interactive", quick=quick, skip_reflection=skip_reflection, direct=direct, gate=gate, gate_callback=gate_callback)
-                )
-        except (RuntimeError, Exception) as exc:
-            console.print(f"\n[bold red]Planning failed:[/bold red] {exc}")
-            orch.mark_planning_failed()
-            raise SystemExit(1)
+        # ── Board-resume mode: task breakdown after human reply ──────────
+        if board_resume:
+            reply_text = ""
+            if reply_file and Path(reply_file).exists():
+                reply_text = Path(reply_file).read_text()
+
+            if not board_spec_id:
+                console.print("[red]--board-spec-id required for --board-resume.[/red]")
+                raise SystemExit(1)
+
+            try:
+                with console.status("[bold green]Resuming planning..."):
+                    spec_id, tasks = asyncio.run(
+                        orch.board_resume_plan(
+                            spec_id=board_spec_id,
+                            reply_text=reply_text,
+                            board_spec_pk=board_spec_pk,
+                            quick=quick, skip_reflection=skip_reflection,
+                        )
+                    )
+            except Exception as exc:
+                console.print(f"\n[bold red]Board plan resume failed:[/bold red] {exc}")
+                raise SystemExit(1)
+        else:
+            # ── Normal mode: interactive / auto / quiet ──────────────────
+            try:
+                if quiet:
+                    # Quiet mode implies auto — spinner, no streaming
+                    console.print("[bold]Decomposing and planning...[/bold]")
+                    with console.status("[bold green]Planning..."):
+                        spec_id, tasks = asyncio.run(
+                            orch.plan(spec, spec_file=spec_file, mode="quiet", quick=quick, skip_reflection=skip_reflection, gate=gate, gate_callback=gate_callback)
+                        )
+                elif auto:
+                    from odin.harnesses.base import extract_text_from_line
+
+                    def _stream_chunk(chunk: str) -> None:
+                        text = extract_text_from_line(chunk)
+                        if text:
+                            sys.stdout.write(text)
+                            sys.stdout.flush()
+
+                    planning_agent = cfg.forced_base_provider or cfg.base_agent
+                    console.print(f"[bold]Planning with {planning_agent}...[/bold]\n")
+                    spec_id, tasks = asyncio.run(
+                        orch.plan(spec, spec_file=spec_file, mode="auto", stream_callback=_stream_chunk, quick=quick, skip_reflection=skip_reflection, gate=gate, gate_callback=gate_callback)
+                    )
+                    # Ensure a newline after streamed output
+                    sys.stdout.write("\n")
+                else:
+                    # Interactive mode (default): tmux session with agent
+                    # --direct skips tmux (for web UI / PTY contexts)
+                    if gate:
+                        console.print("[bold]Analyzing spec before planning...[/bold]")
+                    spec_id, tasks = asyncio.run(
+                        orch.plan(spec, spec_file=spec_file, mode="interactive", quick=quick, skip_reflection=skip_reflection, direct=direct, gate=gate, gate_callback=gate_callback)
+                    )
+            except (RuntimeError, Exception) as exc:
+                console.print(f"\n[bold red]Planning failed:[/bold red] {exc}")
+                orch.mark_planning_failed()
+                raise SystemExit(1)
 
         console.print(
             f"\n[bold green]Plan created![/bold green] "

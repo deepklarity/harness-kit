@@ -101,6 +101,40 @@ describe('TaskCard — dispatch_blocked_reason banner', () => {
         const banner = screen.getByTestId('dispatch-blocked-banner')
         expect(banner.textContent).toMatch(/some_future_reason/)
     })
+
+    // Task #353: the dispatch-blocked banner names the tasks holding the
+    // memory share the gate is waiting on. Without the holder list, the
+    // banner is just "memory budget full" — the operator can't tell which
+    // tasks to watch.
+    it('memory_budget_full banner names holder tasks when stamp is present', () => {
+        clearLocalStorage()
+        const task = makeTask({
+            metadata: {
+                dispatch_blocked_reason: 'memory_budget_full',
+                dispatch_blocked_blocked_by: [
+                    { task_id: 344, task_title: 'Live A', kind: 'execution', mem_mib: 4096 },
+                    { task_id: 346, task_title: 'Reflected', kind: 'reflection', report_id: 12, mem_mib: 4096 },
+                ],
+            },
+        })
+        renderWithProviders(<TaskCard task={task} onClick={noop} />)
+        const banner = screen.getByTestId('dispatch-blocked-banner')
+        expect(banner.textContent).toMatch(/memory share/i)
+        expect(banner.textContent).toMatch(/task 344/)
+        expect(banner.textContent).toMatch(/reflection on 346/)
+    })
+
+    it('memory_budget_full banner with no holder list falls back to a generic message', () => {
+        // Old backend or thin clients without the metadata stamp — the
+        // banner must still render without crashing.
+        clearLocalStorage()
+        const task = makeTask({
+            metadata: { dispatch_blocked_reason: 'memory_budget_full' },
+        })
+        renderWithProviders(<TaskCard task={task} onClick={noop} />)
+        const banner = screen.getByTestId('dispatch-blocked-banner')
+        expect(banner.textContent).toMatch(/memory share/i)
+    })
 })
 
 describe('TaskCard — needs-human indicator', () => {
