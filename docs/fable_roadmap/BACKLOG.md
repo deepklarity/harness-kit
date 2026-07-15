@@ -17,7 +17,11 @@ description. Finished work gets deleted, git remembers it.
   score. Bucket: [getting-started-ease](buckets/getting-started-ease.md).
 
 Wave 12 draft, in order: (1) merge agent v2 — never splice two file
-versions silently, compose-or-park, and a reply parser that accepts prose;
+versions silently, compose-or-park, and a reply parser that accepts prose
+(live evidence: a parked merge rejected three reasonable replies including
+the question's own example phrase "keep-both for everything" — the parser
+matches "keep both" with a space, and the re-ask message hides the real
+failure; "keep the spec side" finally worked);
 (2) fix agy's exec path (benched until then); (3) reviewer protocol for
 host-side claims the sandbox can't see; (4) reflection-pass must fire from
 any status; (5) the metrics script so audits stop hand-counting; (6) stage
