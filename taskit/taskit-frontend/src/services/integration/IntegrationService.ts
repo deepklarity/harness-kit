@@ -164,6 +164,7 @@ export interface IntegrationService {
     fetchSpecCommits?(specId: string): Promise<SpecCommit[]>;
     getSpecStory?(specId: string): Promise<SpecStory>;
     finalizeSpec?(specId: string): Promise<{ pr_url?: string; finalized_at?: string; error?: string }>;
+    requestBoardPlan?(specId: string): Promise<void>;
 
 
     uploadScreenshots(taskId: string, files: File[], authorEmail?: string): Promise<unknown>;

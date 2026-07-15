@@ -165,8 +165,19 @@ export function TaskActionHub({ task, onUpdateTask, onRefresh, authorEmail }: Ta
                     <RotateCcw className="size-4 text-red-500 shrink-0" />
                     <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold text-red-600 dark:text-red-400">Task failed</div>
-                        <div className="text-xs text-muted-foreground">
-                            {hasAssignee ? 'Requeue to re-dispatch the same agent.' : 'Assign an agent to requeue.'}
+                        <div className="text-xs text-muted-foreground" data-testid="failed-next-step">
+                            {/* task #359 — the next-step line is the
+                                honest per-class suggested action. For a
+                                review-cap (3 strikes) it points the
+                                operator at the reviewer's note, not at
+                                re-dispatch. The server composes the
+                                sentence from the failure_class so the
+                                banner can never lie about a stale
+                                failure. */}
+                            {task.failureSuggestedAction
+                                || (hasAssignee
+                                    ? 'Requeue to re-dispatch the same agent.'
+                                    : 'Assign an agent to requeue.')}
                         </div>
                     </div>
                     <Button

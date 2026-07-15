@@ -16,6 +16,8 @@ const emptySummary: AnalyticsCostSummary = {
         task_count: 0,
         avg_cost_per_task: 0,
         reflection_cost: 0,
+        plan_cost: 0,
+        merge_cost: 0,
     },
     time_series: [],
     cost_by_model: [],
@@ -47,6 +49,18 @@ const emptySummary: AnalyticsCostSummary = {
     per_agent_rollup: [],
     merge_health: { total_attempts: 0, by_mode: [], by_outcome: [], lag_seconds: { min: 0, max: 0, p50: 0, p90: 0 } },
     review_health: { total_reviews: 0, by_verdict: [] },
+    throughput_funnel: {
+        total: 0,
+        buckets: [
+            { bucket: 'pass', count: 0, pct: 0 },
+            { bucket: 'rework', count: 0, pct: 0 },
+            { bucket: 'fail', count: 0, pct: 0 },
+            { bucket: 'in_flight', count: 0, pct: 0 },
+        ],
+    },
+    league: { rows: [], meta: { task_count: 0, board_id: null, since_spec: null, aggregate: false } },
+    per_spec: [],
+    scheduled_tasks: [],
     meta: { task_count: 0, granularity: 'day' },
 };
 
@@ -79,12 +93,16 @@ describe('StatsPage smoke test', () => {
         expect(screen.getByText('Throughput')).toBeInTheDocument();
         expect(screen.getByText('Cost & Agents')).toBeInTheDocument();
         expect(screen.getByText('Health')).toBeInTheDocument();
-        // All Boards selected — NOW and league zones show the placeholder.
+        // W12.4: NOW still board-scoped (live activity is one-board),
+        // but the agent league renders on the All-Boards view too
+        // (bundled in fetchAnalytics → data.league.rows).
         expect(screen.getByText('Select a board to view live activity')).toBeInTheDocument();
-        expect(screen.getByText('Select a board to see the agent league')).toBeInTheDocument();
+        // Empty-data league on All-Boards shows the LeagueTable empty
+        // state ("No league data for this board"), not the placeholder.
+        expect(screen.getByText('Agent league')).toBeInTheDocument();
     });
 
-    it('mounts with a board selected and fetches factory/inbox/league data', async () => {
+    it('mounts with a board selected and fetches factory/inbox/analytics data', async () => {
         const service = makeMockService();
         render(
             <MemoryRouter initialEntries={['/stats?board=5']}>
@@ -97,6 +115,11 @@ describe('StatsPage smoke test', () => {
         expect(await screen.findByText('Now')).toBeInTheDocument();
         expect(service.fetchFactorySnapshot).toHaveBeenCalledWith('5');
         expect(service.fetchInbox).toHaveBeenCalledWith('5');
-        expect(service.fetchLeague).toHaveBeenCalledWith('5');
+        // W12.4: league rows are bundled inside fetchAnalytics (single
+        // round-trip). fetchLeague is no longer called by StatsPage
+        // because the per-(agent, model) ranking is now part of the
+        // cost-summary response — both single-board AND All-Boards views
+        // share the same data shape.
+        expect(service.fetchAnalytics).toHaveBeenCalled();
     });
 });

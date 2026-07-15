@@ -470,6 +470,28 @@ class SpecComment(models.Model):
         return f"{self.spec_id}:{self.author_email}"
 
 
+class SpecCommentAttachment(models.Model):
+    """File uploaded as an attachment on a spec comment (e.g. plan preview HTML)."""
+
+    comment = models.ForeignKey(
+        SpecComment, on_delete=models.CASCADE,
+        related_name="file_attachments", null=True, blank=True,
+    )
+    spec = models.ForeignKey(Spec, on_delete=models.CASCADE, related_name="spec_attachments")
+    file = models.FileField(upload_to="spec_attachments/%Y/%m/")
+    original_filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=100, default="application/octet-stream")
+    file_size = models.BigIntegerField(default=0)
+    uploaded_by = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "spec_comment_attachments"
+
+    def __str__(self):
+        return f"{self.spec_id}:{self.original_filename}"
+
+
 class ReflectionStatus(models.TextChoices):
     PENDING = "PENDING"
     RUNNING = "RUNNING"

@@ -140,6 +140,125 @@ def compute_reserved_mib() -> int:
     return reserved
 
 
+def memory_share_holders(board=None):
+    """Enumerate the live VM-spawning tasks currently holding a memory share.
+
+    Returns a list of dicts — one per holder — read from the same DB state the
+    dispatcher's ``compute_reserved_mib`` reads from. Same source, same moment:
+    the dispatch-blocked banner names exactly these tasks, and the factory
+    / board header surfaces exactly these tasks.
+
+    Entry shape::
+
+        {
+            "task_id": <int>,        # task whose execution holds the share
+            "task_title": <str>,
+            "kind": "execution" | "reflection",
+            "mem_mib": <int>,        # bytes reserved against the budget
+            "report_id": <int|None>, # only present for reflection entries
+        }
+
+    Without a board argument the helper returns every holder across all
+    boards (the global accounting the dispatcher itself uses).
+    """
+    from .models import (
+        ReflectionReport, ReflectionStatus, Task, TaskStatus,
+    )
+
+    vm = default_vm_mem_mib()
+    holders = []
+    tasks_qs = Task.objects.filter(status=TaskStatus.EXECUTING)
+    if board is not None:
+        tasks_qs = tasks_qs.filter(board=board)
+    for task in tasks_qs.select_related("board").only(
+        "id", "title", "metadata", "board_id",
+    ):
+        active = (task.metadata or {}).get("active_execution") or {}
+        try:
+            mem_mib = int(active.get("mem_mib") or vm)
+        except (TypeError, ValueError):
+            mem_mib = vm
+        holders.append({
+            "task_id": task.id,
+            "task_title": task.title,
+            "kind": "execution",
+            "mem_mib": mem_mib,
+        })
+
+    refl_qs = ReflectionReport.objects.filter(status=ReflectionStatus.RUNNING)
+    if board is not None:
+        refl_qs = refl_qs.filter(task__board=board)
+    for report in refl_qs.select_related("task").only(
+        "id", "task_id", "task__title",
+    ):
+        holders.append({
+            "task_id": report.task_id,
+            "task_title": report.task.title if report.task else "",
+            "kind": "reflection",
+            "mem_mib": vm,
+            "report_id": report.id,
+        })
+    return holders
+
+
+def memory_share_summary(board=None) -> dict:
+    """Aggregate ``memory_share_holders`` plus the budget into one operator
+    surface. Same primitives as ``compute_reserved_mib`` + ``get_budget_mib``
+    so the board header / factory never disagrees with the dispatcher.
+
+    Shape::
+
+        {
+            "budget_mib": <int|None>,        # None = unbounded
+            "reserved_mib": <int>,           # = compute_reserved_mib() for this board/global
+            "default_vm_mem_mib": <int>,
+            "max_shares": <int>,             # = budget_mib // default_vm_mem_mib
+            "executing_count": <int>,
+            "reflecting_count": <int>,
+            "shares_in_use": <int>,          # = executing + reflecting
+            "holders": [<holder>, ...],      # see memory_share_holders()
+        }
+    """
+    from .models import Task, TaskStatus
+
+    vm = default_vm_mem_mib()
+    budget = get_budget_mib()
+    holders = memory_share_holders(board=board)
+
+    if board is not None:
+        # Per-board reservation mirrors the same DB-state derivation as the
+        # global ``compute_reserved_mib`` — the surface and the gate read
+        # the same rows.
+        reserved = 0
+        for task in Task.objects.filter(
+            board=board, status=TaskStatus.EXECUTING,
+        ).only("id", "metadata"):
+            active = (task.metadata or {}).get("active_execution") or {}
+            try:
+                reserved += int(active.get("mem_mib") or vm)
+            except (TypeError, ValueError):
+                reserved += vm
+        from .models import ReflectionReport, ReflectionStatus
+        reserved += ReflectionReport.objects.filter(
+            status=ReflectionStatus.RUNNING, task__board=board,
+        ).count() * vm
+    else:
+        reserved = compute_reserved_mib()
+
+    executing = sum(1 for h in holders if h["kind"] == "execution")
+    reflecting = sum(1 for h in holders if h["kind"] == "reflection")
+    return {
+        "budget_mib": budget,
+        "reserved_mib": reserved,
+        "default_vm_mem_mib": vm,
+        "max_shares": (budget // vm) if budget else 0,
+        "executing_count": executing,
+        "reflecting_count": reflecting,
+        "shares_in_use": executing + reflecting,
+        "holders": holders,
+    }
+
+
 _UNSET = object()
 
 

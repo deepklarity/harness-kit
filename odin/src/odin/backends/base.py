@@ -102,6 +102,14 @@ class BoardBackend(ABC):
         """Load a single spec by ID."""
         ...
 
+    def get_spec_odin_id_by_pk(self, spec_pk: int) -> Optional[str]:
+        """Look up a spec's odin_id by its backend integer PK.
+
+        Default implementation returns None (backends without an
+        integer-PK/odin_id split, e.g. local disk, have nothing to resolve).
+        """
+        return None
+
     @abstractmethod
     def load_all_specs(self) -> List[SpecArchive]:
         """Load all spec archives."""

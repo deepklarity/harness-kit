@@ -476,9 +476,14 @@ class ThreeStrikeFailStillFires(APITestCase):
         )
         self.assertEqual(
             failure_comment.content,
-            "Task failed after 3 reflection attempts without passing.",
-            "F45 must preserve the exact failure-comment text the existing "
-            "code emits at views.py line 3373 — operators rely on it.",
+            "Review cap reached (NEEDS_WORK on attempt 3). The reviewer "
+            "rejected this work three times in a row. Read the latest "
+            "reviewer's note and decide whether to change direction or "
+            "send back with new guidance.",
+            "task #359: the 3-strike cap posts a plain-English comment "
+            "that leads with the cause + next step (no log-style 'Task "
+            "failed after 3 reflection attempts without passing.' line — "
+            "that string was the banner lie that prompted the task).",
         )
 
         # And the status history row was recorded for the audit trail.

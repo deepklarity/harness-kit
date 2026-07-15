@@ -116,3 +116,27 @@ async def test_missing_api_key_returns_error_raw_no_crash():
         usage = await _provider(api_key=None).get_usage()
     assert usage.used is None
     assert "error" in usage.raw
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_percent_windows_used_when_counts_are_zero():
+    """Real 2026 Coding Plan payload shape: every count field is zero, but
+    current_interval_remaining_percent carries the truth. 5% remaining on
+    the busiest model must surface as 95% used, not as no data."""
+    respx.get("https://api.minimax.io/v1/api/openplatform/coding_plan/remains").mock(
+        return_value=Response(200, json={
+            "base_resp": {"status_code": 0, "status_msg": "success"},
+            "model_remains": [
+                {"model_name": "general", "current_interval_total_count": 0,
+                 "current_interval_usage_count": 0,
+                 "current_interval_remaining_percent": 5},
+                {"model_name": "video", "current_interval_total_count": 0,
+                 "current_interval_usage_count": 0,
+                 "current_interval_remaining_percent": 100},
+            ],
+        })
+    )
+    usage = await _provider().get_usage()
+    assert usage.usage_pct == 95.0
+    assert usage.unit == "%"

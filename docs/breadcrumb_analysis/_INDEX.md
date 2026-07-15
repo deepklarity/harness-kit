@@ -21,6 +21,7 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 | `git-worktree-isolation/` | Git worktree per task, spec branch per spec. Merge deferred to reflection pass. File-locked merge serialization. Covers branch model, worktree lifecycle, merge timing, conflict handling, config, CLI commands |
 | `task-execution-worktree-lifecycle/` | End-to-end spine: dispatch → worktree create → microVM (microsandbox) boot → auto-commit → merge → cleanup. Focuses on the glue plus two recurring pitfalls: the **shadow `.odin/config`** trap and the **run-scoped sandbox cleanup**. Cross-refs `git-worktree-isolation/` and `spec-task-lifecycle/02-execute-and-dispatch/` for depth |
 | `quota-failover-reassignment/` | Quota/429 failover as merged in **W3.11**: detection → ground-truth check via `harness_usage_status` (95% threshold) → 429-with-headroom backs off the *same* agent, genuine exhaustion reassigns to a same-cost-tier fallback. Covers the `harness_usage_status` CLI interface |
+| `task-liveness-retry/` | The run lifecycle the dispatcher owns: dispatch gates (concurrency/assignee/deps/memory-budget/worktree + run-token fence + W12.7 trace rotation), the three liveness checks (heartbeat-lease vs trace-progress vs error-loop, plus legacy adopt-if-alive), the shared reap tail, and the auto-redispatch + failure-policy retry path. DEBUG.md's worked example is the W12.7 stale-trace reap fix: a dead run's leftover trace killed every retry; the fix is dispatch-time rotation in `poll_and_execute` + the age-vs-run-start guard in `_run_progress_mtime`. |
 
 ## Quick navigation
 
@@ -52,6 +53,17 @@ Workflow traces for debugging. Each folder traces a specific flow end-to-end wit
 - **PASS verdict but task didn't reach TESTING?** → `spec-task-lifecycle/03-reflection-loop/DETAILS.md` §6 (PASS merges first, then advances)
 - **Reviewer seeing garbled/truncated context?** → `spec-task-lifecycle/03-reflection-loop/DETAILS.md` §4–5 (comment assembly + truncation/laundering guards)
 - **FAIL verdict — is it advisory?** → `spec-task-lifecycle/03-reflection-loop/FLOW.md` (FAIL shares the NEEDS_WORK retry/fail path)
+
+### Task liveness, reaping & retry
+- **Run died ~3 min after dispatch?** → `task-liveness-retry/DEBUG.md` (lease reap — dead supervisor)
+- **Run killed ~10 min in while the process was alive?** → `task-liveness-retry/DEBUG.md` (progress reap — live supervisor, dead agent)
+- **Run killed while the trace kept growing?** → `task-liveness-retry/DEBUG.md` (error-loop reap)
+- **Every retry dies the instant it starts?** → `task-liveness-retry/DEBUG.md` (stale-trace reap worked example; W12.7 fix = dispatch-time rotation + age-vs-run-start guard)
+- **How are runs watched / what are the three liveness checks?** → `task-liveness-retry/DETAILS.md` §4
+- **Worker restarted — is my run adopted or re-dispatched?** → `task-liveness-retry/DETAILS.md` §4d (adopt-if-alive)
+- **Which failure classes auto-retry, and to the cap?** → `task-liveness-retry/DETAILS.md` §7–8 (policy table + redispatch)
+- **Trace file path / "which file is *the* trace?"** → `task-liveness-retry/DETAILS.md` §5 (session_resolver)
+- **What does dispatch-time trace rotation do?** → `task-liveness-retry/DETAILS.md` §1a (W12.7 structural fix)
 
 ### Task execution + worktree lifecycle
 - **Worktree created inside another worktree / shadow `.odin/config`?** → `task-execution-worktree-lifecycle/DEBUG.md` (root manager at `board.working_dir`)

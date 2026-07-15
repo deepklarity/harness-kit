@@ -144,19 +144,26 @@ def compute_task_estimated_cost(task, usage: dict | None = None) -> Optional[flo
     return estimate_task_cost(model, usage.get("input_tokens"), usage.get("output_tokens"))
 
 
-def compute_spec_cost_summary(tasks, usage_by_task: dict | None = None) -> dict:
-    """Aggregate cost summary across a spec's tasks and their reflections.
+def compute_spec_cost_summary(tasks, usage_by_task: dict | None = None, spec=None) -> dict:
+    """Aggregate cost summary across a spec's tasks — all four categories.
+
+    Sums Plan / Build / Review / Merge costs from a single source of truth:
+    the same ``estimate_task_cost`` pricing function applied to each
+    category's token-usage records.
 
     Args:
         tasks: iterable of Task objects (queryset or list).
         usage_by_task: optional {task_id: usage_dict} to avoid N+1 queries.
+        spec: optional Spec instance — when provided, plan cost is derived
+            from ``spec.metadata['planning_trace']['token_usage']``.
 
-    Returns dict with: total_cost_usd, cost_by_model, total_tokens,
-    total_input_tokens, total_output_tokens, tokens_by_model,
-    total_duration_ms, tasks_with_unknown_cost, reflection_cost_usd.
+    Returns dict with: plan_cost_usd, total_cost_usd (build),
+    reflection_cost_usd (review), merge_cost_usd, cost_by_model,
+    total_tokens, total_input_tokens, total_output_tokens,
+    tokens_by_model, total_duration_ms, tasks_with_unknown_cost.
     """
     from .execution_processing import compute_usage_from_trace
-    from .models import ReflectionReport
+    from .models import MergeAttempt, ReflectionReport
 
     total_cost = 0.0
     total_tokens = 0
@@ -203,7 +210,7 @@ def compute_spec_cost_summary(tasks, usage_by_task: dict | None = None) -> dict:
             if usage or model:
                 tasks_with_unknown_cost += 1
 
-    # Aggregate reflection costs for all tasks in this spec
+    # ── Review cost: sum completed reflections ──────────────────────
     reflection_cost = 0.0
     if task_ids:
         reflections = ReflectionReport.objects.filter(
@@ -218,9 +225,39 @@ def compute_spec_cost_summary(tasks, usage_by_task: dict | None = None) -> dict:
             if cost is not None:
                 reflection_cost += cost
 
+    # ── Merge cost: sum MergeAttempt rows ───────────────────────────
+    merge_cost = 0.0
+    if task_ids:
+        for agent_model, token_usage in MergeAttempt.objects.filter(
+            task_id__in=task_ids,
+        ).values_list("agent_model", "token_usage"):
+            usage = token_usage or {}
+            m_input = usage.get("input_tokens")
+            m_output = usage.get("output_tokens")
+            cost = estimate_task_cost(agent_model, m_input, m_output) if agent_model else None
+            if cost is not None:
+                merge_cost += cost
+
+    # ── Plan cost: from spec.metadata['planning_trace'] ─────────────
+    plan_cost = 0.0
+    if spec is not None:
+        spec_meta = (spec.metadata or {}).get("planning_trace") or {}
+        plan_usage = spec_meta.get("token_usage") or {}
+        plan_model = spec_meta.get("model")
+        if plan_model and plan_usage:
+            cost = estimate_task_cost(
+                plan_model,
+                plan_usage.get("input_tokens"),
+                plan_usage.get("output_tokens"),
+            )
+            if cost is not None:
+                plan_cost = cost
+
     return {
+        "plan_cost_usd": round(plan_cost, 6),
         "total_cost_usd": round(total_cost, 6),
         "reflection_cost_usd": round(reflection_cost, 6),
+        "merge_cost_usd": round(merge_cost, 6),
         "cost_by_model": {k: round(v, 6) for k, v in cost_by_model.items()},
         "total_tokens": total_tokens,
         "total_input_tokens": total_input_tokens,

@@ -365,6 +365,85 @@ class TestReflectTask:
         assert "permissions.allow" not in payload["raw_output"]
         assert "haiku-4-5" in payload["raw_output"]
 
+    def test_reflect_task_truncated_review_yields_reviewer_infra(self, mock_http):
+        """When the reviewer produces substantive reasoning but the output
+        is truncated (finish_reason=length), the report should get
+        REVIEWER_INFRA — not ERROR — so it doesn't consume a strike and
+        triggers a fresh-reviewer retry.
+
+        Task #346: reflection 360 on task 342 had real reasoning but no
+        JSON verdict because the output was cut off. The whole review
+        run's tokens were spent for nothing.
+        """
+        truncated_reasoning = (
+            "I'll analyze this task.\n\n"
+            "The worker implemented the endpoint correctly. Tests pass:\n"
+            "  $ pytest tests/\n  5 passed\n\n"
+            "The build is clean. However, I notice the error handling could"
+        )
+        with patch("odin.reflection.get_harness") as mock_get, \
+             patch("odin.reflection.extract_stream_summary") as mock_extract:
+            harness = MagicMock()
+            harness.execute = AsyncMock(return_value=TaskResult(
+                success=True,
+                output=truncated_reasoning,
+                duration_ms=10000,
+                metadata={"usage": {"input_tokens": 500, "output_tokens": 4000}},
+            ))
+            mock_get.return_value = harness
+            mock_extract.return_value = {"finish_reason": "length", "output_tokens": 4000}
+
+            reflect_task(
+                task_id="42", report_id="1", model="codex",
+                agent="codex", taskit_url="http://localhost:8000",
+            )
+
+        second_patch_call = mock_http.patch.call_args_list[1]
+        payload = second_patch_call[1]["json"]
+        assert payload["status"] == "COMPLETED"
+        assert payload["verdict"] == "REVIEWER_INFRA"
+        assert "length" in payload["verdict_summary"]
+        assert "truncated" in payload["verdict_summary"].lower()
+        # finish_reason persisted in token_usage
+        assert payload["token_usage"]["finish_reason"] == "length"
+        # Truncated reasoning salvaged in raw_output
+        assert "endpoint" in payload["raw_output"]
+
+    def test_reflect_task_json_at_top_with_truncated_prose_parses_normally(self, mock_http):
+        """When the JSON block is at the top (complete) but the prose
+        after it is truncated, the parser should extract the verdict
+        from the JSON — the truncated tail only costs polish."""
+        output_with_json_then_truncated = (
+            '```json\n'
+            '{"verdict":"PASS","summary":"All good.","quality_assessment":"Met.",'
+            '"slop_detection":"None.","improvements":"None.",'
+            '"agent_optimization":"Fine.","quota_failure":"None.","fix_list":[]}\n'
+            '```\n\n'
+            '### Quality Assessment\nThe code is well-structured but'
+        )
+        with patch("odin.reflection.get_harness") as mock_get, \
+             patch("odin.reflection.extract_stream_summary") as mock_extract:
+            harness = MagicMock()
+            harness.execute = AsyncMock(return_value=TaskResult(
+                success=True,
+                output=output_with_json_then_truncated,
+                duration_ms=10000,
+                metadata={"usage": {"input_tokens": 500, "output_tokens": 4000}},
+            ))
+            mock_get.return_value = harness
+            mock_extract.return_value = {"finish_reason": "length", "output_tokens": 4000}
+
+            reflect_task(
+                task_id="42", report_id="1", model="claude-opus-4-6",
+                agent="claude", taskit_url="http://localhost:8000",
+            )
+
+        second_patch_call = mock_http.patch.call_args_list[1]
+        payload = second_patch_call[1]["json"]
+        assert payload["status"] == "COMPLETED"
+        assert payload["verdict"] == "PASS"
+        assert payload["verdict_summary"] == "All good."
+
     def test_reflect_task_report_has_correct_sections(self, mock_http, mock_harness):
         reflect_task(
             task_id="42", report_id="1", model="claude-opus-4-6",

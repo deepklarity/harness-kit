@@ -263,8 +263,14 @@ class TestExecutionDebugComments:
         assert status == TaskStatus.FAILED
         assert payload["failure_type"] == "model_escalation_failure"
 
-    def test_debug_output_truncated_at_8000(self, odin_dirs, config_with_mock):
-        """Debug comments truncate content to 8000 chars."""
+    def test_effective_input_not_truncated(self, odin_dirs, config_with_mock):
+        """The effective-input machine comment carries the FULL prompt — no cap.
+
+        The run-start line promises "full input attached", so a prompt well
+        over the old 8000-char slice must survive intact. Regression for the
+        truncation that used to cut the dump at 8000 chars while the one-liner
+        still claimed the whole input was reachable.
+        """
         orch = Orchestrator(config=config_with_mock)
 
         # Create task with a very long description
@@ -276,7 +282,7 @@ class TestExecutionDebugComments:
         )
         orch.task_mgr.assign_task(task.id, "mock")
 
-        result = asyncio.run(orch.exec_task(task.id))
+        asyncio.run(orch.exec_task(task.id))
 
         comments = orch.task_mgr.get_comments(task.id)
         input_comments = [
@@ -284,6 +290,8 @@ class TestExecutionDebugComments:
             if "debug:effective_input" in c.get("attachments", [])
         ]
         assert len(input_comments) == 1
-        # The "Effective input (with upstream context):\n\n" prefix + 8000 chars of content
-        # Total should be under ~8050
-        assert len(input_comments[0]["content"]) < 8100
+        content = input_comments[0]["content"]
+        # The full wrapped prompt includes the 10k-char description verbatim —
+        # the old slice cut this at 8000. Nothing is dropped now.
+        assert long_desc in content
+        assert len(content) > 10000

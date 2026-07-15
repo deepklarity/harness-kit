@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { usePolling } from '@/hooks/usePolling'
-import type { ExecutorCapacity } from '@/types'
+import type { ExecutorCapacity, MemoryShareHolder } from '@/types'
 import { Cpu, Loader2 } from 'lucide-react'
 
 interface CapacityBadgeProps {
@@ -9,6 +9,48 @@ interface CapacityBadgeProps {
     }
     intervalMs?: number
     className?: string
+}
+
+/** Compose the operator-facing "X+Y/Z" line — task #353. */
+function badgeDisplay(capacity: ExecutorCapacity): string {
+    const executing = capacity.executing ?? capacity.running
+    const reflecting = capacity.reflecting ?? 0
+    const inUse = capacity.shares_in_use ?? executing + reflecting
+    const max =
+        capacity.memory_max_shares && capacity.memory_max_shares > 0
+            ? capacity.memory_max_shares
+            : capacity.max
+    if (reflecting === 0) {
+        return `${inUse}/${max}`
+    }
+    return `${executing}+${reflecting}/${max}`
+}
+
+/** Build the tooltip that names each share-holder — the operator signal
+ * the badge must give at a glance: "3 executing + 1 review = 4/4 memory
+ * shares — held by task 344, reflection on 346". */
+function badgeTooltip(capacity: ExecutorCapacity): string {
+    const executing = capacity.executing ?? capacity.running
+    const reflecting = capacity.reflecting ?? 0
+    const inUse = capacity.shares_in_use ?? executing + reflecting
+    const max =
+        capacity.memory_max_shares && capacity.memory_max_shares > 0
+            ? capacity.memory_max_shares
+            : capacity.max
+    const breakdown =
+        reflecting > 0
+            ? `${executing} executing + ${reflecting} review = ${inUse}/${max} memory shares`
+            : `Sandbox capacity: ${inUse} running of ${max} max.`
+    const holders = capacity.memory_share_holders ?? []
+    if (holders.length === 0) return breakdown
+    const lines = holders.slice(0, 5).map(holderLabel)
+    const overflow = holders.length > 5 ? `\n…and ${holders.length - 5} more` : ''
+    return `${breakdown}\n— held by —\n${lines.join('\n')}${overflow}`
+}
+
+function holderLabel(h: MemoryShareHolder): string {
+    if (h.kind === 'reflection') return `reflection on ${h.task_id} — ${h.task_title}`
+    return `task ${h.task_id} — ${h.task_title}`
 }
 
 export function CapacityBadge({ service, intervalMs, className }: CapacityBadgeProps) {
@@ -28,19 +70,23 @@ export function CapacityBadge({ service, intervalMs, className }: CapacityBadgeP
         immediate: true,
     })
 
+    const inUse = capacity ? (capacity.shares_in_use ?? capacity.running) : 0
+    const max = capacity
+        ? (capacity.memory_max_shares && capacity.memory_max_shares > 0
+              ? capacity.memory_max_shares
+              : capacity.max)
+        : 0
     const state: 'idle' | 'partial' | 'saturated' | 'unknown' =
         !capacity
             ? 'unknown'
-            : capacity.running >= capacity.max
+            : inUse >= max && max > 0
                 ? 'saturated'
-                : capacity.running > 0
+                : inUse > 0
                     ? 'partial'
                     : 'idle'
 
-    const display = capacity ? `${capacity.running}/${capacity.max}` : '—/—'
-    const tooltip = capacity
-        ? `Sandbox capacity: ${capacity.running} running of ${capacity.max} max.`
-        : 'Loading sandbox capacity...'
+    const display = capacity ? badgeDisplay(capacity) : '—/—'
+    const tooltip = capacity ? badgeTooltip(capacity) : 'Loading sandbox capacity...'
 
     return (
         <div

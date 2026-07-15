@@ -20,6 +20,7 @@ class TasksConfig(AppConfig):
         import tasks.dag_executor  # noqa: F401 — register Celery tasks
         import tasks.schedule_executor  # noqa: F401 — register schedule release task
         import tasks.failed_reminder  # noqa: F401 — register failed reminder task
+        import tasks.board_planner  # noqa: F401 — register board-driven plan tasks
 
         # Data-operations registry (task #247): run pending data ops after
         # migrate, so a service restart applies shipped data ops with no

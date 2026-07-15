@@ -11,6 +11,10 @@ interface LeagueTableProps {
     // Hides the card's own title — used when the caller renders its own
     // zone heading above the table (Stats page's "Agent league" heading).
     hideTitle?: boolean;
+    // Fires when an agent row is clicked — the stats page uses this to
+    // open the agent's task drilldown. When omitted, rows render as
+    // plain table rows (back-compat for non-stats callers).
+    onAgentClick?: (agent: string) => void;
 }
 
 type SortKey =
@@ -19,7 +23,8 @@ type SortKey =
     | 'tasks_landed'
     | 'hands_free_pct'
     | 'redo_rounds_avg'
-    | 'cost_usd_total';
+    | 'cost_usd_total'
+    | 'avg_reflection_cost_usd';
 
 function handsFreeColorClass(pct: number): string {
     if (pct >= 0.8) return 'text-green-600 dark:text-green-500';
@@ -32,17 +37,18 @@ function handsFreeLabel(pct: number): string {
 }
 
 // Tooltip summarizing the metrics that no longer get their own column —
-// tokens/duration/conflicts are still in the data, just decluttered from
-// the visible table per the Stats-rebuild spec.
+// tokens/duration/conflicts/reflection-stats are still in the data, just
+// decluttered from the visible table per the Stats-rebuild spec.
 function rowTitle(row: LeagueRow): string {
     return [
         `Tokens (median): ${formatTokens(row.tokens_median)}`,
         `Duration (median): ${formatDuration(row.duration_ms_median)}`,
         `Merge conflicts caused: ${row.merge_conflicts_caused}`,
+        `Reflections: ${row.reflection_count} (total $${row.reflection_cost_usd_total.toFixed(4)})`,
     ].join('\n');
 }
 
-export function LeagueTable({ rows, loading, hideTitle }: LeagueTableProps) {
+export function LeagueTable({ rows, loading, hideTitle, onAgentClick }: LeagueTableProps) {
     const [sortKey, setSortKey] = useState<SortKey>('tasks_landed');
     const [sortDesc, setSortDesc] = useState(true);
 
@@ -69,6 +75,7 @@ export function LeagueTable({ rows, loading, hideTitle }: LeagueTableProps) {
         { key: 'hands_free_pct', label: 'Hands-free %', align: 'right' },
         { key: 'redo_rounds_avg', label: 'Redo avg', align: 'right' },
         { key: 'cost_usd_total', label: 'Cost', align: 'right' },
+        { key: 'avg_reflection_cost_usd', label: 'Avg refl cost', align: 'right' },
     ];
 
     const title = !hideTitle && (
@@ -129,8 +136,26 @@ export function LeagueTable({ rows, loading, hideTitle }: LeagueTableProps) {
                         <tbody>
                             {sorted.map(row => {
                                 const key = `${row.agent}|${row.model}`;
+                                const interactive = !!onAgentClick;
+                                const rowClass = interactive
+                                    ? "border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring"
+                                    : "border-b border-border/50 hover:bg-muted/30 transition-colors";
+                                const rowProps = interactive
+                                    ? {
+                                          role: "button" as const,
+                                          tabIndex: 0,
+                                          "aria-label": `View tasks for ${row.agent}`,
+                                          onClick: () => onAgentClick(row.agent),
+                                          onKeyDown: (e: React.KeyboardEvent) => {
+                                              if (e.key === "Enter" || e.key === " ") {
+                                                  e.preventDefault();
+                                                  onAgentClick(row.agent);
+                                              }
+                                          },
+                                      }
+                                    : {};
                                 return (
-                                    <tr key={key} title={rowTitle(row)} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                                    <tr key={key} title={rowTitle(row)} className={rowClass} {...rowProps}>
                                         <td className="py-2 px-3 font-medium">{row.agent}</td>
                                         <td className="py-2 px-3 font-medium">{row.model}</td>
                                         <td className="py-2 px-3 text-right tabular-nums">{row.tasks_landed}</td>
@@ -148,6 +173,13 @@ export function LeagueTable({ rows, loading, hideTitle }: LeagueTableProps) {
                                         </td>
                                         <td className="py-2 px-3 text-right tabular-nums">
                                             {row.cost_usd_total > 0 ? formatCost(row.cost_usd_total) : '—'}
+                                        </td>
+                                        <td className="py-2 px-3 text-right tabular-nums">
+                                            {row.avg_reflection_cost_usd > 0
+                                                ? formatCost(row.avg_reflection_cost_usd)
+                                                : row.reflection_count > 0
+                                                    ? formatCost(row.avg_reflection_cost_usd)
+                                                    : '—'}
                                         </td>
                                     </tr>
                                 );

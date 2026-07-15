@@ -181,8 +181,13 @@ class PolicyTableDefaults(APITestCase):
         self.assertEqual(
             human,
             {
-                "env_missing", "timeout", "worktree_isolation", "disk_exhaustion",
-                "crash", "cancelled", "model_unavailable", "unknown",
+                "env_missing", "auth_failure", "timeout", "worktree_isolation",
+                "disk_exhaustion", "crash", "cancelled", "model_unavailable",
+                "unknown",
+                # task #359 — three NEEDS_WORK/FAIL reviews means a human
+                # has to read the reviewer's note and decide (auto-retry
+                # the same agent/model is the banner lie).
+                "review_cap",
             },
         )
         # All three sets partition the full taxonomy with no overlap.

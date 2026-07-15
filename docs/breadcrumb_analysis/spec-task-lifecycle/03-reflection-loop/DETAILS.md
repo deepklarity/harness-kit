@@ -84,9 +84,9 @@ Full trace: **`../../quota-failover-reassignment/`**. Do not restate the branch 
 
 ## 8. Re-execution after NEEDS_WORK
 
-After NEEDS_WORK moves a task to IN_PROGRESS and re-fires the execution strategy, `orchestrator.exec_task()` (~1341) rebuilds the prompt via `_build_reflection_context()` (~1674) + `_build_self_context()` (~1734): the latest NEEDS_WORK reflection is prepended as issues to address, plus the task's own latest `summary` comment. Continuity of assignee/model across the rework is recorded by `_record_rework_continuity()` (`views.py` ~756).
+After NEEDS_WORK moves a task to IN_PROGRESS and re-fires the execution strategy, `orchestrator.exec_task()` (~1754) rebuilds the prompt via `_build_task_context()` (~2313, prepended to the brief at ~1885). This single pass collects every comment type and, when a NEEDS_WORK/FAIL reflection is present, emits a **rework directive** that LEADS the prompt: the latest reviewer finding (full verdict text) plus every operator/human comment posted since that reflection, under `## Fix this first — the reviewer's finding`, with an explicit objective ("resolve the finding; do not re-verify the whole brief"). Earlier rounds, the summary, remaining notes, Q&A, proof, and prior agent output follow as context. (The older `_build_reflection_context()` / `_build_self_context()` pair is deprecated.) Continuity of assignee/model across the rework is recorded by `_record_rework_continuity()` (`views.py` ~756).
 
-**Known gap**: only NEEDS_WORK reflection feedback is injected — status_update comments, proof, and prior execution output are not forwarded into the re-execution prompt, so the agent sees the critique but not everything it previously produced.
+**Why the directive leads** (task #363): the rework prompt used to bury a one-line verdict under a passive "Previous Review Feedback" heading while operator replies sat in a separate section, so every re-dispatched agent re-did the whole brief and ignored the targeted fix. Bundling the finding + operator notes at the top with an explicit objective makes a one-line fix converge in one round.
 
 ## 9. ReflectionReport model
 

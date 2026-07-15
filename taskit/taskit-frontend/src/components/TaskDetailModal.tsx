@@ -50,7 +50,8 @@ import { partitionComments } from '../utils/commentStream';
 import { useToast } from '@/hooks/use-toast';
 import { parseCommentBody } from '../utils/commentParser';
 import { parseFailureDetails } from '../utils/failureParser';
-import { IdeBadge, IdeSetupModal } from './IdeSetupModal';
+import { dedupeFailureTags } from '../utils/failureTags';
+import { IdeSetupModal } from './IdeSetupModal';
 import { getDispatchBlockReason } from './dispatchBlock';
 import { DispatchBlockBanner } from './DispatchBlockBanner';
 import { TaskReworkBox } from './TaskReworkBox';
@@ -134,6 +135,7 @@ export function TaskDetailModal({
     const [sessionMeta, setSessionMeta] = useState<SessionMeta | null>(null);
 
     const [showAllHistory, setShowAllHistory] = useState(false);
+    const [activityOpen, setActivityOpen] = useState(false);
     const [showAllComments, setShowAllComments] = useState(false);
     const [showDebugComments, setShowDebugComments] = useState(false);
     const [commentText, setCommentText] = useState('');
@@ -940,23 +942,23 @@ export function TaskDetailModal({
                                     })()}
                                     {(() => {
                                         const metadata = task.metadata as Record<string, unknown> | undefined;
-                                        const failureClass = metadata?.failure_class;
-                                        const lastFailureType = metadata?.last_failure_type;
-                        return ((failureClass || lastFailureType) ? (
-                            <div className="flex items-center gap-1 mt-1 flex-wrap">
-                                {failureClass ? (
-                                    <Badge variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 text-amber-400 border-amber-500/20">
-                                        {String(failureClass)}
-                                    </Badge>
-                                ) : null}
-                                {lastFailureType ? (
-                                    <Badge variant="outline" className="text-[9px] px-1 py-0 bg-red-500/10 text-red-400 border-red-500/20">
-                                        {String(lastFailureType)}
-                                    </Badge>
-                                ) : null}
-                            </div>
-                        ) : null) as React.ReactNode;
-                    })()}
+                                        // failure_class and last_failure_type frequently carry the
+                                        // same value (e.g. both "stale_execution"); dedupe so the
+                                        // tag renders once, not twice.
+                                        const failureTags = dedupeFailureTags(
+                                            metadata?.failure_class as string | undefined,
+                                            metadata?.last_failure_type as string | undefined,
+                                        );
+                                        return (failureTags.length > 0 ? (
+                                            <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                                {failureTags.map((tag, i) => (
+                                                    <Badge key={`${tag}-${i}`} variant="outline" className="text-[9px] px-1 py-0 bg-amber-500/10 text-amber-400 border-amber-500/20">
+                                                        {tag}
+                                                    </Badge>
+                                                ))}
+                                            </div>
+                                        ) : null) as React.ReactNode;
+                                    })()}
                                     {(() => {
                                         const metadata = task.metadata as Record<string, unknown> | undefined;
                                         const failureDebug = metadata?.failure_debug;
@@ -1094,12 +1096,17 @@ export function TaskDetailModal({
                             </CompactRow>
 
                             {/* WHY line — single-row summary of why the router
-                                (or the human) picked this assignee. Em-dash when
-                                absent. Tooltip surfaces rule + cheaper alternatives
-                                + twin consensus so the operator can audit. */}
-                            <CompactRow label="Why">
-                                <AssignmentReason task={task} />
-                            </CompactRow>
+                                (or the human) picked this assignee. Only renders
+                                when there is a reason sentence to read; a value-less
+                                "Override —" row is hidden, not shown as noise. */}
+                            {(() => {
+                                const whyReason = (task.metadata?.assignment_reason as { reason?: string } | undefined)?.reason;
+                                return whyReason ? (
+                                    <CompactRow label="Why">
+                                        <AssignmentReason task={task} />
+                                    </CompactRow>
+                                ) : null;
+                            })()}
 
                             {/* Model — directly below assignee so changes are visible */}
                             {(assigneeModels.length > 0 || execContext.model) && (
@@ -1116,7 +1123,10 @@ export function TaskDetailModal({
                                             }}
                                             disabled={isExecuting}
                                         >
-                                            <SelectTrigger className="h-6 text-[10px] font-mono w-full !whitespace-nowrap overflow-hidden">
+                                            <SelectTrigger
+                                                className="h-auto min-h-6 text-[11px] font-mono w-full break-all leading-tight py-1 text-left"
+                                                title={execContext.model || undefined}
+                                            >
                                                 <SelectValue placeholder="Select model..." />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1182,12 +1192,20 @@ export function TaskDetailModal({
                                     ) : (
                                         <div className="flex items-start justify-between gap-4">
                                             <div className="space-y-1 text-xs">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-medium text-foreground">Budget:</span>
-                                                    <span className="font-mono text-foreground/90">{formatBudgetValue(task.devEta)}</span>
-                                                </div>
-                                                <div className={`inline-flex items-center gap-2 rounded-md px-2 py-1 ${isOverBudget ? 'bg-red-500/10 text-red-500 dark:text-red-300' : 'text-foreground'}`}>
-                                                    <span className="font-medium">Used:</span>
+                                                {/* Only show a Budget line when a budget is actually set —
+                                                    "Budget: —" next to real used-time is noise that obscures
+                                                    the one number the operator cares about. */}
+                                                {task.devEta !== undefined && (
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-medium text-foreground">Budget:</span>
+                                                        <span className="font-mono text-foreground/90">{formatBudgetValue(task.devEta)}</span>
+                                                    </div>
+                                                )}
+                                                <div
+                                                    className={`inline-flex items-center gap-2 rounded-md px-2 py-1 ${task.devEta !== undefined && isOverBudget ? 'bg-red-500/10 text-red-500 dark:text-red-300' : 'text-foreground'}`}
+                                                    title="Total time spent executing this task (all attempts)"
+                                                >
+                                                    <span className="font-medium">{task.devEta !== undefined ? 'Used' : 'Time used'}:</span>
                                                     <span className="font-mono">{formatDuration(usedExecutionMs)}</span>
                                                 </div>
                                             </div>
@@ -1622,7 +1640,7 @@ export function TaskDetailModal({
                             task={task}
                             onUpdateTask={onUpdateTask}
                             onRefresh={onRefresh}
-                            authorEmail={authUser?.email}
+                            authorEmail={authUser?.email ?? undefined}
                         />
                         {/* Description */}
                         <div className="mb-8">
@@ -1866,13 +1884,23 @@ export function TaskDetailModal({
 
                         <Separator className="my-6" />
 
-                        {/* Activity Timeline */}
-                        <div>
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">
+                        {/* Activity Timeline — collapsed by default. Comments is
+                            the one place to read what happened; the raw mutation
+                            timeline competes with it in a different format, so it
+                            tucks behind a single header line until the operator
+                            asks for it. */}
+                        <div data-testid="activity-section">
+                            <div className="flex items-center justify-between mb-2">
+                                <button
+                                    data-testid="activity-toggle"
+                                    className="flex items-center gap-1.5 text-sm font-bold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+                                    onClick={() => setActivityOpen(o => !o)}
+                                    aria-expanded={activityOpen}
+                                >
+                                    <ChevronRight className={`size-3.5 transition-transform ${activityOpen ? 'rotate-90' : ''}`} />
                                     Activity ({visibleMutations.length})
-                                </h3>
-                                {hiddenCount > 0 && (
+                                </button>
+                                {activityOpen && hiddenCount > 0 && (
                                     <Button
                                         variant="ghost"
                                         size="sm"
@@ -1883,14 +1911,16 @@ export function TaskDetailModal({
                                     </Button>
                                 )}
                             </div>
-                            <div className="relative">
-                                <div className="absolute left-[7px] top-4 bottom-4 w-px bg-border" />
-                                <div className="space-y-5">
-                                    {visibleMutations.map((mutation, idx) => (
-                                        <MutationItem key={mutation.id || idx} mutation={mutation} />
-                                    ))}
+                            {activityOpen && (
+                                <div className="relative">
+                                    <div className="absolute left-[7px] top-4 bottom-4 w-px bg-border" />
+                                    <div className="space-y-5">
+                                        {visibleMutations.map((mutation, idx) => (
+                                            <MutationItem key={mutation.id || idx} mutation={mutation} />
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
 
 

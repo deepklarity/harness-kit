@@ -263,3 +263,14 @@ db.sqlite3-*
 # local-only: history and research funnel stay on the operator machine, in no remote
 docs/fable_roadmap/archive/
 docs/wiki/
+
+# Private / machine-local material the wave-12 merge resurrected (sweep rule):
+docs/fable_roadmap/linkedin-project.md
+odin/config/seed_project_notes_linkedin.md
+docs/fable_roadmap/changelog.html
+docs/fable_roadmap/overwatch-toolkit/
+docs/fable_roadmap/bootstrap/create_wave[1-8]*.py
+docs/fable_roadmap/bootstrap/create_smoke_tables.py
+docs/fable_roadmap/bootstrap/sample_vm_mem.py
+smoke_output/
+docs/fable_roadmap/audits/board5_cleared_2026-07-06.json

@@ -156,6 +156,11 @@ interface HarnessTask {
     board_escalation_enabled?: boolean;
     needs_human?: boolean;
     needs_human_reason?: string;
+    // task #359 — failure banner fields, composed server-side from
+    // failure_class + last_failure_reason so the banner can never lie
+    // about a stale failure from an earlier run.
+    failure_suggested_action?: string;
+    failure_human_reason?: string;
     schedule_summary?: {
         id: number;
         kind: 'ONE_TIME' | 'RECURRING';
@@ -230,8 +235,10 @@ interface HarnessSpec {
     status?: string;
     planner_config?: Record<string, unknown>;
     cost_summary?: {
+        plan_cost_usd: number;
         total_cost_usd: number;
         reflection_cost_usd: number;
+        merge_cost_usd: number;
         cost_by_model: Record<string, number>;
         total_tokens: number;
         total_input_tokens: number;
@@ -1568,6 +1575,12 @@ export class HarnessTimeService implements IntegrationService {
             scheduleSummary: task.schedule_summary ?? undefined,
             needsHuman: task.needs_human ?? false,
             needsHumanReason: task.needs_human_reason || undefined,
+            // Task #359 — the failure banner reads these verbatim. The
+            // serializer composes both from the failure_class + reason,
+            // so the banner always describes the failure that parked the
+            // task — not a stale one from an earlier run.
+            failureSuggestedAction: task.failure_suggested_action || undefined,
+            failureHumanReason: task.failure_human_reason || undefined,
         };
     }
 
@@ -1770,6 +1783,10 @@ export class HarnessTimeService implements IntegrationService {
     async activateSpec(specId: string): Promise<Spec> {
         const raw = await this.post<HarnessSpec>(`/api/specs/${Number(specId)}/activate/`, {});
         return this.transformSpec(raw);
+    }
+
+    async requestBoardPlan(specId: string): Promise<void> {
+        await this.post(`/api/specs/${Number(specId)}/request-board-plan/`, {});
     }
 
     async createPlanningSpec(data: {

@@ -67,19 +67,27 @@ describe('AssignmentReason — WHY line + tooltip', () => {
         expect(screen.getByTestId('assignment-reason-rule').textContent).toMatch(/Override/)
     })
 
-    it('renders em-dash when assignment_reason is absent (old tasks)', () => {
+    it('hides the row when assignment_reason is absent (old tasks)', () => {
         const task = makeTask({ metadata: {} })
         render(<AssignmentReason task={task} />)
-        const row = screen.getByTestId('assignment-reason-row')
-        // The row exists but the reason degrades to em-dash — never hidden.
-        expect(row).toBeInTheDocument()
-        expect(row.textContent).toMatch(/—/)
+        // No reason sentence → the WHY line says nothing, so it does not render.
+        expect(screen.queryByTestId('assignment-reason-row')).not.toBeInTheDocument()
     })
 
-    it('renders em-dash when metadata is missing entirely', () => {
+    it('hides the row when metadata is missing entirely', () => {
         const task = makeTask()
         render(<AssignmentReason task={task} />)
-        expect(screen.getByTestId('assignment-reason-row').textContent).toMatch(/—/)
+        expect(screen.queryByTestId('assignment-reason-row')).not.toBeInTheDocument()
+    })
+
+    it('hides the row when an override carries no reason text', () => {
+        const task = makeTask({
+            metadata: {
+                assignment_reason: makeAR({ override: true, override_by: 'alice@example.com', reason: '' }),
+            },
+        })
+        render(<AssignmentReason task={task} />)
+        expect(screen.queryByTestId('assignment-reason-row')).not.toBeInTheDocument()
     })
 
     it('twin_consensus line appears in the tooltip when present', () => {

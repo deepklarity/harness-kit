@@ -25,7 +25,10 @@ TODO → IN_PROGRESS → EXECUTING → REVIEW → TESTING → DONE
 ## Create and dispatch
 
 Create tasks with the loader scripts in `bootstrap/`. Agent accounts are
-`{agent}@odin.agent`.
+`{agent}@odin.agent`. Write every title and brief per
+`docs/task_brief_template.md` and `docs/fable_roadmap/TONE.md` — a title is
+a sentence you'd say to a teammate out loud, not a category label with a
+system word in it.
 
 Dispatch means setting the status through the API:
 
@@ -38,6 +41,14 @@ curl -s -X PATCH "http://localhost:9100/api/tasks/<id>/" \
 Send everything that is ready, all at once. The executor's limit
 (`DAG_EXECUTOR_MAX_CONCURRENCY`, default 3, sized to this machine's RAM at
 about 4 GB per sandbox) is the queue. Don't hold work back to manage load.
+
+Exception — a brand-new spec: dispatch ONE task first and wait for it to
+reach EXECUTING before sending the rest. Two tasks initializing a fresh
+spec branch at the same time race on worktree creation and one lands in
+FAILED (missing_worktree); it happened four times in one day. The requeue
+always succeeds, but the failure is pure noise. The real fix (the executor
+serializes spec-branch initialization) is in the backlog; until it lands,
+stagger the first dispatch.
 
 ## Watch and triage
 

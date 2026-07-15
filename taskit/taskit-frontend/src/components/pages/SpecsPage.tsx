@@ -290,7 +290,7 @@ export function SpecsPage({ selectedBoard, refreshKey = 0, currentBoard, onSpecC
                                     <div className="text-base font-semibold mb-2 break-all">{spec.title}</div>
                                     <div className="flex items-center gap-3 text-[10px] font-mono mb-1.5">
                                         <span className="flex items-center gap-1 text-emerald-400">
-                                            {formatCost(spec.costSummary?.total_cost_usd ?? 0)}
+                                            {formatCost((spec.costSummary?.plan_cost_usd ?? 0) + (spec.costSummary?.total_cost_usd ?? 0) + (spec.costSummary?.reflection_cost_usd ?? 0) + (spec.costSummary?.merge_cost_usd ?? 0))}
                                         </span>
                                         {(spec.costSummary?.reflection_cost_usd ?? 0) > 0 && (
                                             <span className="text-violet-400">

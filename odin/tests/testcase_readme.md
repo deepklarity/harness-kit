@@ -24,6 +24,7 @@ tests/
     test_cost_estimator.py # Pricing table loading, cost estimation from tokens
     test_dag.py            # DAG validation (cycle detection), wave grouping, envelope parsing
     test_merge_agent.py    # Merge-conflict classifier, in-worktree resolution, comment formatters, additive-non-overlapping auto-resolve gate (task 254)
+    test_build_task_context.py # Rework directive for re-dispatch: NEEDS_WORK/FAIL finding + operator notes/replies since last attempt lead the prompt (task 363)
     test_reflection.py     # Reflection prompt builder and report parser
     test_agent_routing.py  # Pure suggester: cheapest-capable ranks, escalation, thin-history fallback
     test_route_task_suggester.py # Orchestrator wiring of the suggester into _route_task tier distribution
@@ -423,6 +424,15 @@ win/lose paths, planner-override semantics, defensive degradation.
 | `TestBareKeywordLaunderingHardErrors::test_bare_keyword_buried_in_unrelated_text_errors` | "rate_limit_failure" word → ERROR |
 | `TestBareKeywordLaunderingHardErrors::test_bare_pass_buried_in_unrelated_text_is_honored` | PASS buried in noise still honored |
 | `TestBareKeywordLaunderingHardErrors::test_error_includes_raw_head_for_debuggability` | ERROR summary embeds raw head for operator triage |
+| `TestReviewerInfraTruncation::test_substantive_output_no_json_with_truncation_yields_reviewer_infra` | Reasoning + no JSON + finish_reason=length → REVIEWER_INFRA (task 346) |
+| `TestReviewerInfraTruncation::test_json_at_top_with_truncated_prose_parses_normally` | JSON at top + truncated prose → PASS parsed normally |
+| `TestReviewerInfraTruncation::test_substantive_output_no_json_without_truncation_still_errors` | No truncation → ERROR (not REVIEWER_INFRA) |
+| `TestReviewerInfraTruncation::test_empty_output_with_truncation_still_errors` | Empty output + truncation → ERROR (not substantive) |
+| `TestReviewerInfraTruncation::test_reviewer_infra_summary_includes_finish_reason` | REVIEWER_INFRA summary mentions finish_reason |
+| `TestReviewerInfraTruncation::test_reviewer_infra_summary_preserves_reasoning_head` | Truncated reasoning salvaged in summary |
+| `TestReviewerInfraTruncation::test_bare_keyword_with_truncation_still_reviewer_infra` | Bare keyword + truncation → REVIEWER_INFRA |
+| `TestReviewerInfraTruncation::test_other_output_cap_reasons_trigger_reviewer_infra` | All _OUTPUT_CAP_REASONS trigger REVIEWER_INFRA |
+| `TestReviewerInfraTruncation::test_non_cap_finish_reason_does_not_trigger_reviewer_infra` | Non-cap finish_reason (end_turn) → ERROR |
 | `TestPromptRequiresJsonContract::test_prompt_requires_fenced_json_block` | Prompt names `verdict` and `fix_list` keys |
 | `TestPromptRequiresJsonContract::test_prompt_warns_against_bare_keyword` | Prompt warns against bare keyword laundering |
 | `TestPromptRequiresJsonContract::test_prompt_explains_markdown_rendering_is_optional` | Prompt says markdown rendering is optional |
@@ -799,7 +809,20 @@ win/lose paths, planner-override semantics, defensive degradation.
 | `TestExecutionDebugComments::test_debug_comments_posted_during_execution` | debug:effective_input and debug:full_output comments posted |
 | `TestExecutionDebugComments::test_debug_effective_input_includes_upstream_context` | Injected upstream context appears in debug input comment |
 | `TestExecutionDebugComments::test_execution_result_includes_effective_input` | effective_input in execution_result payload |
-| `TestExecutionDebugComments::test_debug_output_truncated_at_8000` | Debug content truncated at 8000 chars |
+| `TestExecutionDebugComments::test_effective_input_not_truncated` | Effective-input comment carries the full prompt — no 8000-char cap |
+
+### test_run_start_comment.py — Run-start one-liner + effective-input dedup (task #360)
+
+| Test | What it checks |
+|---|---|
+| `TestRunStartOneLiner::test_one_liner_under_200_chars` | Run-start line is one short human-readable line (<200 chars) |
+| `TestRunStartOneLiner::test_attempt_increments_per_run` | Attempt number counts prior run-start lines |
+| `TestEffectiveInputDedup::test_dumped_once_when_prompt_unchanged` | Byte-identical dump suppressed across retries |
+| `TestEffectiveInputDedup::test_redumps_when_prompt_changes` | Dump re-posts when the prompt genuinely changes |
+| `TestEffectiveInputDedup::test_full_input_reachable_in_machine_channel` | Full input lives in the debug comment (machine toggle) |
+| `TestFullEffectiveInputNoTruncation::test_prompt_over_8kb_preserved_in_full` | Prompt >8 KB stored verbatim — no truncation |
+| `TestFullEffectiveInputNoTruncation::test_prompt_over_8kb_still_dedups_when_unchanged` | Large prompt still dedups across retries |
+| `TestRunStartWiredIntoExecTask::test_exec_task_posts_run_start_one_liner` | exec_task posts the run-start one-liner |
 
 ### test_harness_subprocess_errors.py — Harness subprocess error paths (all 6 harnesses)
 
@@ -897,6 +920,8 @@ These tests live in the taskit-backend, not in odin's test tree, but cover Odin-
 | `TestReflectTask::test_posts_failed_status_on_error` | HTTP error → FAILED status posted |
 | `TestReflectTask::test_custom_model_override` | Custom model passed through to harness |
 | `TestReflectTask::test_patches_assembled_prompt` | RUNNING patch includes assembled_prompt with full reviewer prompt |
+| `TestReflectTask::test_truncated_review_yields_reviewer_infra` | Truncated reasoning + finish_reason=length → REVIEWER_INFRA, finish_reason persisted in token_usage (task 346) |
+| `TestReflectTask::test_json_at_top_with_truncated_prose_parses_normally` | JSON at top + truncated prose → PASS parsed normally (verdict survives truncation) |
 
 ---
 

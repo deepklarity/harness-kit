@@ -631,6 +631,8 @@ class Orchestrator:
         direct: bool = False,
         gate: bool = True,
         gate_callback: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
+        board_driven: bool = False,
+        board_spec_pk: Optional[int] = None,
     ) -> Tuple[str, List[Task]]:
         """Decompose a spec into sub-tasks and create them with suggested agent
         assignments.  Does NOT execute anything.
@@ -657,7 +659,16 @@ class Orchestrator:
 
         # 1. Create spec archive FIRST — spec_id is available for plan_path
         title = spec_file or _extract_title(spec)
-        sid = generate_spec_id(title)
+        sid = None
+        if board_driven and board_spec_pk is not None and self._spec_backend:
+            # Board-driven mode plans an EXISTING board spec. Reuse its
+            # odin_id so save_spec() updates that spec in place instead of
+            # creating a second Spec row — otherwise tasks would end up
+            # linked to a freshly-created spec, not the one that was
+            # requested (see task 345 round 4).
+            sid = self._spec_backend.get_spec_odin_id_by_pk(board_spec_pk)
+        if not sid:
+            sid = generate_spec_id(title)
         self._last_plan_spec_id = sid  # Track for mark_planning_failed()
         spec_archive = SpecArchive(
             id=sid,
@@ -773,6 +784,14 @@ class Orchestrator:
                 "has_answers": bool(answers) if gate_callback else False,
             })
 
+        # Board-driven mode: post gate questions to spec comments and return
+        # early. The human will reply on the spec, which triggers Phase 2
+        # (board_resume_plan) to do the actual task breakdown.
+        if board_driven:
+            self._post_board_gate(sid, clarification, preview_path, board_spec_pk)
+            self._log.info("Board-driven plan gate posted for spec %s, awaiting reply", sid)
+            return sid, []
+
         prompt = self._build_plan_prompt(
             spec=spec,
             plan_path=str(plan_path),
@@ -853,6 +872,204 @@ class Orchestrator:
         )
         return sid, tasks
 
+    def _post_board_gate(
+        self,
+        spec_id: str,
+        clarification: Dict[str, Any],
+        preview_path: Path,
+        board_spec_pk: Optional[int] = None,
+    ) -> None:
+        """Post clarification gate questions/summary/preview to the spec as
+        SpecComments. Used by board-driven mode — the gate conversation
+        happens in spec comments instead of a terminal.
+        """
+        backend = getattr(self, "_spec_backend", None)
+        if backend is None or board_spec_pk is None:
+            self._log.warning(
+                "Cannot post board gate: no backend or spec PK (spec_id=%s)",
+                spec_id,
+            )
+            return
+
+        questions = clarification.get("questions", [])
+        summary = clarification.get("summary", "")
+        author_email = "odin+planner@odin.agent"
+        author_label = "odin-planner"
+
+        if summary:
+            backend.post_spec_comment_by_pk(
+                board_spec_pk,
+                content=f"**Planning Summary**\n\n{summary}",
+                comment_type="planning",
+                author_email=author_email,
+                author_label=author_label,
+            )
+
+        if questions:
+            lines = []
+            for i, q in enumerate(questions, 1):
+                lines.append(f"**Q{i}:** {q}")
+            q_block = "\n\n".join(lines)
+            backend.post_spec_comment_by_pk(
+                board_spec_pk,
+                content=(
+                    "The planner has questions before breaking down tasks. "
+                    "Reply on this spec with your answers and planning will "
+                    f"continue automatically.\n\n{q_block}"
+                ),
+                comment_type="question",
+                author_email=author_email,
+                author_label=author_label,
+            )
+        else:
+            backend.post_spec_comment_by_pk(
+                board_spec_pk,
+                content=(
+                    "No clarification questions — ready to proceed. "
+                    "Reply to confirm and planning will continue."
+                ),
+                comment_type="question",
+                author_email=author_email,
+                author_label=author_label,
+            )
+
+        if clarification.get("preview_exists") and Path(preview_path).exists():
+            try:
+                uploaded = backend.upload_spec_attachment(
+                    board_spec_pk,
+                    str(preview_path),
+                    author_email=author_email,
+                )
+                att_id = uploaded[0]["id"] if uploaded else None
+                backend.post_spec_comment_by_pk(
+                    board_spec_pk,
+                    content=(
+                        "Plan preview page attached — open the file attachment "
+                        "below to view the rendered HTML."
+                    ),
+                    comment_type="planning",
+                    author_email=author_email,
+                    author_label=author_label,
+                    attachment_ids=[att_id] if att_id else None,
+                )
+            except Exception as exc:
+                self._log.warning(
+                    "Could not upload plan preview attachment for spec_pk=%s: %s",
+                    board_spec_pk, exc,
+                )
+
+        backend.update_spec_metadata_by_pk(
+            board_spec_pk,
+            {"board_plan_status": "awaiting_answers"},
+        )
+
+        spec_archive = self.spec_store.load(spec_id)
+        if spec_archive:
+            meta = spec_archive.metadata or {}
+            meta["board_plan_clarification"] = {
+                k: v for k, v in clarification.items()
+                if k in ("questions", "summary")
+            }
+            meta["board_plan_status"] = "awaiting_answers"
+            spec_archive.metadata = meta
+            self._save_spec(spec_archive)
+
+    async def board_resume_plan(
+        self,
+        spec_id: str,
+        reply_text: str,
+        board_spec_pk: Optional[int] = None,
+        working_dir: Optional[str] = None,
+        quick: bool = False,
+        skip_reflection: bool = False,
+    ) -> Tuple[str, List[Task]]:
+        """Resume a board-driven plan after a human reply.
+
+        Loads the spec, appends the reply as clarification answers, and runs
+        task breakdown (decompose + create tasks). The clarification gate is
+        skipped — it already ran in Phase 1.
+        """
+        self._log.info("Board plan resume: spec_id=%s", spec_id)
+        self.logger.log(action="board_plan_resume_started", metadata={"spec_id": spec_id})
+
+        spec_archive = self.spec_store.load(spec_id)
+        if not spec_archive:
+            raise RuntimeError(
+                f"Spec archive {spec_id} not found for board resume"
+            )
+
+        spec_text = spec_archive.content
+        wd = working_dir or spec_archive.metadata.get("working_dir", str(Path.cwd()))
+
+        if reply_text:
+            spec_text = spec_text + f"\n\n---\n## Clarification Answers\n{reply_text}"
+
+        quota = await self._fetch_quota()
+        routing_config = self._fetch_routing_config()
+        available_agents = await self._build_available_agents(quota, routing_config)
+
+        plans_dir = Path(self.config.task_storage).parent / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = (plans_dir / f"plan_{spec_id}.json").resolve()
+
+        prompt = self._build_plan_prompt(
+            spec=spec_text,
+            plan_path=str(plan_path),
+            available_agents=available_agents,
+            quota=quota,
+            quick=quick,
+        )
+
+        log_dir = Path(self.config.log_dir)
+        trace_file = str(log_dir / f"plan_{spec_id}.trace.jsonl")
+        decompose_result = await self._decompose(
+            prompt, wd, spec_id=spec_id,
+            stream_callback=None, plan_path=str(plan_path),
+        )
+        if Path(trace_file).exists():
+            decompose_result = TaskResult(
+                success=decompose_result.success,
+                output=Path(trace_file).read_text(errors="replace"),
+                duration_ms=decompose_result.duration_ms,
+                agent=decompose_result.agent,
+                error=decompose_result.error,
+            )
+
+        if not plan_path.exists():
+            raise RuntimeError(
+                f"Planning agent did not write plan to {plan_path}. "
+                f"Check the agent output for errors."
+            )
+        sub_tasks = self._parse_json_array(plan_path.read_text())
+
+        tasks = await self._create_tasks_from_plan(
+            sub_tasks, spec_id, quota, routing_config,
+            skip_reflection=skip_reflection,
+        )
+
+        if decompose_result is not None:
+            self._record_planning_trace(spec_id, decompose_result, prompt)
+
+        self._mark_planning_complete(spec_id)
+
+        if board_spec_pk is not None:
+            backend = getattr(self, "_spec_backend", None)
+            if backend:
+                backend.update_spec_metadata_by_pk(
+                    board_spec_pk,
+                    {"board_plan_status": "complete"},
+                )
+
+        self._log.info(
+            "Board plan resume completed: spec_id=%s, task_count=%d",
+            spec_id, len(tasks),
+        )
+        self.logger.log(
+            action="plan_completed",
+            metadata={"spec_id": spec_id, "task_count": len(tasks)},
+        )
+        return spec_id, tasks
+
     def _record_planning_trace(
         self,
         spec_id: str,
@@ -890,6 +1107,7 @@ class Orchestrator:
                 model=model,
                 effective_input=effective_input[:5000],
                 success=result.success,
+                token_usage=result.metadata.get("usage") or None,
             )
         except Exception:
             self._log.warning(
@@ -955,6 +1173,61 @@ class Orchestrator:
         except Exception:
             self._log.debug(
                 "[task:%s] could not record warm_start_docs metadata", task_id, exc_info=True,
+            )
+
+    def _post_run_start(
+        self, task_id: str, agent: Optional[str], model: Optional[str],
+        effective_input: str,
+    ) -> None:
+        """Post the run-start line + the full effective input as a machine comment.
+
+        Replaces the old single 8KB "Effective input" dump that buried the
+        comment stream on retried tasks (five identical copies on a task
+        retried five times). Two pieces, both best-effort:
+
+        * a one-line, human-readable run-start event —
+          "Run started · <agent>/<model> · attempt N · full input attached"
+          (under ~200 chars). The attempt number counts prior run-start
+          lines, so it re-posts each attempt and stays out of the way.
+        * the full effective input as a machine comment
+          (``debug:effective_input``), tucked behind the UI's machine toggle
+          exactly like an execution trace. Suppressed when byte-identical to
+          the last dump, so a retry that didn't change the prompt adds no
+          second copy. Nothing is dropped — the input stays reachable.
+        """
+        try:
+            existing = self.task_mgr.get_comments(task_id) or []
+        except Exception:
+            self._log.debug(
+                "[task:%s] run-start: could not read existing comments", task_id, exc_info=True,
+            )
+            existing = []
+
+        attempt = sum(
+            1 for c in existing
+            if str(c.get("content", "")).startswith("Run started")
+        ) + 1
+        who = "/".join(p for p in (agent, model) if p) or "—"
+        self.task_mgr.add_comment(
+            task_id=task_id,
+            author="odin",
+            content=f"Run started · {who} · attempt {attempt} · full input attached",
+        )
+
+        input_body = f"Effective input:\n\n{effective_input}"
+        # The full input — no cap. The one-liner above promises "full input
+        # attached", so the dump delivers it byte-for-byte; the UI hides it
+        # behind the machine toggle (``debug:effective_input``), exactly like
+        # an execution trace. Suppress the byte-identical dump — a retry whose
+        # prompt didn't change gets one copy, not one per attempt. The body
+        # keeps the "Effective input" prefix so reflection + the
+        # comment-stream filter still recognise it as machine output.
+        if not any(c.get("content") == input_body for c in existing):
+            self.task_mgr.add_comment(
+                task_id=task_id,
+                author="odin",
+                content=input_body,
+                attachments=["debug:effective_input"],
             )
 
     def _fetch_routing_config(self) -> Optional[Dict[str, Any]]:
@@ -2318,6 +2591,13 @@ Do not take any further actions after writing the plan."""
         structured block within a token budget.  Replaces the narrower
         ``_build_reflection_context`` + ``_build_self_context`` pair.
 
+        Rework directive: when a NEEDS_WORK / FAIL reflection is present this
+        is a re-dispatch, and the latest reviewer finding LEADS the output
+        under ``## Fix this first — the reviewer's finding`` — bundled with
+        every operator/human comment posted since that reflection and an
+        explicit objective.  The original task brief follows as context (the
+        caller appends it).  Without a reflection the block is plain history.
+
         The summary comment acts as a checkpoint — most comment types are
         only collected post-summary.  Reflections (NEEDS_WORK + FAIL) cross
         the summary boundary because they're always relevant.
@@ -2340,11 +2620,18 @@ Do not take any further actions after writing the plan."""
                 break
 
         # ------ 2. Classify comments into priority buckets ------
-        reflections = []       # NEEDS_WORK + FAIL, all comments (ignore summary boundary)
+        # reflections: (idx, verdict, reviewer, content) — cross summary boundary
+        # human_notes: (idx, is_post_summary, formatted) — whole history, so the
+        #   rework directive can surface operator guidance posted since the last
+        #   attempt regardless of where the summary checkpoint fell.
+        reflections = []
         summary_text = ""      # latest summary content
         summary_label = ""
-        human_notes = []       # non-agent, non-system, post-summary
+        human_notes = []
         qa_pairs = []          # question + reply, post-summary
+        reply_notes = []       # reply, full history — operator guidance posted
+                               #   since the last reflection surfaces here even
+                               #   when the summary checkpoint sits between them.
         proof_items = []       # proof, post-summary
         latest_agent_output = ""  # latest agent status_update, post-summary
 
@@ -2369,7 +2656,7 @@ Do not take any further actions after writing the plan."""
                         _comment_attr(c, "author_label")
                         or _comment_attr(c, "author_email", "reviewer")
                     )
-                    reflections.append(f"[{verdict}] ({reviewer}): {content}")
+                    reflections.append((i, verdict, reviewer, content))
                 continue
 
             # --- Summary: capture latest ---
@@ -2379,13 +2666,6 @@ Do not take any further actions after writing the plan."""
                     _comment_attr(c, "author_label")
                     or _comment_attr(c, "author_email", "AI Summary")
                 )
-                continue
-
-            # --- Everything else: post-summary only ---
-            is_post_summary = (
-                latest_summary_idx is None or i > latest_summary_idx
-            )
-            if not is_post_summary:
                 continue
 
             content = _filter_comment_content(raw_content)
@@ -2402,37 +2682,102 @@ Do not take any further actions after writing the plan."""
                 ):
                     continue
 
+            is_post_summary = (
+                latest_summary_idx is None or i > latest_summary_idx
+            )
+
+            # Q&A, proof, and agent status are post-summary only. Human
+            # notes are the fallback and are collected across the whole
+            # history so the rework directive can surface operator guidance
+            # posted since the last attempt regardless of the summary checkpoint.
             if ctype == "question":
-                qa_pairs.append(f"[QUESTION]: {content}")
+                if is_post_summary:
+                    qa_pairs.append(f"[QUESTION]: {content}")
             elif ctype == "reply":
-                qa_pairs.append(f"[REPLY]: {content}")
+                if is_post_summary:
+                    qa_pairs.append(f"[REPLY]: {content}")
+                # Replies from the operator are fresh steering for whatever
+                # attempt comes next, regardless of where the summary
+                # checkpoint sits. The rework directive surfaces them when
+                # they were posted after the latest reflection (filtered by
+                # index below) and otherwise they stay available for the
+                # Human Notes section.
+                if not email.endswith("@odin.agent") and email != "system@taskit":
+                    label = _comment_attr(c, "author_label") or email
+                    reply_notes.append((i, is_post_summary, f"- [{label}]: {content}"))
             elif ctype == "proof":
-                if not self._is_execution_noise(content):
+                if is_post_summary and not self._is_execution_noise(content):
                     proof_items.append(content)
             elif ctype == "status_update" and email.endswith("@odin.agent"):
-                if not self._is_execution_noise(content):
+                if is_post_summary and not self._is_execution_noise(content):
                     latest_agent_output = content  # keep overwriting; last one wins
             elif not email.endswith("@odin.agent") and email != "system@taskit":
-                # Human note
                 label = _comment_attr(c, "author_label") or email
-                human_notes.append(f"- [{label}]: {content}")
+                human_notes.append((i, is_post_summary, f"- [{label}]: {content}"))
 
         # ------ 3. Build sections in priority order ------
         sections = []
 
+        # The latest reflection marks the end of the last attempt. Operator
+        # comments posted after it are the freshest guidance for this round.
+        latest_refl_idx = reflections[-1][0] if reflections else None
+
         if reflections:
-            sections.append(
-                ("## Previous Review Feedback", "\n\n".join(reflections))
+            ri, rverdict, rreviewer, rcontent = reflections[-1]
+            rework_notes = [
+                note
+                for (idx, _post, note) in human_notes
+                if latest_refl_idx is not None and idx > latest_refl_idx
+            ]
+            # Operator replies posted since the latest reflection are
+            # steering for this round, not just thread history — surface
+            # them alongside status_update operator notes.
+            rework_notes.extend([
+                note
+                for (idx, _post, note) in reply_notes
+                if latest_refl_idx is not None and idx > latest_refl_idx
+            ])
+
+            finding_parts = [f"[{rverdict}] ({rreviewer}):\n{rcontent}"]
+            if rework_notes:
+                finding_parts.append(
+                    "Operator notes since the last attempt:\n"
+                    + "\n".join(rework_notes)
+                )
+            finding_parts.append(
+                "Your objective this round: resolve the finding above. "
+                "Do not re-verify the entire task brief unless the finding "
+                "requires it."
             )
+            sections.append(
+                ("## Fix this first — the reviewer's finding",
+                 "\n\n".join(finding_parts))
+            )
+
+            # Earlier rounds are context, not the active directive.
+            if len(reflections) > 1:
+                earlier = [
+                    f"[{verdict}] ({reviewer}): {content}"
+                    for (_idx, verdict, reviewer, content) in reflections[:-1]
+                ]
+                sections.append(
+                    ("## Earlier review rounds", "\n\n".join(earlier))
+                )
 
         if summary_text:
             sections.append(
                 ("## Task Summary", f"(from {summary_label}):\n{summary_text}")
             )
 
-        if human_notes:
+        # Human notes not already shown in the fix-first block.
+        remaining_notes = [
+            note
+            for (idx, post, note) in human_notes
+            if post and (latest_refl_idx is None or idx <= latest_refl_idx)
+        ]
+        if remaining_notes:
             sections.append(
-                ("## Human Notes", "\n".join(human_notes))
+                ("## Human Notes", "\n".join(remaining_notes))
             )
 
         if qa_pairs:
@@ -5265,14 +5610,11 @@ SUCCESS or FAILED
                 ),
             )
 
-            # Log effective input as debug comment for DAG debugging
+            # Run-start line + full effective input as a machine comment.
+            # The one-liner re-posts each attempt (attempt N in the body);
+            # the full-input dump is deduped so retries don't stack copies.
             if not mock:
-                self.task_mgr.add_comment(
-                    task_id=task_id,
-                    author="odin",
-                    content=f"Effective input (with upstream context):\n\n{wrapped[:8000]}",
-                    attachments=["debug:effective_input"],
-                )
+                self._post_run_start(task_id, agent_name, model, wrapped)
 
             # Build per-task env vars for opencode-type agents so that
             # parallel tasks don't clobber each other's identity in the

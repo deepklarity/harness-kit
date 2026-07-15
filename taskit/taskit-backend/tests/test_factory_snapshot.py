@@ -38,6 +38,9 @@ os.environ.setdefault("FIREBASE_AUTH_ENABLED", "False")
 
 from datetime import timedelta
 
+from unittest.mock import patch
+
+from django.test import override_settings
 from django.utils import timezone
 
 from tasks.models import (
@@ -46,11 +49,16 @@ from tasks.models import (
     MergeMode,
     MergeOutcome,
     MergeTrigger,
+    ReflectionReport,
+    ReflectionStatus,
     TaskRun,
     TaskRunState,
     TaskStatus,
 )
 from tests.base import APITestCase
+from tasks import sandbox_budget
+
+VM = sandbox_budget.DEFAULT_VM_MEM_MIB
 
 
 class FactorySnapshotNotFoundTests(APITestCase):
@@ -347,3 +355,115 @@ class FactorySnapshotStoryTests(APITestCase):
         tldr = story["tldr"]
         for key in ("landed", "hands_free", "incidents", "waiting_on_human"):
             self.assertIn(key, tldr)
+
+
+class FactorySnapshotMemorySharesTests(APITestCase):
+    """Task #353: the factory snapshot gains a `memory_shares` block — the
+    same accounting primitive the dispatcher uses — so the board header and
+    factory strip can render "3 executing + 1 review = 4/4 memory shares"."""
+
+    def setUp(self):
+        super().setUp()
+        self.board = self.make_board()
+
+    def test_memory_shares_present_in_empty_board(self):
+        resp = self.client.get(f"/boards/{self.board.id}/factory/")
+        self.assertEqual(resp.status_code, 200)
+        block = resp.data["memory_shares"]
+        self.assertEqual(block["shares_in_use"], 0)
+        self.assertEqual(block["executing_count"], 0)
+        self.assertEqual(block["reflecting_count"], 0)
+        self.assertEqual(block["holders"], [])
+        # budget_mib is whatever SANDBOX_MEMORY_BUDGET_MIB resolves to in the
+        # test env; the contract is "key is present" rather than a specific
+        # value.
+        self.assertIn("budget_mib", block)
+
+    @override_settings(SANDBOX_MEMORY_BUDGET_MIB=VM * 4)
+    def test_memory_shares_lists_mixed_exec_and_reflection_holders(self):
+        a = self.make_task(
+            self.board, title="Live A", status=TaskStatus.EXECUTING,
+            metadata={"active_execution": {"mem_mib": VM}},
+        )
+        b = self.make_task(
+            self.board, title="Live B", status=TaskStatus.EXECUTING,
+            metadata={"active_execution": {"mem_mib": VM}},
+        )
+        reflected = self.make_task(self.board, title="Reflected",
+                                   status=TaskStatus.REVIEW)
+        ReflectionReport.objects.create(
+            task=reflected, reviewer_agent="claude", reviewer_model="m",
+            status=ReflectionStatus.RUNNING,
+        )
+
+        resp = self.client.get(f"/boards/{self.board.id}/factory/")
+        block = resp.data["memory_shares"]
+
+        self.assertEqual(block["budget_mib"], VM * 4)
+        self.assertEqual(block["shares_in_use"], 3)
+        self.assertEqual(block["executing_count"], 2)
+        self.assertEqual(block["reflecting_count"], 1)
+        self.assertEqual(block["max_shares"], 4)
+
+        exec_holders = [h for h in block["holders"] if h["kind"] == "execution"]
+        refl_holders = [h for h in block["holders"] if h["kind"] == "reflection"]
+        self.assertEqual({h["task_id"] for h in exec_holders}, {a.id, b.id})
+        self.assertEqual(len(refl_holders), 1)
+        self.assertEqual(refl_holders[0]["task_id"], reflected.id)
+
+    def test_memory_shares_includes_other_boards_global_view(self):
+        """Rework round 2: /factory must show the GLOBAL dispatcher
+        memory-holder list — the same accounting the dispatcher itself uses
+        (``compute_reserved_mib`` reads EXECUTING tasks + RUNNING reflections
+        across every board). The reviewer correctly caught that the board-
+        scoped view gave the lie "3/4 running" while the gate was actually
+        held by holders on a different board.
+        """
+        other_board = self.make_board(name="Other")
+        self.make_task(other_board, title="Live elsewhere",
+                       status=TaskStatus.EXECUTING,
+                       metadata={"active_execution": {"mem_mib": VM}})
+        mine = self.make_task(self.board, title="Mine",
+                              status=TaskStatus.EXECUTING,
+                              metadata={"active_execution": {"mem_mib": VM}})
+
+        resp = self.client.get(f"/boards/{self.board.id}/factory/")
+        holders = resp.data["memory_shares"]["holders"]
+        titles = {h["task_title"] for h in holders}
+        # GLOBAL: the factory view surfaces every holder, not just this
+        # board's — otherwise the operator sees a lie when a reflection on
+        # another board is what holds the share.
+        self.assertEqual(titles, {"Mine", "Live elsewhere"})
+        # reserved_mib matches the dispatcher primitive.
+        self.assertEqual(
+            resp.data["memory_shares"]["reserved_mib"],
+            sandbox_budget.compute_reserved_mib(),
+        )
+
+    @override_settings(SANDBOX_MEMORY_BUDGET_MIB=VM)
+    def test_memory_shares_reserved_matches_compute_reserved_mib(self):
+        """The factory snapshot must read from the same primitive the dispatcher
+        uses — no parallel accounting — so the surface and gate can never drift."""
+        self.make_task(self.board, title="T",
+                       status=TaskStatus.EXECUTING,
+                       metadata={"active_execution": {"mem_mib": VM}})
+        resp = self.client.get(f"/boards/{self.board.id}/factory/")
+        block = resp.data["memory_shares"]
+        self.assertEqual(block["reserved_mib"], sandbox_budget.compute_reserved_mib())
+        self.assertEqual(block["budget_mib"] - block["reserved_mib"],
+                         block["budget_mib"] - VM)
+
+    @override_settings(SANDBOX_MEMORY_BUDGET_MIB=0)
+    def test_memory_shares_unbounded_when_no_budget(self):
+        """`memory_share_holders` lists live spawns whether the budget is
+        configured or not — the surface stays honest on hosts where the cap
+        isn't enforced."""
+        with patch.object(sandbox_budget, "_host_ram_mib", return_value=None):
+            self.make_task(self.board, title="Solitary",
+                           status=TaskStatus.EXECUTING,
+                           metadata={"active_execution": {"mem_mib": VM}})
+            resp = self.client.get(f"/boards/{self.board.id}/factory/")
+        block = resp.data["memory_shares"]
+        self.assertIsNone(block["budget_mib"])
+        self.assertEqual(block["shares_in_use"], 1)
+        self.assertEqual(block["max_shares"], 0)

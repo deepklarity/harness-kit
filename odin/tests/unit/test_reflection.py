@@ -634,6 +634,140 @@ class TestStripOdinEnvelopes:
         assert "ODIN-SUMMARY" not in parsed["verdict_summary"]
 
 
+class TestReviewerInfraTruncation:
+    """When the reviewer's output is truncated mid-generation (provider output
+    cap), the verdict may be missing not because the reviewer failed to judge
+    the work, but because it ran out of tokens before emitting the JSON block.
+
+    These outputs are classified as REVIEWER_INFRA — not ERROR — so they don't
+    count against the task's 3 strikes and can be retried with a fresh reviewer.
+
+    Task #346: reflection 360 on task 342 had real reasoning but no JSON verdict
+    because the output was cut off. The report went ERROR and the whole review
+    run's tokens were spent for nothing. Task 159 lost 4 reflections the same way.
+    """
+
+    SUBSTANTIVE_REASONING_NO_JSON = (
+        "I'll analyze this task carefully.\n\n"
+        "The worker implemented the JWT login endpoint in src/auth/login.py. "
+        "Looking at the code, the endpoint correctly validates credentials "
+        "against the user model and issues a JWT token with the right expiry.\n\n"
+        "The proof file at .proof/task-42/proof.md shows the test output:\n"
+        "  $ python manage.py test auth.tests.test_login\n"
+        "  Ran 3 tests in 0.12s\n  OK\n\n"
+        "The build passes:\n"
+        "  $ python manage.py check\n  System check identified no issues.\n\n"
+        "However, I notice the token refresh endpoint is not implemented yet. "
+        "The task description mentions JWT-based login which could imply refresh "
+        "support, but the acceptance criteria only mention the login endpoint. "
+        "The refresh endpoint would be a separate task.\n\n"
+        "Looking at error handling, the endpoint returns 401 for invalid "
+        "credentials and 400 for missing fields. This follows REST conventions.\n\n"
+        "The code quality is good — proper use of serializers, the view is "
+        "well-structured, and tests cover both happy path and error cases. "
+        "The worker also updated the CLAUDE.md with the new endpoint.\n\n"
+        "Overall the work meets the acceptance criteria. The only minor issue "
+        "is that the proof could have included a curl example, but that's "
+    )
+
+    JSON_AT_TOP_TRUNCATED_PROSE = (
+        '```json\n'
+        '{\n'
+        '  "verdict": "PASS",\n'
+        '  "summary": "All acceptance criteria met with clean tests and build.",\n'
+        '  "quality_assessment": "JWT login endpoint implemented correctly.",\n'
+        '  "slop_detection": "None.",\n'
+        '  "improvements": "None.",\n'
+        '  "agent_optimization": "Model tier appropriate.",\n'
+        '  "quota_failure": "None.",\n'
+        '  "fix_list": []\n'
+        '}\n'
+        '```\n\n'
+        '### Quality Assessment\n'
+        'The code is well-structured. The endpoint correctly validates\n'
+    )
+
+    def test_substantive_output_no_json_with_truncation_yields_reviewer_infra(self):
+        """Fixture: real reasoning paragraphs, no JSON fence, finish_reason=length.
+        This is the exact shape of reflection 360 on task 342 — the reviewer
+        wrote its analysis but ran out of tokens before the JSON block."""
+        result = parse_reflection_report(
+            self.SUBSTANTIVE_REASONING_NO_JSON,
+            finish_reason="length",
+        )
+        assert result["verdict"] == "REVIEWER_INFRA"
+
+    def test_json_at_top_with_truncated_prose_parses_normally(self):
+        """Fixture: complete JSON fence at the top, then prose that gets
+        truncated. The parser should extract the verdict from the JSON
+        block — the truncated tail only costs polish, not the verdict."""
+        result = parse_reflection_report(
+            self.JSON_AT_TOP_TRUNCATED_PROSE,
+            finish_reason="length",
+        )
+        assert result["verdict"] == "PASS"
+        assert result["verdict_summary"] == "All acceptance criteria met with clean tests and build."
+
+    def test_substantive_output_no_json_without_truncation_still_errors(self):
+        """Same substantive reasoning, but no finish_reason — the reviewer
+        finished normally but produced no verdict. That's a real reviewer
+        failure (ERROR), not an infra truncation."""
+        result = parse_reflection_report(self.SUBSTANTIVE_REASONING_NO_JSON)
+        assert result["verdict"] == "ERROR"
+
+    def test_empty_output_with_truncation_still_errors(self):
+        """Empty output with finish_reason=length is NOT substantive —
+        the reviewer produced nothing. Still ERROR, not REVIEWER_INFRA."""
+        result = parse_reflection_report("", finish_reason="length")
+        assert result["verdict"] == "ERROR"
+
+    def test_reviewer_infra_summary_includes_finish_reason(self):
+        """The verdict_summary must mention the finish_reason so an operator
+        reading the board sees why the review was classified as infra."""
+        result = parse_reflection_report(
+            self.SUBSTANTIVE_REASONING_NO_JSON,
+            finish_reason="length",
+        )
+        assert "length" in result["verdict_summary"]
+
+    def test_reviewer_infra_summary_preserves_reasoning_head(self):
+        """The truncated reasoning must be salvaged in the verdict_summary
+        so a human reading the thread sees what the reviewer managed to say."""
+        result = parse_reflection_report(
+            self.SUBSTANTIVE_REASONING_NO_JSON,
+            finish_reason="length",
+        )
+        assert "JWT" in result["verdict_summary"] or "JWT" in result.get("raw_output", "")
+
+    def test_bare_keyword_with_truncation_still_reviewer_infra(self):
+        """A bare non-PASS keyword in truncated output should still be
+        REVIEWER_INFRA, not ERROR — the truncation explains the missing
+        structure, so it's infra, not a reviewer failure."""
+        text = "I think this task is NEEDS_WORK because the tests don't"
+        result = parse_reflection_report(text, finish_reason="max_tokens")
+        assert result["verdict"] == "REVIEWER_INFRA"
+
+    def test_other_output_cap_reasons_trigger_reviewer_infra(self):
+        """All _OUTPUT_CAP_REASONS should trigger REVIEWER_INFRA, not just 'length'."""
+        for reason in ("max_tokens", "max-tokens", "max_turns"):
+            result = parse_reflection_report(
+                self.SUBSTANTIVE_REASONING_NO_JSON,
+                finish_reason=reason,
+            )
+            assert result["verdict"] == "REVIEWER_INFRA", (
+                f"finish_reason={reason!r} should yield REVIEWER_INFRA"
+            )
+
+    def test_non_cap_finish_reason_does_not_trigger_reviewer_infra(self):
+        """A finish_reason that is NOT an output cap (e.g. 'stop', 'end_turn')
+        means the reviewer finished normally — no verdict is still ERROR."""
+        result = parse_reflection_report(
+            self.SUBSTANTIVE_REASONING_NO_JSON,
+            finish_reason="end_turn",
+        )
+        assert result["verdict"] == "ERROR"
+
+
 class TestExtractTokenUsage:
     """_extract_token_usage() sums token data from Claude stream-json step_finish events."""
 
@@ -722,10 +856,10 @@ class TestExtractTokenUsage:
 TASK_159_HAIKU_NOISE = (
     "Ignoring 124 permissions.allow entries from .claude/settings.local.json: "
     "this workspace has not been trusted. Run Claude Code interactively here "
-    'once and accept the trust dialog, or set projects["/home/user/work/tmp/'
+    'once and accept the trust dialog, or set projects["/home/operator/work/tmp/'
     'harness-kit-stable/.odin/worktrees/sp_fable_w3/159"].hasTrustDialogAccepted: '
     'true in /root/.claude.json.\n'
-    '{"type":"system","subtype":"init","cwd":"/home/user/work/tmp/harness-kit-'
+    '{"type":"system","subtype":"init","cwd":"/home/operator/work/tmp/harness-kit-'
     'stable/.odin/worktrees/sp_fable_w3/159","session_id":"abc","model":'
     '"claude-haiku-4-5","permissionMode":"bypassPermissions"}\n'
     '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed",'

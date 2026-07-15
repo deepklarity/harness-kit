@@ -112,6 +112,7 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
     const [showContentSearch, setShowContentSearch] = useState(false);
     const [showMetadata, setShowMetadata] = useState(false);
     const [retrying, setRetrying] = useState(false);
+    const [requestingPlan, setRequestingPlan] = useState(false);
     const [terminalVisible, setTerminalVisible] = useState(false);
     const [terminalKey, setTerminalKey] = useState(0);
     const [isCreatingPr, setIsCreatingPr] = useState(false);
@@ -139,6 +140,20 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
             setRetrying(false);
         }
     }, [specId, service]);
+
+    const handleRequestBoardPlan = useCallback(async () => {
+        setRequestingPlan(true);
+        try {
+            await (service as unknown as {
+                requestBoardPlan: (id: string) => Promise<void>;
+            }).requestBoardPlan(specId);
+            refetchSpec();
+        } catch {
+            /* ignore — user can try again */
+        } finally {
+            setRequestingPlan(false);
+        }
+    }, [specId, service, refetchSpec]);
 
     // Sort tasks by id ascending
     const sortedTasks = useMemo(() => {
@@ -269,7 +284,6 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
 
     // Cost data comes from the backend — single source of truth
     const costSummary = spec.costSummary;
-    const mergeSummary = spec.mergeSummary;
 
     const routingConfig = spec.metadata?.model_routing as Array<{ agent: string; model: string }> | undefined;
     const specBranch = spec.metadata?.branch as string | undefined;
@@ -296,6 +310,34 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                     <Link to={`/specs/${specId}/debug${searchParams.get('board') ? `?board=${searchParams.get('board')}` : ''}`} className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 h-8 text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors group">
                         <Bug className="size-3.5 group-hover:text-orange-400 transition-colors" /> Debug Execution
                     </Link>
+                    {(() => {
+                        const boardPlanStatus = (spec?.metadata?.board_plan_status as string) || '';
+                        const showButton = spec && (
+                            (spec.tasks?.length ?? 0) === 0 ||
+                            spec.status === 'planning' ||
+                            boardPlanStatus === 'awaiting_answers' ||
+                            boardPlanStatus === 'requested'
+                        );
+                        if (!showButton) return null;
+                        const awaiting = boardPlanStatus === 'awaiting_answers';
+                        const requested = boardPlanStatus === 'requested' || requestingPlan;
+                        return (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5 text-xs"
+                                onClick={handleRequestBoardPlan}
+                                disabled={awaiting || requested}
+                            >
+                                {(requestingPlan || requested) && !awaiting ? (
+                                    <Loader2 className="size-3.5 animate-spin" />
+                                ) : (
+                                    <Brain className="size-3.5" />
+                                )}
+                                {awaiting ? 'Awaiting Reply' : requestingPlan || requested ? 'Planning…' : 'Plan Spec'}
+                            </Button>
+                        );
+                    })()}
                 {onDeleteSpec && (
                     <AlertDialog>
                         <AlertDialogTrigger asChild>
@@ -515,9 +557,9 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                                     <>, <span className="text-red-400">{spec?.tasks?.filter(t => t.currentStatus === 'FAILED').length} failed</span></>
                                 )}
                             </span>
-                            {costSummary && ((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (mergeSummary?.merge_cost_usd || 0)) > 0 && (
+                            {costSummary && ((costSummary.plan_cost_usd || 0) + (costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (costSummary.merge_cost_usd || 0)) > 0 && (
                                 <span className="text-xs font-mono text-emerald-400">
-                                    {formatCost((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (mergeSummary?.merge_cost_usd || 0))}
+                                    {formatCost((costSummary.plan_cost_usd || 0) + (costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (costSummary.merge_cost_usd || 0))}
                                 </span>
                             )}
                         </div>
@@ -653,6 +695,12 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                     </CardHeader>
                     <CardContent className="space-y-1.5">
                         <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Plan</span>
+                            <span className="font-mono font-semibold text-sky-400">
+                                {formatCost(costSummary?.plan_cost_usd ?? null)}
+                            </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Build</span>
                             <span className="font-mono font-semibold text-emerald-400">
                                 {formatCost(costSummary?.total_cost_usd ?? null)}
@@ -667,14 +715,14 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Merge</span>
                             <span className="font-mono font-semibold text-amber-400">
-                                {formatCost(mergeSummary?.merge_cost_usd ?? null)}
+                                {formatCost(costSummary?.merge_cost_usd ?? null)}
                             </span>
                         </div>
-                        {costSummary && ((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (mergeSummary?.merge_cost_usd || 0)) > 0 && (
+                        {costSummary && ((costSummary.plan_cost_usd || 0) + (costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (costSummary.merge_cost_usd || 0)) > 0 && (
                             <div className="flex items-center justify-between text-xs border-t border-border/50 pt-1.5">
                                 <span className="text-muted-foreground font-semibold">Total</span>
                                 <span className="font-mono font-semibold text-foreground">
-                                    {formatCost((costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (mergeSummary?.merge_cost_usd || 0))}
+                                    {formatCost((costSummary.plan_cost_usd || 0) + (costSummary.total_cost_usd || 0) + (costSummary.reflection_cost_usd || 0) + (costSummary.merge_cost_usd || 0))}
                                 </span>
                             </div>
                         )}
@@ -722,6 +770,9 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                                     ))}
                             </>
                         )}
+                        <p className="text-[10px] text-muted-foreground/60 pt-1">
+                            Plan/review/merge costs tracked from Jul 2026
+                        </p>
                     </CardContent>
                 </Card>
 

@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from .models import (
     Board, CommentAttachment, CommentType, Label, Notification, NotificationPreference,
-    ReflectionReport, ScheduleKind, ScheduleStatus, Spec, SpecComment, Task,
+    ReflectionReport, ScheduleKind, ScheduleStatus, Spec, SpecComment, SpecCommentAttachment, Task,
     TaskComment, TaskHistory, TaskPriority, TaskSchedule, TaskScheduleRun,
     TaskStatus, User, UserSetting,
 )
@@ -59,10 +59,17 @@ def _time_in_statuses_from_history(obj, status_history):
 def _visible_scheduled_tasks(qs):
     # Mirrors views._exclude_hidden_scheduled_tasks: only future
     # occurrences hide; executed scheduled runs are visible history.
-    return qs.exclude(
+    # Terminal recurring tasks collapse into the schedule's run history
+    # (board hygiene — daily tasks must not drown the board).
+    qs = qs.exclude(
         schedule_id__isnull=False,
         schedule__status__in=[ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED],
         status__in=[TaskStatus.BACKLOG, TaskStatus.TODO],
+    )
+    return qs.exclude(
+        schedule_id__isnull=False,
+        schedule__kind=ScheduleKind.RECURRING,
+        status__in=_FROZEN_STATUSES,
     )
 
 
@@ -136,6 +143,8 @@ class TaskSerializer(serializers.ModelSerializer):
     completed_at = serializers.SerializerMethodField()
     needs_human = serializers.SerializerMethodField()
     needs_human_reason = serializers.SerializerMethodField()
+    failure_suggested_action = serializers.SerializerMethodField()
+    failure_human_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -150,6 +159,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "reference_images",
             "schedule_summary", "completed_at",
             "needs_human", "needs_human_reason",
+            "failure_suggested_action", "failure_human_reason",
         ]
         read_only_fields = ["id", "created_at", "last_updated_at", "kanban_position"]
 
@@ -274,6 +284,38 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def get_needs_human_reason(self, obj):
         return self._needs_human_reason(obj)
+
+    def get_failure_suggested_action(self, obj):
+        """The honest next-step sentence for a FAILED task (task #359).
+
+        Empty string when the task isn't FAILED — the banner doesn't
+        render in the first place, so the field carries no signal. The
+        frontend reads this verbatim, so the language here is the
+        language a human sees.
+        """
+        if obj.status != "FAILED":
+            return ""
+        from .failure_messages import suggested_action_for_metadata
+        return suggested_action_for_metadata(obj.metadata or {})
+
+    def get_failure_human_reason(self, obj):
+        """The plain-English banner sentence for a FAILED task (task #359).
+
+        Composed from ``failure_class`` (preferred) or ``last_failure_type``
+        (fallback) so the banner never reads as log-style key:value noise.
+        Empty string when the task isn't FAILED — same contract as
+        :meth:`get_failure_suggested_action`.
+        """
+        if obj.status != "FAILED":
+            return ""
+        metadata = obj.metadata or {}
+        from .failure_messages import humanize_failure_reason
+        return humanize_failure_reason(
+            metadata.get("last_failure_reason") or "",
+            failure_type=metadata.get("last_failure_type"),
+            failure_class=metadata.get("failure_class"),
+            failure_origin=metadata.get("last_failure_origin"),
+        )
 
 class CreateTaskSerializer(StrictUnknownFieldsMixin, serializers.Serializer):
     board_id = serializers.IntegerField()
@@ -505,12 +547,33 @@ class BoardDetailSerializer(BoardSerializer):
         return TaskSerializer(qs, many=True, context=self.context).data
 
 
+class SpecCommentAttachmentSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SpecCommentAttachment
+        fields = [
+            "id", "url", "original_filename", "content_type",
+            "file_size", "uploaded_by", "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        request = self.context.get("request")
+        if request and obj.file:
+            return request.build_absolute_uri(obj.file.url)
+        return obj.file.url if obj.file else None
+
+
 class SpecCommentSerializer(serializers.ModelSerializer):
+    file_attachments = SpecCommentAttachmentSerializer(many=True, read_only=True)
+
     class Meta:
         model = SpecComment
         fields = [
             "id", "spec_id", "author_email", "author_label",
             "content", "attachments", "comment_type", "created_at",
+            "file_attachments",
         ]
         read_only_fields = ["id", "spec_id", "created_at"]
 
@@ -539,7 +602,7 @@ class SpecSerializer(serializers.ModelSerializer):
 
     def get_cost_summary(self, obj):
         from .pricing import compute_spec_cost_summary
-        return compute_spec_cost_summary(obj.tasks.all())
+        return compute_spec_cost_summary(obj.tasks.all(), spec=obj)
 
     def get_merge_summary(self, obj):
         from .pricing import compute_spec_merge_summary
@@ -565,7 +628,11 @@ class SpecListSerializer(serializers.ModelSerializer):
 
     def get_cost_summary(self, obj):
         from .pricing import compute_spec_cost_summary
-        return compute_spec_cost_summary(obj.tasks.all())
+        return compute_spec_cost_summary(obj.tasks.all(), spec=obj)
+
+    def get_merge_summary(self, obj):
+        from .pricing import compute_spec_merge_summary
+        return compute_spec_merge_summary(obj.tasks.all())
 
     def get_merge_summary(self, obj):
         from .pricing import compute_spec_merge_summary
@@ -612,6 +679,7 @@ class PlanningResultSerializer(serializers.Serializer):
     model = serializers.CharField(allow_blank=True, default="")
     effective_input = serializers.CharField(allow_blank=True, required=False, default="")
     success = serializers.BooleanField()
+    token_usage = serializers.JSONField(required=False, default=dict)
 
 
 class BoardMemberIdsSerializer(serializers.Serializer):
@@ -809,13 +877,16 @@ class SpecDiagnosticSerializer(serializers.ModelSerializer):
 
     def get_cost_summary(self, obj):
         from .pricing import compute_spec_cost_summary
-        return compute_spec_cost_summary(obj.tasks.all())
+        return compute_spec_cost_summary(obj.tasks.all(), spec=obj)
 
     def get_merge_summary(self, obj):
         from .pricing import compute_spec_merge_summary
         return compute_spec_merge_summary(obj.tasks.all())
 
 
+# Derived from agent_models.json (via get_active_agents) rather than
+# hardcoded, so retiring/curating a provider there automatically removes it
+# from valid reflection reviewers here too — no second list to go stale.
 # Derived from agent_models.json (via get_active_agents) rather than
 # hardcoded, so retiring/curating a provider there automatically removes it
 # from valid reflection reviewers here too — no second list to go stale.

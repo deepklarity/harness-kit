@@ -20,9 +20,10 @@ Trace file locations (absolute, written by odin with cwd=working_dir):
 
 from __future__ import annotations
 
+import time as _time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from .execution.utils import resolve_working_dir
 from .models import ReflectionReport, ReflectionStatus, Task, TaskStatus
@@ -32,6 +33,13 @@ SESSION_TYPE_TASK = "task_execution"
 SESSION_TYPE_REFLECTION = "reflection"
 
 _TASK_EXECUTING_STATUSES = {TaskStatus.IN_PROGRESS, TaskStatus.EXECUTING}
+
+# Per-task trace filenames that dispatch must rotate aside before starting a
+# new run (F354). Listed in resolution order so each is independently handled
+# — the rotation must cover both the primary trace AND the .out fallback the
+# session_resolver uses, so neither can poison a fresh retry with the
+# previous attempt's mtime.
+_TASK_TRACE_FILENAMES = ("task_{task_id}.trace.jsonl", "task_{task_id}.out")
 
 
 @dataclass
@@ -63,6 +71,65 @@ def _stat(path: Path) -> tuple[bool, int, Optional[float]]:
         return True, st.st_size, st.st_mtime
     except (FileNotFoundError, NotADirectoryError, PermissionError):
         return False, 0, None
+
+
+def _rotate_leftover_trace_files_for_task(
+    task: Task, *, now_epoch: Optional[float] = None,
+) -> List[Path]:
+    """Move any leftover per-task trace files aside with a timestamp suffix.
+
+    F354: a retry can inherit the previous attempt's
+    ``{working_dir}/.odin/logs/task_<id>.trace.jsonl`` (or its ``.out``
+    fallback). Without rotation the progress scanner
+    (``_reap_stalled_progress_runs``) judges the new run by the previous
+    attempt's mtime and reaps it at birth — the zombie-poisoning class that
+    killed four tasks in a row (#301, #306, #342, #345) before the root
+    cause was traced.
+
+    Called from ``poll_and_executor`` immediately before ``task_runs.start_run``
+    so each attempt starts with a clean slate. The original file is moved
+    (preserving mtime and content for forensics) to a ``.<epoch>.bak``
+    sibling; the resolver then sees no fresh file and points the next exec
+    at the canonical ``task_<id>.trace.jsonl`` path. A traceless run falls
+    back to the lease/heartbeat check, which is the only check that can
+    correctly judge a freshly-started run with no output yet.
+
+    Sweep coverage: the rotation handles the two filenames the resolver
+    actively uses (``task_<id>.trace.jsonl`` and ``task_<id>.out``) plus
+    any stale ``metadata["trace_file"]`` absolute path the previous attempt
+    recorded. Worktree-local ``task_<id>.trace.jsonl`` is left alone — the
+    worktree is recreated at every dispatch and any prior file vanishes with
+    it.
+
+    Returns the list of backup paths created (caller may log them or pass
+    through to ``odin gc``). Errors are swallowed at the caller; this
+    function itself raises only on filesystem faults that the caller's
+    try/except should downgrade to a warning (Bookkeeping Never Kills the
+    Run).
+    """
+    log_dir = _log_dir_for_task(task)
+    if log_dir is None:
+        return []
+    suffix = f".{int(now_epoch if now_epoch is not None else _time.time())}.bak"
+    rotated: List[Path] = []
+    for filename in _TASK_TRACE_FILENAMES:
+        path = log_dir / filename.format(task_id=task.id)
+        if not path.exists():
+            continue
+        backup = path.with_name(path.name + suffix)
+        # If a backup with this suffix already exists (two dispatches in the
+        # same second), append a counter rather than clobbering the prior
+        # backup. Bounded at 10 collisions — beyond that, the original is
+        # already rotated enough.
+        if backup.exists():
+            for n in range(1, 10):
+                candidate = path.with_name(f"{path.name}{suffix}.{n}")
+                if not candidate.exists():
+                    backup = candidate
+                    break
+        path.rename(backup)
+        rotated.append(backup)
+    return rotated
 
 
 def _reflection_trace_path(log_dir: Path, report_id: int) -> Path:

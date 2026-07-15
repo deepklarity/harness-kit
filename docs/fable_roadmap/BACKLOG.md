@@ -7,6 +7,47 @@ description. Finished work gets deleted, git remembers it.
 
 ## Now
 
+- **Merge agent v2 — the next wave opens with this.** Two live failures in
+  one shift: (a) a guided merge resolves per-file with one uniform action,
+  so answering "task side" on one hunk silently wiped a sibling task's 122
+  lines in the same file (caught by the verify gate, repaired by hand);
+  (b) the reply parser rejected three reasonable answers including its own
+  example phrase. Compose-or-park per hunk, and a parser that accepts
+  prose. Bucket: [trust](buckets/trust.md).
+
+- **Second instance on the Linux box.** A setup task, not a decision. The
+  sleep pain proved the single-laptop cost again; the reap fix removes the
+  killing, not the freezing. Bucket: [runs-anywhere](buckets/runs-anywhere.md).
+
+- **Gitleaks as a skill and a preset.** Before tonight's public push, an
+  independent gitleaks sweep of the full history caught a credential
+  pattern every hand-rolled grep missed (it turned out to be Google's
+  public Gemini CLI client, but the point stands: the tool sees what
+  patterns don't). Wrap it twice: an hk- skill for operator sessions
+  (scan history before any public push — make it a named step of the
+  release checklist) and a board preset so agents can run it on any
+  repo the kit works on. Bucket: [audits](buckets/audits.md).
+
+- **Proof failures must be loud, and the tool must not lie.** A user's
+  agent spent 14 minutes probing because (a) a failed screenshot upload is
+  swallowed into a return-value footnote instead of a board comment, and
+  (b) the taskit_add_comment description implies file_paths get uploaded
+  when they are stored as metadata only (the host uploads .proof files at
+  reflection). Fix both: failed uploads post a visible warning comment;
+  the tool text says exactly what each parameter does. Also: planning dies
+  at routing when the planner invents capability labels no agent declares
+  ("No viable route", caps like html/file_writing) — unknown labels must
+  warn and be ignored, not fail the plan (two user reports, diagnosis in
+  orchestrator.py:3928). Bucket: [trust](buckets/trust.md).
+
+- **Spec-branch initialization must not race.** When two tasks of a fresh
+  spec dispatch together, worktree creation races and one fails
+  missing_worktree — four times in one day, every requeue succeeded. Fix at
+  the cause: the executor serializes (or lock-retries) the first worktree
+  creation per spec instead of failing the loser. Until then the runbook
+  staggers the first dispatch of a new spec. Bucket:
+  [trust](buckets/trust.md).
+
 - **Quickstart follow-ups.** The Quickstart shipped (docs/Quickstart.md +
   docs/adoption/CHECKLIST.md) and works — live-tested on an outside
   workspace. What's left from that run: handle multi-repo workspaces,

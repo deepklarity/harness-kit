@@ -145,6 +145,12 @@ export interface Task {
     }>;
     needsHuman?: boolean;
     needsHumanReason?: string;
+    // Task #359 — the failure banner must always describe the failure
+    // that parked the task, with an honest one-line next step. The
+    // serializer composes both from the failure_class + reason; the
+    // banner renders them verbatim, no recomputation on the client.
+    failureSuggestedAction?: string;
+    failureHumanReason?: string;
     // Memory: closest finished twins + quote (exposed on the detail API).
     twins?: TaskTwin[];
     estimate?: TaskEstimate | null;
@@ -249,8 +255,10 @@ export interface Board {
 }
 
 export interface SpecCostSummary {
+    plan_cost_usd: number;
     total_cost_usd: number;
     reflection_cost_usd: number;
+    merge_cost_usd: number;
     cost_by_model: Record<string, number>;
     total_tokens: number;
     total_input_tokens: number;
@@ -572,10 +580,40 @@ export interface TaskIdeOptions {
 
 // ─── Executor / Sandbox Capacity Types ─────────────────────
 
+export interface MemoryShareHolder {
+    task_id: string;
+    task_title: string;
+    kind: 'execution' | 'reflection';
+    mem_mib: number;
+    report_id?: number;
+}
+
+export interface MemorySharesBlock {
+    budget_mib: number | null;
+    reserved_mib: number;
+    default_vm_mem_mib: number;
+    max_shares: number;
+    executing_count: number;
+    reflecting_count: number;
+    shares_in_use: number;
+    holders: MemoryShareHolder[];
+}
+
 export interface ExecutorCapacity {
     running: number;
     max: number;
     suggested_max: number;
+    // Task #353: split the running count by VM kind and surface the
+    // holders so the badge can render "3+1/4" with a tooltip naming each
+    // share-holder — same accounting the dispatcher uses, no parallel
+    // surface.
+    executing?: number;
+    reflecting?: number;
+    shares_in_use?: number;
+    memory_budget_mib?: number | null;
+    memory_reserved_mib?: number;
+    memory_max_shares?: number;
+    memory_share_holders?: MemoryShareHolder[];
 }
 
 export interface ExecutorMaxConcurrency {
@@ -772,6 +810,7 @@ export interface FactorySnapshot {
     board_name: string;
     running: FactoryRunningTask[];
     queues: FactoryQueues;
+    memory_shares?: MemorySharesBlock;
     recent_merges: FactoryMergeAttempt[];
     open_errors: FactoryOpenError[];
     story: FactoryStory;
@@ -848,6 +887,8 @@ export interface AnalyticsSummaryKPIs {
     task_count: number;
     avg_cost_per_task: number;
     reflection_cost: number;
+    plan_cost: number;
+    merge_cost: number;
 }
 
 export interface AnalyticsTimeSeries {
@@ -977,6 +1018,55 @@ export interface AnalyticsReviewHealth {
     by_verdict: AnalyticsVerdictBucket[];
 }
 
+export interface AnalyticsFunnelBucket {
+    bucket: 'pass' | 'rework' | 'fail' | 'in_flight';
+    count: number;
+    pct: number;
+}
+
+export interface AnalyticsThroughputFunnel {
+    total: number;
+    buckets: AnalyticsFunnelBucket[];
+}
+
+export interface AnalyticsLeagueSection {
+    rows: LeagueRow[];
+    meta: {
+        task_count: number;
+        board_id: number | null;
+        since_spec: string | null;
+        aggregate: boolean;
+    };
+}
+
+export interface AnalyticsPerSpecRow {
+    odin_id: string;
+    title: string;
+    board_id: number | null;
+    board_name: string | null;
+    task_count: number;
+    done_count: number;
+    failed_count: number;
+    in_flight_count: number;
+    total_cost_usd: number;
+    total_tokens: number;
+    created_at: string | null;
+}
+
+export interface AnalyticsScheduledTaskRow {
+    id: number;
+    template_title: string;
+    template_kind: string;
+    status: string;
+    board_id: number | null;
+    board_name: string | null;
+    run_count: number;
+    success_count: number;
+    failure_count: number;
+    next_run_at_utc: string | null;
+    created_at: string | null;
+}
+
 export interface AnalyticsCostSummary {
     summary_kpis: AnalyticsSummaryKPIs;
     time_series: AnalyticsTimeSeries[];
@@ -992,6 +1082,10 @@ export interface AnalyticsCostSummary {
     per_agent_rollup: AnalyticsPerAgentRollup[];
     merge_health: AnalyticsMergeHealth;
     review_health: AnalyticsReviewHealth;
+    throughput_funnel: AnalyticsThroughputFunnel;
+    league: AnalyticsLeagueSection;
+    per_spec: AnalyticsPerSpecRow[];
+    scheduled_tasks: AnalyticsScheduledTaskRow[];
     meta: { task_count: number; granularity: string };
 }
 
@@ -1005,6 +1099,8 @@ export interface ProviderQuota {
     unit: string;
     reset_date: string | null;
     state: string | null;
+    error: string | null;
+    last_fetched: string | null;
     raw: Record<string, unknown> | null;
 }
 
@@ -1073,6 +1169,9 @@ export interface LeagueRow {
     duration_ms_median: number;
     merge_conflicts_caused: number;
     cost_usd_total: number;
+    reflection_count: number;
+    reflection_cost_usd_total: number;
+    avg_reflection_cost_usd: number;
 }
 
 export interface LeagueResponse {

@@ -44,6 +44,15 @@ class LeagueRow:
       duration_ms_median    median of per-task last_duration_ms
       merge_conflicts_caused sum of tasks with any conflict MergeAttempt
       cost_usd_total        sum of per-task estimated costs (USD)
+      reflection_count      COMPLETED reflections where reviewer_agent
+                            == agent and reviewer_model == model
+                            (the operator's "redo/reflection cost"
+                            column — what each reviewer actually costs)
+      reflection_cost_usd_total
+                            sum of those reflections' estimated USD cost
+      avg_reflection_cost_usd
+                            reflection_cost_usd_total / reflection_count,
+                            or 0.0 when no reflections
     """
 
     agent: str
@@ -56,6 +65,9 @@ class LeagueRow:
     duration_ms_median: float
     merge_conflicts_caused: int
     cost_usd_total: float
+    reflection_count: int = 0
+    reflection_cost_usd_total: float = 0.0
+    avg_reflection_cost_usd: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -69,6 +81,9 @@ class LeagueRow:
             "duration_ms_median": self.duration_ms_median,
             "merge_conflicts_caused": self.merge_conflicts_caused,
             "cost_usd_total": self.cost_usd_total,
+            "reflection_count": self.reflection_count,
+            "reflection_cost_usd_total": self.reflection_cost_usd_total,
+            "avg_reflection_cost_usd": self.avg_reflection_cost_usd,
         }
 
 
@@ -78,9 +93,11 @@ class LeagueRow:
 def aggregate_league_rows(rows: list[dict]) -> List[LeagueRow]:
     """Group per-task dict rows by (agent, model) into LeagueRow.
 
-    Each input row carries the 10 LeagueRow fields for one task
-    snapshot (typically tasks_landed=1). Sums/means/medians are applied
-    per the field's semantics (see LeagueRow docstring).
+    Each input row carries the LeagueRow fields for one task
+    snapshot (typically tasks_landed=1), plus per-row
+    reflection_count + reflection_cost_usd_total when the caller
+    attached them. Sums/means/medians are applied per the field's
+    semantics (see LeagueRow docstring).
     """
     if not rows:
         return []
@@ -110,6 +127,16 @@ def aggregate_league_rows(rows: list[dict]) -> List[LeagueRow]:
             int(r["merge_conflicts_caused"]) for r in items
         )
         cost_usd_total = sum(float(r["cost_usd_total"]) for r in items)
+        reflection_count = sum(int(r.get("reflection_count", 0) or 0) for r in items)
+        reflection_cost_usd_total = sum(
+            float(r.get("reflection_cost_usd_total", 0.0) or 0.0)
+            for r in items
+        )
+        avg_reflection_cost_usd = (
+            reflection_cost_usd_total / reflection_count
+            if reflection_count
+            else 0.0
+        )
 
         out.append(LeagueRow(
             agent=agent,
@@ -122,6 +149,9 @@ def aggregate_league_rows(rows: list[dict]) -> List[LeagueRow]:
             duration_ms_median=duration_ms_median,
             merge_conflicts_caused=merge_conflicts_caused,
             cost_usd_total=cost_usd_total,
+            reflection_count=reflection_count,
+            reflection_cost_usd_total=reflection_cost_usd_total,
+            avg_reflection_cost_usd=avg_reflection_cost_usd,
         ))
 
     out.sort(key=lambda r: (-r.tasks_landed, r.agent, r.model))
@@ -213,19 +243,24 @@ def _cost_for_task(model: str, usage: dict) -> float:
 
 
 def compute_league_for_board(
-    board,
+    board=None,
     *,
     since_spec: Optional[str] = None,
 ) -> List[LeagueRow]:
-    """Compute per-(agent, model) league rows for one board.
+    """Compute per-(agent, model) league rows.
 
     Reads Task rows where status is in ``LANDED_STATUSES``
-    (DONE ∪ TESTING). When ``since_spec`` is provided, only tasks
-    whose spec was created at or after the named spec are included
-    (wave-comparable windows — operators name newer waves with
-    reverse-alphabetic prefixes so the same lookup also filters by
-    spec name). If ``since_spec`` does not match any spec on the
-    board, the function returns an empty list.
+    (DONE ∪ TESTING). When ``board`` is None, the function aggregates
+    across every board in the database — the All-Boards view on the
+    stats page needs this rollup. When ``board`` is set, only that
+    board's tasks are considered (the per-board view).
+
+    When ``since_spec`` is provided, only tasks whose spec was created
+    at or after the named spec are included (wave-comparable windows
+    — operators name newer waves with reverse-alphabetic prefixes so
+    the same lookup also filters by spec name). If ``since_spec``
+    does not match any spec on the relevant scope, the function
+    returns an empty list.
 
     For each task:
       * agent    = ``assignee.name`` (else ``"unknown"``)
@@ -241,16 +276,37 @@ def compute_league_for_board(
                           outcome="conflict"
       * cost     = ``estimate_task_cost(model, in, out)``; 0 when None
 
+    Reflection-cost aggregation (W12.4 operator scope addition):
+      For each per-task row above the function attaches a count and
+      total USD cost taken from COMPLETED ``ReflectionReport`` rows
+      whose ``reviewer_agent`` and ``reviewer_model`` match this
+      row's agent+model — i.e. the row carries the avg cost of
+      reflections where this provider was the reviewer (not the
+      executor). ``aggregate_league_rows`` then sums/averages per
+      (agent, model) bucket.
+
     Rows are sorted by (tasks_landed desc, agent asc, model asc).
     """
-    from .models import MergeAttempt, MergeOutcome, Spec, Task, TaskHistory
+    from .models import (
+        MergeAttempt,
+        MergeOutcome,
+        ReflectionReport,
+        ReflectionStatus,
+        Spec,
+        Task,
+        TaskHistory,
+    )
     from .execution_processing import compute_usage_from_trace
+    from .pricing import estimate_task_cost
 
-    qs = Task.objects.filter(board=board, status__in=LANDED_STATUSES)
+    qs = Task.objects.filter(status__in=LANDED_STATUSES)
+    if board is not None:
+        qs = qs.filter(board=board)
     if since_spec:
-        cutoff = Spec.objects.filter(
-            board=board, odin_id=since_spec,
-        ).order_by("created_at").first()
+        spec_qs = Spec.objects.filter(odin_id=since_spec)
+        if board is not None:
+            spec_qs = spec_qs.filter(board=board)
+        cutoff = spec_qs.order_by("created_at").first()
         if cutoff is None:
             return []
         qs = qs.filter(spec__created_at__gte=cutoff.created_at)
@@ -274,6 +330,39 @@ def compute_league_for_board(
             ).values_list("task_id", flat=True)
         )
 
+    # Per-task map of (reviewer_agent, reviewer_model) → list of USD
+    # costs for COMPLETED reflections on that task. We need this scope
+    # bucketed by task (not by global pair) because each per-task row
+    # only counts the reflections that ran on THAT task — counting
+    # globally would double-count when several tasks share a reviewer.
+    reflection_costs_by_task: Dict[int, Dict[tuple, list[float]]] = defaultdict(
+        lambda: defaultdict(list),
+    )
+    if task_ids:
+        reflection_pairs = (
+            ReflectionReport.objects
+            .filter(
+                task_id__in=task_ids,
+                status=ReflectionStatus.COMPLETED,
+            )
+            .values("task_id", "reviewer_agent", "reviewer_model", "token_usage")
+        )
+        for entry in reflection_pairs:
+            t_id = entry.get("task_id")
+            pair = (
+                (entry.get("reviewer_agent") or "").strip() or "unknown",
+                (entry.get("reviewer_model") or "").strip() or "unknown",
+            )
+            usage = entry.get("token_usage") or {}
+            if not isinstance(usage, dict):
+                usage = {}
+            in_t = int(usage.get("input_tokens") or 0)
+            out_t = int(usage.get("output_tokens") or 0)
+            cost = estimate_task_cost(pair[1], in_t, out_t)
+            if cost is None:
+                cost = 0.0
+            reflection_costs_by_task[t_id][pair].append(float(cost))
+
     rows: list[dict] = []
     for task in tasks:
         agent = _resolve_agent(task)
@@ -295,6 +384,13 @@ def compute_league_for_board(
         merge_conflict = task.id in conflict_task_ids
         cost = _cost_for_task(model, usage)
 
+        # Reflection costs are attached per REVIEWER pair in a second
+        # pass below — attaching them here only when the reviewer pair
+        # equals this task's executor pair dropped every review a
+        # provider did on someone else's task.
+        refl_count = 0
+        refl_total = 0.0
+
         rows.append({
             "agent": agent,
             "model": model,
@@ -306,6 +402,40 @@ def compute_league_for_board(
             "duration_ms_median": float(duration_ms),
             "merge_conflicts_caused": 1 if merge_conflict else 0,
             "cost_usd_total": cost,
+            "reflection_count": refl_count,
+            "reflection_cost_usd_total": refl_total,
         })
 
-    return aggregate_league_rows(rows)
+    aggregated = aggregate_league_rows(rows)
+
+    # Second pass: reviewer-keyed reflection costs. Sum every COMPLETED
+    # reflection in scope by its (reviewer_agent, reviewer_model) pair,
+    # regardless of which executor's task was reviewed, and attach to the
+    # matching league row — creating a review-only row when that provider
+    # executed nothing in the window.
+    reviewer_totals: Dict[tuple, list[float]] = defaultdict(list)
+    for per_pair in reflection_costs_by_task.values():
+        for pair, costs in per_pair.items():
+            reviewer_totals[pair].extend(costs)
+
+    from dataclasses import replace as _dc_replace
+    by_pair = {(r.agent, r.model): r for r in aggregated}
+    for pair, costs in reviewer_totals.items():
+        base = by_pair.get(pair) or LeagueRow(
+            agent=pair[0], model=pair[1], tasks_landed=0,
+            hands_free_count=0, hands_free_pct=0.0,
+            redo_rounds_avg=0.0, tokens_median=0.0,
+            duration_ms_median=0.0, merge_conflicts_caused=0,
+            cost_usd_total=0.0,
+        )
+        by_pair[pair] = _dc_replace(
+            base,
+            reflection_count=len(costs),
+            reflection_cost_usd_total=round(sum(costs), 6),
+            avg_reflection_cost_usd=round(sum(costs) / len(costs), 6) if costs else 0.0,
+        )
+    # Preserve aggregate ordering; append review-only providers at the end.
+    ordered = [by_pair[(r.agent, r.model)] for r in aggregated]
+    seen = {(r.agent, r.model) for r in aggregated}
+    ordered += [r for p2, r in by_pair.items() if p2 not in seen]
+    return ordered

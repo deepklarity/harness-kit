@@ -13,18 +13,19 @@ it becomes real work, and every task created from a bucket carries that
 bucket's WHY in its description. Scores live in this table and nowhere
 else; they move only with evidence, at audits.
 
-**Overall: 5.2/10** (plain average of the eleven scored categories;
-Autonomy joins at its first audit and is not yet in the average).
+**Overall: 5.0/10** (plain average of the eleven scored categories; the
+dip from 5.2 is Autonomy joining at its honest first score, not
+regression — see audits/2026-07-15-taskpage-wave12-close.md).
 
 | Category | Score | One line |
 |---|---|---|
-| [Trust](buckets/trust.md) | 7/10 | The kit must not lie or panic |
-| Autonomy | – | First score at the next audit (hands-free counter) |
+| [Trust](buckets/trust.md) | 6/10 | Honest classes and evidence, but the merge agent spliced files silently once this period |
+| Autonomy | 3/10 | Loop self-runs; requeues, escalations and merge replies were all human (hand-counted) |
 | [Memory](buckets/memory.md) | 6/10 | Ledger answers repeats; recall still not in briefs |
 | [Routing and cost](buckets/routing-and-cost.md) | 7/10 | One policy table, editable; unproven at scale |
 | [Getting oriented](buckets/getting-oriented.md) | 6/10 | Projects carry notes; the kit itself still starts cold |
 | [Watching](buckets/watching.md) | 6/10 | Failures show up in the product; one health page still missing |
-| [The human's seat](buckets/humans-seat.md) | 6/10 | Spec gate landed; deciding still means digging sometimes |
+| [The human's seat](buckets/humans-seat.md) | 7/10 | One board reply resumes a parked merge; planning asks on the board; parser friction remains |
 | [Project powers](buckets/project-powers.md) | 5/10 | One external product shipped end to end |
 | [Audits](buckets/audits.md) | 4/10 | Health checks are hand-rolled, presets sit unused |
 | [Getting started](buckets/getting-started-ease.md) | 3/10 | Quickstart shipped and proven once; strangers still unproven at scale |

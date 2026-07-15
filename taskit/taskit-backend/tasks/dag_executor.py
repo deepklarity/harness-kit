@@ -103,18 +103,48 @@ class AgentNotEnabledOnBoard(Exception):
         )
 
 
-def _set_dispatch_blocked_reason(task, reason):
+def _set_dispatch_blocked_reason(task, reason, *, blocked_by=None):
     """Persist `dispatch_blocked_reason` on a task and log it (loud skip).
 
-    Idempotent: skips the DB round-trip if the reason is already correct.
-    Used to surface the dispatch gate's decision on the task's metadata
-    payload that the UI / spec tracing tools consume.
+    Idempotent: skips the DB round-trip if the reason is already correct
+    AND no holder list needs refreshing. Used to surface the dispatch
+    gate's decision on the task's metadata payload that the UI / spec
+    tracing tools consume.
+
+    ``blocked_by`` (optional): a list of share-holder entries (see
+    ``sandbox_budget.memory_share_holders``) naming the tasks currently
+    holding the memory shares the gate is waiting on. Stored under
+    ``metadata.dispatch_blocked_blocked_by`` so the dispatch-blocked banner
+    can render "held by task 344, reflection on 346" instead of the bare
+    code. On a same-reason re-stamp the holder list is refreshed — shares
+    can have moved (one VM released, a reflection finished, a new task
+    became the blocker) and the banner must reflect who is actually
+    holding the shares right now, not the snapshot from the last poll.
     """
     metadata = dict(task.metadata or {})
-    if metadata.get("dispatch_blocked_reason") == reason:
+    same_reason = metadata.get("dispatch_blocked_reason") == reason
+    if same_reason:
+        if blocked_by:
+            existing = metadata.get("dispatch_blocked_blocked_by") or []
+            if existing != list(blocked_by):
+                # Holder set drifted since the last stamp — refresh the
+                # persisted list so the banner stops advertising stale
+                # names. Touch dispatch_blocked_at too so operators can
+                # see when the banner last updated.
+                metadata["dispatch_blocked_blocked_by"] = list(blocked_by)
+                metadata["dispatch_blocked_at"] = timezone.now().isoformat()
+                Task.objects.filter(id=task.id).update(metadata=metadata)
+                task.metadata = metadata
         return
     metadata["dispatch_blocked_reason"] = reason
     metadata["dispatch_blocked_at"] = timezone.now().isoformat()
+    if blocked_by:
+        metadata["dispatch_blocked_blocked_by"] = list(blocked_by)
+    elif "dispatch_blocked_blocked_by" in metadata:
+        # Drop a stale holder list when the stamp is being renewed for a
+        # different reason — keeping it would advertise holders that are
+        # no longer what blocked this task.
+        metadata.pop("dispatch_blocked_blocked_by", None)
     Task.objects.filter(id=task.id).update(metadata=metadata)
     task.metadata = metadata
 
@@ -126,12 +156,23 @@ def _clear_dispatch_blocked_reason(task, *, persist=False):
     other code wants to reset the visible signal. When `persist` is False
     the change is only applied to the in-memory instance, so the caller
     controls the save.
+
+    Always drops the companion ``dispatch_blocked_blocked_by`` stamp too —
+    the operator-visible "held by task X, reflection on Y" list is part of
+    the same banner and must not survive a requeue.
     """
     metadata = dict(task.metadata or {})
-    if "dispatch_blocked_reason" not in metadata and "dispatch_blocked_at" not in metadata:
+    has_any = any(
+        k in metadata for k in (
+            "dispatch_blocked_reason", "dispatch_blocked_at",
+            "dispatch_blocked_blocked_by",
+        )
+    )
+    if not has_any:
         return
     metadata.pop("dispatch_blocked_reason", None)
     metadata.pop("dispatch_blocked_at", None)
+    metadata.pop("dispatch_blocked_blocked_by", None)
     if persist:
         Task.objects.filter(id=task.id).update(metadata=metadata)
     task.metadata = metadata
@@ -393,9 +434,16 @@ def poll_and_execute():
         # waits in line (stamped + skipped) instead of booting into swap.
         # ``continue`` (not ``break``) so a later, differently-sized spawn
         # could still fit — uniform VM size today, but the gate stays correct
-        # if per-task sizes are introduced.
+        # if per-task sizes are introduced. The stamp also carries the
+        # current holder list so the dispatch-blocked banner can name each
+        # share-holder (task #353) instead of the bare "memory budget full".
         if budget_remaining is not None and vm_mem > budget_remaining:
-            _set_dispatch_blocked_reason(task, "memory_budget_full")
+            from .sandbox_budget import memory_share_holders
+            _set_dispatch_blocked_reason(
+                task,
+                "memory_budget_full",
+                blocked_by=memory_share_holders(),
+            )
             logger.info(
                 "[task:%s] Poll skip: memory budget full "
                 "(need %dMiB, %dMiB remaining of %dMiB)",
@@ -528,6 +576,25 @@ def poll_and_execute():
             locked_task.status = TaskStatus.EXECUTING
             locked_task.metadata = metadata
             locked_task.save(update_fields=["status", "metadata", "last_updated_at"])
+            # F354: rotate any leftover per-task trace files aside BEFORE the
+            # new run starts so the progress scanner can't be poisoned by the
+            # previous attempt's mtime. Bookkeeping Never Kills the Run — a
+            # rotation failure logs a warning and lets the run proceed (the
+            # age-vs-run-start guard in _run_progress_mtime catches the
+            # poisoned file defensively).
+            try:
+                from .session_resolver import _rotate_leftover_trace_files_for_task
+                rotated = _rotate_leftover_trace_files_for_task(locked_task)
+                if rotated:
+                    logger.info(
+                        "[task:%s] Rotated %d leftover trace file(s) before run: %s",
+                        locked_task.id, len(rotated), [p.name for p in rotated],
+                    )
+            except Exception:
+                logger.exception(
+                    "[task:%s] Leftover-trace rotation failed; continuing dispatch",
+                    locked_task.id,
+                )
             task_runs.start_run(locked_task, run_token)
 
             TaskHistory.objects.create(
@@ -630,6 +697,25 @@ def execute_single_task(task_id, run_token=None):
     if task.status != TaskStatus.EXECUTING:
         _append_summary(log_file, task, exit_code)
         logger.info("Task %s status already changed to %s by odin", task_id, task.status)
+        return
+
+    # Supersession fence (the requeue double-post): odin may have recorded
+    # this run's result AND the failure policy requeued under a brand-new run
+    # while this subprocess was finishing. The task is EXECUTING again, but
+    # under a different run_token — this wrapper must not re-post run A's
+    # failure burst (the requeue already owns the task). Only post for the
+    # run this wrapper was dispatched for.
+    current_run = task_runs.current_running_run(task)
+    if (
+        run_token
+        and current_run is not None
+        and current_run.run_token != run_token
+    ):
+        _append_summary(log_file, task, exit_code)
+        logger.info(
+            "Task %s run superseded (this=%s current=%s) — wrapper skips post",
+            task_id, run_token, current_run.run_token,
+        )
         return
 
     # Check for a user-requested stop that landed in metadata before the
@@ -1088,6 +1174,15 @@ def _run_progress_mtime(run):
     heartbeat-only lease check. Reuses ``session_resolver``'s path resolution
     (metadata["trace_file"] -> board-root logs -> worktree logs) so the
     definition of "the trace" stays in one place.
+
+    Age-vs-run-start guard (F354): the per-task trace file is shared across
+    retries (the path is keyed to ``task_<id>``, not the attempt). A fresh
+    retry that hasn't written yet is judged by the previous attempt's mtime
+    and reaped at birth. Ignore any mtime older than ``run.started_at`` —
+    that file belongs to a previous attempt, and the run falls back to the
+    lease/heartbeat check (which is the only check that can correctly judge
+    a freshly-started run with no output yet). Returns None so the caller
+    treats the run as "no trace yet" instead of "stale trace".
     """
     task = run.task
     try:
@@ -1101,6 +1196,23 @@ def _run_progress_mtime(run):
     path = _task_trace_path(task, log_dir, task.id)
     exists, _size, mtime = _stat(path)
     if not exists or mtime is None:
+        return None
+    # Age-vs-run-start guard: mtime older than the run's started_at (minus a
+    # small grace for the dispatch→first-write gap, see below) is a leftover
+    # from a previous attempt (dispatch should have rotated it aside, but if
+    # it didn't, or a legacy path wrote here, fall through to the
+    # lease/heartbeat check rather than poisoning this run with the
+    # predecessor's idle time).
+    #
+    # The 2-second grace absorbs the real-world race where odin emits its
+    # first trace line a fraction of a second before the supervisor stamps
+    # the run row (and the test-setup race where the trace fixture is
+    # written microseconds before task_runs.start_run). Anything past the
+    # grace is unambiguously a previous attempt — the F354 poisoned-retry
+    # signature. 600s is the progress window; 2s vs 600s leaves the real
+    # zombie detection (10-minute idle) completely untouched.
+    started_at_epoch = run.started_at.timestamp() if run.started_at else 0
+    if started_at_epoch and mtime < started_at_epoch - 2.0:
         return None
     return mtime
 
@@ -1630,6 +1742,18 @@ def _maybe_auto_redispatch_infra_failure(task, policy=None, *, advice_text=""):
         metadata[INFRA_AUTO_REDISPATCH_HISTORY_KEY] = history[-INFRA_AUTO_REDISPATCH_HISTORY_MAX:]
         metadata["last_rework_reason"] = "infra_auto_redispatch"
         metadata["last_rework_at"] = timezone.now().isoformat()
+        # Task #353: clear the stale dispatch-blocked banner a previous gate
+        # left on this task. The auto-redispatch path always proceeds
+        # (FAILED → IN_PROGRESS + strategy.trigger), so any pre-existing
+        # stamp would lie to the operator about a task that is now live.
+        # If a fresh dispatch gate later holds the task, _set_* stamps it
+        # again with the live holder list.
+        for key in (
+            "dispatch_blocked_reason",
+            "dispatch_blocked_at",
+            "dispatch_blocked_blocked_by",
+        ):
+            metadata.pop(key, None)
         # NOTE: rework_count is bumped by the F45 _record_rework_continuity
         # call below (it covers both NEEDS_WORK and infra auto-redispatch
         # to keep the counter in one place). Bumping here would double-count.

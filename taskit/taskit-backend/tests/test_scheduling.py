@@ -181,15 +181,15 @@ class SchedulingTests(APITestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("starts_at_local", serializer.errors)
 
-    def test_scheduled_task_visibility_future_hidden_executed_shown(self):
+    def test_scheduled_task_visibility_active_shown_terminal_collapsed(self):
         schedule = create_schedule(
             board=self.board,
             kind="RECURRING",
             timezone_name="UTC",
             starts_at_local=timezone.now() - timedelta(days=1),
             template={
-                "title": "Hidden recurring task",
-                "description": "Should stay out of board surfaces between runs",
+                "title": "Daily recurring task",
+                "description": "Active run visible; terminal run collapsed",
                 "priority": "HIGH",
                 "assignee_id": self.user.id,
             },
@@ -209,13 +209,65 @@ class SchedulingTests(APITestCase):
         task.save(update_fields=["status"])
         self.assertEqual(_exclude_hidden_scheduled_tasks(Task.objects.filter(board=self.board)).count(), 0)
 
-        # Executed occurrence is board history and MUST be visible
-        # (user report: the daily scrape run was invisible on kanban).
-        task.status = TaskStatus.DONE
+        # Active occurrence (IN_PROGRESS) is board-visible — the
+        # operator needs to see today's run.
+        task.status = TaskStatus.IN_PROGRESS
         task.save(update_fields=["status"])
         board_data = BoardDetailSerializer(self.board).data
         self.assertEqual(len(board_data["tasks"]), 1)
         self.assertEqual(_exclude_hidden_scheduled_tasks(Task.objects.filter(board=self.board)).count(), 1)
+
+        # Terminal recurring task collapses into the schedule's run
+        # history — hidden from the board listing (board hygiene:
+        # daily tasks must not drown the kanban).
+        task.status = TaskStatus.DONE
+        task.save(update_fields=["status"])
+        self.assertEqual(_exclude_hidden_scheduled_tasks(Task.objects.filter(board=self.board)).count(), 0)
+
+    def test_board_hygiene_collapses_terminal_recurring_tasks(self):
+        """Two consecutive releases: the finished (DONE) day-1 task
+        collapses into the schedule's run history while the active day-2
+        task stays on the board."""
+        schedule = create_schedule(
+            board=self.board,
+            kind="RECURRING",
+            timezone_name="UTC",
+            starts_at_local=timezone.now() - timedelta(days=2),
+            template={
+                "title": "Daily scrape",
+                "priority": "HIGH",
+                "assignee_id": self.user.id,
+            },
+            recurrence_rule={
+                "freq": "DAILY",
+                "interval": 1,
+            },
+            created_by=self.user.email,
+        )
+
+        release_due_schedules()
+        task1 = Task.objects.filter(schedule=schedule).order_by("id").first()
+        task1.status = TaskStatus.DONE
+        task1.save(update_fields=["status"])
+
+        schedule.refresh_from_db()
+        schedule.next_run_at_utc = timezone.now() - timedelta(minutes=1)
+        schedule.save(update_fields=["next_run_at_utc"])
+        release_due_schedules()
+        task2 = Task.objects.filter(schedule=schedule).order_by("id").last()
+
+        self.assertEqual(Task.objects.filter(schedule=schedule).count(), 2)
+
+        visible_ids = set(
+            _exclude_hidden_scheduled_tasks(Task.objects.filter(board=self.board))
+            .values_list("id", flat=True)
+        )
+        self.assertIn(task2.id, visible_ids)
+        self.assertNotIn(task1.id, visible_ids)
+
+        self.assertEqual(schedule.runs.count(), 2)
+        run_task_ids = set(schedule.runs.values_list("task_id", flat=True))
+        self.assertEqual(run_task_ids, {task1.id, task2.id})
 
     def test_reflection_pass_finalizes_run_at_testing_not_review(self):
         schedule = create_schedule(
@@ -513,6 +565,108 @@ class SchedulingTests(APITestCase):
         latest_run = schedule.runs.order_by("-scheduled_for_utc", "-id").first()
         self.assertEqual(latest_run.status, ScheduleRunStatus.SKIPPED_OVERLAP)
 
+    def test_recurring_schedule_mints_fresh_task_per_release(self):
+        schedule = create_schedule(
+            board=self.board,
+            kind="RECURRING",
+            timezone_name="UTC",
+            starts_at_local=timezone.now() - timedelta(days=2),
+            template={
+                "title": "Daily scrape",
+                "priority": "HIGH",
+                "assignee_id": self.user.id,
+            },
+            recurrence_rule={
+                "freq": "DAILY",
+                "interval": 1,
+            },
+            created_by=self.user.email,
+        )
+
+        released = release_due_schedules()
+        self.assertEqual(released, 1)
+        tasks = list(Task.objects.filter(schedule=schedule).order_by("id"))
+        self.assertEqual(len(tasks), 1)
+        task1 = tasks[0]
+        self.assertTrue(task1.title.startswith("Daily scrape \u2014 "))
+        run1 = task1.current_schedule_run
+        self.assertIsNotNone(run1)
+        self.assertEqual(run1.task_id, task1.id)
+
+        task1.status = TaskStatus.DONE
+        task1.save(update_fields=["status"])
+
+        schedule.refresh_from_db()
+        schedule.next_run_at_utc = timezone.now() - timedelta(minutes=1)
+        schedule.save(update_fields=["next_run_at_utc"])
+
+        released = release_due_schedules()
+        self.assertEqual(released, 1)
+        tasks = list(Task.objects.filter(schedule=schedule).order_by("id"))
+        self.assertEqual(len(tasks), 2)
+        task2 = tasks[1]
+        self.assertTrue(task2.title.startswith("Daily scrape \u2014 "))
+        self.assertNotEqual(task1.title, task2.title)
+        self.assertNotEqual(task1.id, task2.id)
+        run2 = task2.current_schedule_run
+        self.assertIsNotNone(run2)
+        self.assertEqual(run2.task_id, task2.id)
+        self.assertNotEqual(run1.id, run2.id)
+
+    def test_recurring_release_strips_execution_scoped_metadata(self):
+        # A stale trace_file (and other execution-scoped keys) in the
+        # schedule template must NOT carry into freshly minted tasks.
+        # If it did, the stale-execution reaper (session_resolver) would
+        # read the dead trace path and reap every newborn task at birth.
+        schedule = create_schedule(
+            board=self.board,
+            kind="RECURRING",
+            timezone_name="UTC",
+            starts_at_local=timezone.now() - timedelta(days=2),
+            template={
+                "title": "Daily analysis",
+                "priority": "HIGH",
+                "assignee_id": self.user.id,
+                "metadata": {
+                    "trace_file": "/old/.odin/logs/task_999.trace.jsonl",
+                    "output_file": "/old/.odin/logs/task_999.out",
+                    "worktree_path": "/old/worktrees/sp_x/999",
+                    "working_dir": "/old/worktrees/sp_x/999",
+                    "branch": "task/sp_x/999",
+                    "active_execution": {"pid": 12345, "strategy": "celery_dag"},
+                    "subprocess_pid": 12345,
+                    "taskit_id": 999,
+                    "origin": "user note that must survive",
+                },
+            },
+            recurrence_rule={"freq": "DAILY", "interval": 1},
+            created_by=self.user.email,
+        )
+
+        release_due_schedules()
+        task1 = Task.objects.filter(schedule=schedule).order_by("id").first()
+        task1.status = TaskStatus.DONE
+        task1.save(update_fields=["status"])
+
+        schedule.refresh_from_db()
+        schedule.next_run_at_utc = timezone.now() - timedelta(minutes=1)
+        schedule.save(update_fields=["next_run_at_utc"])
+        release_due_schedules()
+        task2 = Task.objects.filter(schedule=schedule).order_by("id").last()
+
+        stripped = {
+            "trace_file", "output_file", "worktree_path", "working_dir",
+            "branch", "active_execution", "subprocess_pid", "taskit_id",
+        }
+        for task in (task1, task2):
+            meta = task.metadata or {}
+            for key in stripped:
+                self.assertNotIn(
+                    key, meta,
+                    f"execution-scoped key {key!r} leaked into task {task.id}",
+                )
+            self.assertEqual(meta.get("origin"), "user note that must survive")
+
     def test_resume_does_not_backfill_missed_occurrences(self):
         schedule = create_schedule(
             board=self.board,
@@ -570,7 +724,7 @@ class SchedulingTests(APITestCase):
 
         task = Task.objects.get(schedule=schedule)
         self.assertEqual(task.status, TaskStatus.IN_PROGRESS)
-        self.assertEqual(task.title, "Run now task")
+        self.assertTrue(task.title.startswith("Run now task \u2014 "))
         self.assertEqual(task.description, "Manual fire")
         self.assertEqual(task.priority, "HIGH")
         self.assertEqual(task.assignee_id, self.user.id)

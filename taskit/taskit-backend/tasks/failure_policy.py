@@ -189,6 +189,16 @@ DEFAULT_POLICY_TABLE: Dict[str, FailurePolicy] = {
         backoff_seconds=0,
         description="API key / auth / CLI missing — operator must fix environment.",
     ),
+    "auth_failure": FailurePolicy(
+        # task #359 — alias class for env_missing used by the auth-side
+        # detector (the failure_messages module aliases its suggested
+        # action back to the env_missing language). Same HUMAN policy:
+        # the operator must fix credentials.
+        action=ACTION_HUMAN,
+        max_retries=0,
+        backoff_seconds=0,
+        description="Authentication failed — operator must fix credentials or environment.",
+    ),
     "timeout": FailurePolicy(
         action=ACTION_HUMAN,
         max_retries=0,
@@ -218,6 +228,18 @@ DEFAULT_POLICY_TABLE: Dict[str, FailurePolicy] = {
         max_retries=0,
         backoff_seconds=0,
         description="User-initiated stop — no automatic action.",
+    ),
+    "review_cap": FailurePolicy(
+        # task #359 — three reflection reviews rejected the work. The
+        # agent has already tried three times against the same review
+        # notes; re-dispatching the same agent/model is the banner lie
+        # that put task #356 on the operator's desk. Hold for human
+        # judgment — the suggested action (rendered by failure_messages)
+        # is "read the latest reviewer's note and decide".
+        action=ACTION_HUMAN,
+        max_retries=0,
+        backoff_seconds=0,
+        description="Reviewer rejected the work three times — operator must read the reviewer's note and decide.",
     ),
     "model_unavailable": FailurePolicy(
         action=ACTION_HUMAN,
@@ -534,12 +556,23 @@ def post_failure_history_comment(task) -> bool:
         suggestion = _HISTORY_SUGGESTION.get(safe, safe)
         lines.append(f"History suggests: {suggestion}")
 
+    body = "\n".join(lines)
+
+    # The same failure processed twice (a requeue racing the runner wrapper,
+    # or a re-recorded execution result) would otherwise post an identical
+    # history card twice within seconds. Suppress the byte-identical repeat;
+    # a genuinely different prior (new fingerprint, new resolution) differs
+    # and re-posts.
+    from .comment_dedup import has_identical_comment
+    if has_identical_comment(task, body, author_email="odin+dag-executor@system"):
+        return True
+
     TaskComment.objects.create(
         task=task,
         schedule_run=task.current_schedule_run,
         author_email="odin+dag-executor@system",
         author_label="odin-dag-executor",
-        content="\n".join(lines),
+        content=body,
         comment_type=CommentType.STATUS_UPDATE,
     )
     return True

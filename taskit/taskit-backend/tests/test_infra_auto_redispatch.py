@@ -845,3 +845,118 @@ class NoAssigneeDoesNotRedispatch(APITestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, TaskStatus.FAILED)
         self.assertNotIn(INFRA_AUTO_REDISPATCH_META_KEY, task.metadata)
+
+
+class AutoRedispatchClearsStaleBanner(APITestCase):
+    """Task #353: FAILED → IN_PROGRESS auto-requeue must not wear its old
+    dispatch-blocked stamp when the path actually proceeds with execution.
+
+    Reproduces the feedback from the prior review round: the auto-redispatch
+    path persisted the FAILED task's pre-existing `dispatch_blocked_reason`
+    into the freshly-IN_PROGRESS metadata, so the operator saw a stale
+    "memory budget full" / "concurrency cap" banner on a task that had just
+    been moved to IN_PROGRESS. The fix: clear the stamp before saving the
+    new status; if a fresh gate holds the task on re-entry, the stamp is
+    re-set with the live reason.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.board = self.make_board(allow_project_root_execution=True)
+        self.assignee = self.make_user(
+            name="claude", email="claude@odin.agent",
+        )
+
+    @patch("tasks.dag_executor._run_subprocess_with_cancellation")
+    @patch("tasks.dag_executor._read_log_tail")
+    def test_stale_failure_stamp_is_cleared_when_strategy_fires(
+        self, mock_tail, mock_run,
+    ):
+        """A task that hit the cap or budget gate on a previous round carries
+        an old dispatch_blocked_reason in metadata. After FAILED → IN_PROGRESS
+        auto-redispatch + strategy.trigger, the stamp must NOT survive —
+        otherwise the operator sees a "memory budget full" banner on a task
+        that's actually now executing.
+        """
+        mock_run.return_value = (1, "odin_non_zero_exit")
+        mock_tail.return_value = (
+            "Agent did not emit an ODIN-STATUS block."
+        )
+
+        task = self.make_task(
+            self.board,
+            title="Stale stamp survivor",
+            status=TaskStatus.EXECUTING,
+            assignee=self.assignee,
+            model_name="claude-sonnet-4-5",
+            metadata={
+                # Stale stamp left over from a previous gate.
+                "dispatch_blocked_reason": "memory_budget_full",
+                "dispatch_blocked_at": "2026-07-05T00:00:00Z",
+                "dispatch_blocked_blocked_by": [
+                    {"task_id": 999, "task_title": "Old holder",
+                     "kind": "execution", "mem_mib": 4096},
+                ],
+            },
+        )
+
+        # execute_single_task classifies the missing ODIN-STATUS as infra
+        # → _maybe_auto_redispatch_infra_failure moves FAILED → IN_PROGRESS
+        # and fires the strategy.
+        with patch(
+            "tasks.execution.get_strategy",
+        ) as mock_get_strategy:
+            mock_strategy = MagicMock()
+            mock_get_strategy.return_value = mock_strategy
+
+            execute_single_task(task.id)
+
+            mock_strategy.trigger.assert_called_once()
+
+        task.refresh_from_db()
+        # The dispatch_blocked_reason and blocked_by stamp are both gone.
+        self.assertNotIn("dispatch_blocked_reason", task.metadata or {})
+        self.assertNotIn("dispatch_blocked_at", task.metadata or {})
+        self.assertNotIn(
+            "dispatch_blocked_blocked_by", task.metadata or {},
+        )
+        # Status + counter are on the auto-redispatch trail.
+        self.assertEqual(task.status, TaskStatus.IN_PROGRESS)
+        self.assertEqual(
+            task.metadata.get(INFRA_AUTO_REDISPATCH_META_KEY), 1,
+        )
+
+    @patch("tasks.dag_executor._run_subprocess_with_cancellation")
+    @patch("tasks.dag_executor._read_log_tail")
+    def test_no_strategy_leaves_no_blocked_banner_after_redispatch(
+        self, mock_tail, mock_run,
+    ):
+        """Even when no execution strategy is configured (task sits
+        IN_PROGRESS for poll_and_execute), the auto-redispatch path must
+        clear the stale stamp on re-entry — poll_and_execute's gate will
+        re-stamp it with the live reason if it still holds.
+        """
+        mock_run.return_value = (1, "odin_non_zero_exit")
+        mock_tail.return_value = (
+            "Agent did not emit an ODIN-STATUS block."
+        )
+
+        task = self.make_task(
+            self.board,
+            title="Stale-stamp no-strategy",
+            status=TaskStatus.EXECUTING,
+            assignee=self.assignee,
+            model_name="claude-sonnet-4-5",
+            metadata={
+                "dispatch_blocked_reason": "concurrency_cap_reached",
+            },
+        )
+
+        with patch("tasks.execution.get_strategy", return_value=None):
+            execute_single_task(task.id)
+
+        task.refresh_from_db()
+        self.assertNotIn("dispatch_blocked_reason", task.metadata or {})
+        self.assertNotIn(
+            "dispatch_blocked_blocked_by", task.metadata or {},
+        )

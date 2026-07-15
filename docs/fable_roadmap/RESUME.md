@@ -36,19 +36,38 @@ plans. The audit (audits/2026-07-11-wave10-11-close.md) verified every
 claim in code and moved the scores.
 
 Still true and unfixed: the merge agent can silently splice two versions
-of a file (three operator surgeries in one night) — top of wave 12. agy's
-exec path crashes on contact and is benched. The new machinery has run
-once, not a hundred times.
+of a file — top of the backlog, with fresh evidence. agy is UNBENCHED:
+after the wave-12 merge it ran a sandboxed smoke end to end (task 366,
+merged). The proof path is proven live too: a sandboxed agent rendered an
+HTML table, screenshotted it, and the screenshot landed on the board as an
+attachment (task 365). Two small proof gaps for the backlog: a failed
+screenshot upload is silent (agents flail instead of failing loud), and
+the tool text implies file_paths get uploaded when they are metadata only
+— a user hit both.
 
 The task-page readability spec (113) came from the user rating the task
-modal 0/10; eight agreed findings became six tasks and most are merged and
-DONE: honest failure banner, modal cleanup, tone-passed templates, memory
-shares, and W12.4 — planning is now a board conversation. Still finishing:
-system-comment dedupe (360), rework-prompts-lead-with-the-finding (363),
-DB-lock retry on saves (364). Standing decision with the user: merge
-spec/sp_fable_w12 to main and restart services — it carries the W12.7
-reaper fix; until then every requeue needs its old trace files rotated
-aside by hand or the run gets killed at birth.
+modal 0/10; eight agreed findings became six tasks, all merged and DONE:
+honest failure banner with the right next step, modal cleanup, tone-passed
+templates, system comments that never repeat, rework prompts that lead
+with the reviewer's finding, and saves that retry on a locked database.
+Wave 12 is merged too — the user said merge everything to the 15july
+branch, and services run it. The sleep-kills-retries bug is fixed and
+proven live (three requeues ran clean with no manual log rotation).
+Lesson that must not repeat: the v0.1 release squashed history without
+re-cutting the open spec branches, which cost a 91-conflict merge. New
+rule: a mainline squash isn't done until every open spec branch is re-cut
+from the new tip.
+
+PARKED CLEANLY at the user's request after the audit
+(audits/2026-07-15-taskpage-wave12-close.md — scores moved, overall 5.0).
+Services, watcher, and sandboxes are all stopped; the board is empty of
+live work; everything is committed and pushed on branch 15july. To resume:
+run the "Before you start" block below (services + watcher), then load the
+next wave from the backlog's "Now" — merge agent v2 first (evidence pack
+is in the backlog entry), the Linux-box second instance next. One open
+observation for the next session: gunicorn sat at ~70% CPU with an idle
+board just before shutdown — check whether a poll loop spins before
+loading new work.
 
 Two tracks now. This board (Fable, the kit building itself) resumes from
 the backlog's "Now" — proof screenshots first, then pain-point audit

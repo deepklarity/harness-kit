@@ -132,4 +132,38 @@ describe('TaskActionHub — region 2 (waiting on you)', () => {
         expect(screen.getByTestId('requeue-btn')).toBeDisabled();
         expect(screen.getByText(/Assign an agent to requeue/i)).toBeInTheDocument();
     });
+
+    it('shows the per-class suggested action for a review-cap failure', () => {
+        // Task #359 — the 3-strike cap used to show "Requeue to re-dispatch
+        // the same agent", which was the banner lie. Now the server sends
+        // the honest next step (read the reviewer's note) and the hub
+        // renders it verbatim.
+        const task = makeTask({
+            currentStatus: 'FAILED',
+            assignees: ['Agent'],
+            assigneeIds: ['a1'],
+            failureSuggestedAction:
+                'The reviewer rejected this work three times in a row. Read the latest reviewer\u2019s note and decide whether to change direction or send back with new guidance.',
+        });
+        renderHub(task, {});
+
+        const nextStep = screen.getByTestId('failed-next-step');
+        expect(nextStep.textContent).toMatch(/reviewer rejected this work three times/i);
+        // The old lie is gone.
+        expect(nextStep.textContent).not.toMatch(/requeue.*re-dispatch/i);
+    });
+
+    it('falls back to the requeue wording when the server did not send a suggested action', () => {
+        // Older tasks pre-#359 have no failureSuggestedAction; the hub
+        // must still render *something* honest. Requeue with the old
+        // wording is the safe default for that cohort.
+        const task = makeTask({
+            currentStatus: 'FAILED',
+            assignees: ['Agent'],
+            assigneeIds: ['a1'],
+        });
+        renderHub(task, {});
+        expect(screen.getByTestId('failed-next-step').textContent)
+            .toMatch(/requeue.*re-dispatch/i);
+    });
 });

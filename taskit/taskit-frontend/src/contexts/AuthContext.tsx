@@ -10,7 +10,7 @@ interface AuthUser {
     mustChangePassword?: boolean;
 }
 
-interface AuthContextValue {
+export interface AuthContextValue {
     user: AuthUser | null;
     loading: boolean;
     authEnabled: boolean;
@@ -32,7 +32,7 @@ interface LoginResponse {
     };
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+export const AuthContext = createContext<AuthContextValue | null>(null);
 
 const AUTH_ENABLED = (import.meta.env.VITE_AUTH_ENABLED ?? import.meta.env.VITE_FIREBASE_AUTH_ENABLED) === 'true';
 const API_BASE_URL = (import.meta.env.VITE_HARNESS_TIME_API_URL || 'http://localhost:8000').replace(/\/$/, '');

@@ -282,6 +282,7 @@ interface BlockToken {
     content: string | string[];
     level?: number;
     language?: string;
+    start?: number;
 }
 
 /**
@@ -377,14 +378,35 @@ function parseBlocks(content: string): BlockToken[] {
         // Ordered list: 1. item
         if (/^\s*\d+\.\s+/.test(line)) {
             const items: string[] = [];
-            while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-                items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
-                i++;
+            const startMatch = line.match(/^\s*(\d+)\.\s+/);
+            const start = startMatch ? parseInt(startMatch[1], 10) : 1;
+            // A "loose" list has blank lines (or other interleaved non-item
+            // lines like the warning blurb between twins) between its items.
+            // CommonMark keeps the numbering continuous across those gaps; the
+            // naive reader that ended the list at the first blank line reset
+            // every item to "1.". We look ahead past blank lines and keep
+            // collecting as long as the next non-blank line is another item.
+            while (i < lines.length) {
+                if (/^\s*\d+\.\s+/.test(lines[i])) {
+                    items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+                    i++;
+                } else if (!lines[i].trim()) {
+                    let j = i;
+                    while (j < lines.length && !lines[j].trim()) j++;
+                    if (j < lines.length && /^\s*\d+\.\s+/.test(lines[j])) {
+                        i = j;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
             }
             if (items.length > 0) {
                 blocks.push({
                     type: 'ol',
                     content: items,
+                    start,
                 });
             }
             continue;
@@ -570,7 +592,7 @@ function renderBlock(block: BlockToken, index: number, keyPrefix: string): React
             return (
                 <ul key={blockKey} className="my-3 list-disc list-outside pl-6 space-y-1.5">
                     {(block.content as string[]).map((item, i) => (
-                        <li key={`${blockKey}-item-${i}`} className="pl-1">
+                        <li key={`${blockKey}-item-${i}`} className="pl-1 break-words">
                             {renderInline(parseInline(item), `${blockKey}-item-${i}`)}
                         </li>
                     ))}
@@ -579,9 +601,9 @@ function renderBlock(block: BlockToken, index: number, keyPrefix: string): React
 
         case 'ol':
             return (
-                <ol key={blockKey} className="my-3 list-decimal list-outside pl-6 space-y-1.5">
+                <ol key={blockKey} className="my-3 list-decimal list-outside pl-6 space-y-1.5" start={block.start ?? 1}>
                     {(block.content as string[]).map((item, i) => (
-                        <li key={`${blockKey}-item-${i}`} className="pl-1">
+                        <li key={`${blockKey}-item-${i}`} className="pl-1 break-words">
                             {renderInline(parseInline(item), `${blockKey}-item-${i}`)}
                         </li>
                     ))}

@@ -273,6 +273,19 @@ class TaskRunProgressLivenessTests(APITestCase):
         os.utime(trace, (old, old))
         return trace
 
+    def _backdate_run_started_at(self, run, *, seconds_ago):
+        """Move a run's started_at into the past so a trace written later
+        looks like a real in-progress zombie (not a leftover from a previous
+        attempt). F354: the age-vs-run-start guard refuses to reap a trace
+        whose mtime predates run.started_at — so realistic zombie tests must
+        backdate the run to be slightly older than the trace."""
+        TaskRun.objects.filter(pk=run.pk).update(
+            started_at=timezone.now() - timedelta(seconds=seconds_ago),
+            last_heartbeat=timezone.now(),
+        )
+        run.refresh_from_db()
+        return run
+
     def _executing_task_with_run(self, *, pid=None, trace_path=None):
         metadata = {}
         if trace_path is not None:
@@ -319,9 +332,13 @@ class TaskRunProgressLivenessTests(APITestCase):
         )
         live_pid, proc = self._spawn_odin_exec_lookalike(task.id)
         run = task_runs.start_run(task, "zombie-token", pid=live_pid)
+        # F354: a real zombie has been running for a while — backdate the run
+        # so its started_at is older than the trace's mtime (the previous
+        # version of this test left started_at=NOW, which is the poisoned-
+        # retry signature the guard now correctly refuses to reap).
+        self._backdate_run_started_at(run, seconds_ago=35 * 60)
         # Heartbeat is FRESH (no backdate) -> the lease check must NOT fire;
         # only the progress check should catch this run.
-        run_no = TaskRun.objects.filter(pk=run.pk)
         self.assertTrue(_pid_alive(live_pid))
 
         reconcile_task_runs()
@@ -393,6 +410,11 @@ class TaskRunProgressLivenessTests(APITestCase):
             metadata={"trace_file": str(trace)},
         )
         run = task_runs.start_run(task, "advanced-token", pid=2**22 + 9)
+        # F354: a real zombie has been running long enough to be reaped — the
+        # trace's age must exceed the run's age, otherwise the age-vs-run-start
+        # guard correctly identifies the trace as a leftover and refuses to
+        # reap.
+        self._backdate_run_started_at(run, seconds_ago=35 * 60)
 
         reconcile_task_runs()
 

@@ -11,10 +11,13 @@ from unittest.mock import MagicMock, patch
 from django.test import override_settings
 
 from .base import APITestCase
+from tasks import sandbox_budget
 from tasks.models import (
     BoardMembership, ReflectionReport, ReflectionStatus,
     TaskComment, TaskHistory, TaskStatus, User, UserRole,
 )
+
+VM = sandbox_budget.DEFAULT_VM_MEM_MIB
 
 
 class TestAutoAdvanceOnReflection(APITestCase):
@@ -177,6 +180,104 @@ class TestAutoAdvanceOnReflection(APITestCase):
         mock_strategy.trigger.assert_called_once_with(task)
         self.assertNotIn("dispatch_blocked_reason", task.metadata or {})
 
+    # ── Task #353: requeue must clear stale dispatch_blocked_reason ──────
+
+    @patch("tasks.execution.get_strategy")
+    def test_needs_work_rework_clears_stale_dispatch_blocked_reason(self, mock_get_strategy):
+        """NEEDS_WORK → strategy.trigger(): the dispatch_blocked_reason stamp
+        left by an earlier gate must NOT survive the requeue (otherwise the
+        banner lies about a task that's already executing).
+
+        Reproduces the feedback from the prior review round: a reflective
+        verdict that triggers the strategy leaves the banner in place even
+        though the task has been re-spawned. The fix is to clear the stamp
+        before the gate assessment; if the gate still says "no", the stamp
+        is re-set with the fresh reason.
+        """
+        user = User.objects.create(name="Agent", email="agent@stale.test")
+        # A stale stamp from an earlier round (the bug under test).
+        task = self.make_task(
+            self.board, status=TaskStatus.REVIEW, assignee=user,
+            metadata={
+                "dispatch_blocked_reason": "concurrency_cap_reached",
+                "dispatch_blocked_at": "2026-07-01T00:00:00Z",
+            },
+        )
+        report = self._create_report(task)
+
+        mock_strategy = MagicMock()
+        mock_get_strategy.return_value = mock_strategy
+
+        self._complete_report(report.id, verdict="NEEDS_WORK")
+
+        # Strategy fires (rework below cap → no gate hold).
+        mock_strategy.trigger.assert_called_once_with(task)
+        # Stamp must be gone — the task is on its way to EXECUTING.
+        task.refresh_from_db()
+        self.assertNotIn("dispatch_blocked_reason", task.metadata or {})
+        self.assertNotIn("dispatch_blocked_at", task.metadata or {})
+
+    @patch("tasks.execution.get_strategy")
+    def test_fail_verdict_rework_clears_stale_dispatch_blocked_reason(self, mock_get_strategy):
+        """FAIL verdict follows the same requeue path as NEEDS_WORK — the
+        stamp must clear when strategy.trigger() fires."""
+        user = User.objects.create(name="Agent", email="agent@fail-cleared.test")
+        task = self.make_task(
+            self.board, status=TaskStatus.REVIEW, assignee=user,
+            metadata={
+                "dispatch_blocked_reason": "memory_budget_full",
+                "dispatch_blocked_at": "2026-07-02T00:00:00Z",
+            },
+        )
+        report = self._create_report(task)
+
+        mock_strategy = MagicMock()
+        mock_get_strategy.return_value = mock_strategy
+
+        self._complete_report(report.id, verdict="FAIL")
+
+        task.refresh_from_db()
+        self.assertNotIn("dispatch_blocked_reason", task.metadata or {})
+
+    @patch("tasks.execution.get_strategy")
+    @override_settings(SANDBOX_MEMORY_BUDGET_MIB=VM, DAG_EXECUTOR_MAX_CONCURRENCY=10)
+    def test_rework_memory_full_stamp_names_holder_tasks(self, mock_get_strategy):
+        """When the rework gate holds at memory_budget_full, the stamp must
+        name the holder tasks (same contract as the poll path) so the banner
+        can show "waiting for a memory share — held by task X, reflection on Y".
+        """
+        from tasks import sandbox_budget
+
+        user = User.objects.create(name="Agent", email="agent@stamp.test")
+        holder = self.make_task(
+            self.board, title="Live exec", status=TaskStatus.EXECUTING,
+            metadata={"active_execution": {"mem_mib": VM}},
+        )
+        reflected = self.make_task(self.board, title="Refl holder",
+                                   status=TaskStatus.REVIEW)
+        ReflectionReport.objects.create(
+            task=reflected, reviewer_agent="claude", reviewer_model="m",
+            status=ReflectionStatus.RUNNING,
+        )
+        task = self.make_task(self.board, status=TaskStatus.REVIEW, assignee=user)
+        report = self._create_report(task)
+
+        mock_strategy = MagicMock()
+        mock_get_strategy.return_value = mock_strategy
+
+        self._complete_report(report.id, verdict="NEEDS_WORK")
+
+        task.refresh_from_db()
+        # Gate held the task → stamp is set with holder names.
+        self.assertEqual(task.metadata.get("dispatch_blocked_reason"),
+                         "memory_budget_full")
+        blocked_by = task.metadata.get("dispatch_blocked_blocked_by") or []
+        ids = {h["task_id"] for h in blocked_by}
+        self.assertIn(holder.id, ids)
+        self.assertIn(reflected.id, ids)
+        # Strategy did NOT fire (gate held).
+        mock_strategy.trigger.assert_not_called()
+
     # ── 3-strike failure ─────────────────────────────────────────
 
     def test_third_needs_work_fails_task(self):
@@ -204,7 +305,10 @@ class TestAutoAdvanceOnReflection(APITestCase):
 
         comment = TaskComment.objects.filter(task=task, author_email="system@taskit").last()
         self.assertIsNotNone(comment)
-        self.assertIn("3 reflection attempts", comment.content)
+        # task #359 — the comment leads with the cause and the next step,
+        # not the log-style "3 reflection attempts without passing" line.
+        self.assertIn("review cap", comment.content.lower())
+        self.assertIn("reviewer", comment.content.lower())
 
     def test_mixed_verdicts_count_toward_limit(self):
         """Any completed reflection counts — not just NEEDS_WORK verdicts."""

@@ -216,3 +216,118 @@ class TestPlanPostsPlanningResult:
         spec_archive = orch.spec_store.load(sid)
         assert spec_archive is not None
         # Either no planning_trace key, or it's missing — both are fine
+
+
+class TestPlanningTraceTokenUsage:
+    """Planning trace must carry token_usage so plan cost can be computed."""
+
+    def test_record_planning_trace_passes_token_usage_to_backend(self, odin_dirs, config_with_mock):
+        """_record_planning_trace extracts usage from result.metadata and passes it."""
+        orch = Orchestrator(config=config_with_mock)
+
+        fake_result = TaskResult(
+            success=True,
+            output="Planning output...",
+            duration_ms=30000,
+            agent="mock",
+            metadata={"usage": {"input_tokens": 50_000, "output_tokens": 10_000}},
+        )
+
+        mock_backend = MagicMock()
+        mock_backend.record_planning_result = MagicMock()
+        orch.task_mgr._backend = mock_backend
+
+        with patch.object(orch, "_planning_agent_model", return_value=("mock", "mock-model")):
+            orch._record_planning_trace("sp_test_usage", fake_result, "plan prompt")
+
+        mock_backend.record_planning_result.assert_called_once()
+        call_kwargs = mock_backend.record_planning_result.call_args
+        assert call_kwargs.kwargs.get("token_usage") == {
+            "input_tokens": 50_000,
+            "output_tokens": 10_000,
+        }
+
+    def test_record_planning_trace_no_usage_passes_none(self, odin_dirs, config_with_mock):
+        """When result has no usage metadata, token_usage is None (not an error)."""
+        orch = Orchestrator(config=config_with_mock)
+
+        fake_result = TaskResult(
+            success=True,
+            output="Planning output...",
+            duration_ms=30000,
+            agent="mock",
+        )
+
+        mock_backend = MagicMock()
+        mock_backend.record_planning_result = MagicMock()
+        orch.task_mgr._backend = mock_backend
+
+        with patch.object(orch, "_planning_agent_model", return_value=("mock", "mock-model")):
+            orch._record_planning_trace("sp_test_nousage", fake_result, "plan prompt")
+
+        mock_backend.record_planning_result.assert_called_once()
+        call_kwargs = mock_backend.record_planning_result.call_args
+        assert call_kwargs.kwargs.get("token_usage") is None
+
+    def test_record_planning_result_includes_token_usage_in_payload(self):
+        """record_planning_result includes token_usage in the POST payload."""
+        from odin.backends.taskit import TaskItBackend
+
+        backend = TaskItBackend(
+            base_url="http://localhost:8000",
+            board_id=1,
+            created_by="test@test.com",
+        )
+        mock_client = MagicMock()
+        mock_client.post = MagicMock(return_value=MagicMock(status_code=200))
+        mock_client.get = MagicMock(return_value=MagicMock(
+            status_code=200,
+            json=lambda: [{"id": 42}],
+        ))
+        backend._client = mock_client
+
+        backend.record_planning_result(
+            spec_id="sp_test",
+            raw_output="trace",
+            duration_ms=1000,
+            agent="claude",
+            model="claude-sonnet-4-5",
+            effective_input="prompt",
+            success=True,
+            token_usage={"input_tokens": 100, "output_tokens": 50},
+        )
+
+        mock_client.post.assert_called_once()
+        payload = mock_client.post.call_args.kwargs.get("json", {})
+        assert payload.get("token_usage") == {"input_tokens": 100, "output_tokens": 50}
+
+    def test_record_planning_result_omits_token_usage_when_none(self):
+        """record_planning_result omits token_usage from payload when None."""
+        from odin.backends.taskit import TaskItBackend
+
+        backend = TaskItBackend(
+            base_url="http://localhost:8000",
+            board_id=1,
+            created_by="test@test.com",
+        )
+        mock_client = MagicMock()
+        mock_client.post = MagicMock(return_value=MagicMock(status_code=200))
+        mock_client.get = MagicMock(return_value=MagicMock(
+            status_code=200,
+            json=lambda: [{"id": 42}],
+        ))
+        backend._client = mock_client
+
+        backend.record_planning_result(
+            spec_id="sp_test",
+            raw_output="trace",
+            duration_ms=1000,
+            agent="claude",
+            model="claude-sonnet-4-5",
+            effective_input="prompt",
+            success=True,
+        )
+
+        mock_client.post.assert_called_once()
+        payload = mock_client.post.call_args.kwargs.get("json", {})
+        assert "token_usage" not in payload
