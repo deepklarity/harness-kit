@@ -40,6 +40,16 @@ of a file (three operator surgeries in one night) — top of wave 12. agy's
 exec path crashes on contact and is benched. The new machinery has run
 once, not a hundred times.
 
+The task-page readability spec (113) came from the user rating the task
+modal 0/10; eight agreed findings became six tasks and most are merged and
+DONE: honest failure banner, modal cleanup, tone-passed templates, memory
+shares, and W12.4 — planning is now a board conversation. Still finishing:
+system-comment dedupe (360), rework-prompts-lead-with-the-finding (363),
+DB-lock retry on saves (364). Standing decision with the user: merge
+spec/sp_fable_w12 to main and restart services — it carries the W12.7
+reaper fix; until then every requeue needs its old trace files rotated
+aside by hand or the run gets killed at birth.
+
 Two tracks now. This board (Fable, the kit building itself) resumes from
 the backlog's "Now" — proof screenshots first, then pain-point audit
 presets. The second track is the first external project. Everything about
