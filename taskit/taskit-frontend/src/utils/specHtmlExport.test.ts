@@ -59,14 +59,16 @@ describe('buildSpecHtml', () => {
     expect(html).toContain('13,840 out')
   })
 
-  it('renders a succeeded task with essentials + Succeeded outcome', () => {
+  it('renders a completed task with essentials + a clear outcome', () => {
     const html = buildSpecHtml(makeSpec({ tasks: [makeTask({ title: 'Write CSV serializer' })] }), { exportedAt: FIXED })
     expect(html).toContain('Write CSV serializer')
     expect(html).toContain('codex')
     expect(html).toContain('gpt-5.4')
     expect(html).toContain('13,100 in / 5,320 out')
     expect(html).toContain('$0.38')
-    expect(html).toMatch(/Succeeded/)
+    expect(html).toMatch(/Complete/)
+    expect(html).toContain('Task 1:')
+    expect(html).toContain('Execution time</dt><dd>3m 48s')
   })
 
   it('renders a failed task with reason/origin/type and expands it by default', () => {
@@ -102,9 +104,10 @@ describe('buildSpecHtml', () => {
     expect(html).toMatch(/In progress/i)
   })
 
-  it('treats TESTING as work-complete (awaiting manual testing), not "In progress"', () => {
+  it('treats TESTING as complete, not "In progress"', () => {
     const html = buildSpecHtml(makeSpec({ tasks: [makeTask({ currentStatus: 'TESTING' })] }), { exportedAt: FIXED })
-    expect(html).toMatch(/awaiting manual testing/i)
+    expect(html).toMatch(/Complete/i)
+    expect(html).toMatch(/final testing is underway/i)
     expect(html).not.toMatch(/In progress/i)
   })
 
@@ -159,5 +162,16 @@ describe('buildSpecHtml', () => {
     const t = makeTask({ timeInStatuses: { EXECUTING: 228000, TESTING: 18000, REVIEW: 6000 } })
     const html = buildSpecHtml(makeSpec({ tasks: [t] }), { exportedAt: FIXED })
     expect(html).toMatch(/title="[^"]*Executing[^"]*Testing[^"]*Review[^"]*"/)
+  })
+
+  it('summarizes the current outcome and flags a failed dependency path', () => {
+    const failed = makeTask({ id: 't1', idShort: 1, title: 'Prepare API', currentStatus: 'FAILED' })
+    const blocked = makeTask({ id: 't2', idShort: 2, title: 'Export report', currentStatus: 'TODO', dependsOn: ['t1'] })
+    const html = buildSpecHtml(makeSpec({ tasks: [failed, blocked], taskCount: 2 }), { exportedAt: FIXED })
+    expect(html).toContain('At a glance')
+    expect(html).toContain('0 completed · 1 need attention · 1 still open')
+    expect(html).toContain('Depends on')
+    expect(html).toContain('Failed — blocks this task')
+    expect(html).toContain('Prepare API')
   })
 })

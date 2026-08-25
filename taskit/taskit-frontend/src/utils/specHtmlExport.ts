@@ -87,7 +87,7 @@ function renderDescription(task: Task): string {
         `</div>`;
 }
 
-function renderTask(task: Task): string {
+function renderTask(task: Task, tasksById: Map<string, Task>): string {
     const status = (task.currentStatus || '').toUpperCase();
     const isFailed = status === 'FAILED';
     const isDone = status === 'DONE';
@@ -102,7 +102,7 @@ function renderTask(task: Task): string {
         : agent ? esc(agent) : DASH;
     const agentSummary = agent ? esc(agent) : DASH;
 
-    const durationStr = task.totalLifespanMs > 0 ? esc(formatDuration(task.totalLifespanMs)) : DASH;
+    const durationStr = task.executingTimeMs > 0 ? esc(formatDuration(task.executingTimeMs)) : DASH;
     const cost = esc(formatCost(task.estimatedCostUsd));
     const tokens = esc(tokensInOut(task.usage));
 
@@ -112,32 +112,37 @@ function renderTask(task: Task): string {
         : DASH;
 
     const desc = renderDescription(task);
+    const dependencies = (task.dependsOn || []).map(id => tasksById.get(id) || { id, title: `Task #${id}`, currentStatus: 'UNKNOWN' } as Task);
+    const dependencyHtml = dependencies.length
+        ? `<div class="dependencies"><span class="lbl">Depends on</span>${dependencies.map(dependency =>
+            `<span class="dep ${['FAILED', 'BLOCKED'].includes(dependency.currentStatus.toUpperCase()) ? 'dep-bad' : ''}">Task ${esc(dependency.idShort || dependency.id)}: ${esc(dependency.title || dependency.name)} · ${esc(prettyStatus(dependency.currentStatus))}${['FAILED', 'BLOCKED'].includes(dependency.currentStatus.toUpperCase()) ? ' — blocks this task' : ''}</span>`
+        ).join('')}</div>`
+        : '';
 
     let outcome: string;
     if (isDone) {
-        outcome = `<div class="outcome ok"><span class="label">✓ Succeeded</span> — completed and moved to DONE.</div>`;
+        outcome = `<div class="outcome ok"><span class="label">✓ Complete</span> — this task is finished.</div>`;
     } else if (isFailed) {
         const md = (task.metadata || {}) as Record<string, unknown>;
         const reason = md.last_failure_reason ? esc(md.last_failure_reason) : 'Not recorded';
         const origin = md.last_failure_origin ? esc(md.last_failure_origin) : DASH;
         const type = md.last_failure_type ? esc(md.last_failure_type) : DASH;
         outcome =
-            `<div class="outcome fail"><span class="label">✗ Failed</span>` +
+            `<div class="outcome fail"><span class="label">⚠ Needs attention</span>` +
             `<div class="fail-grid">` +
-            `<span class="fk">Reason</span><span>${reason}</span>` +
-            `<span class="fk">Origin</span><span>${origin}</span>` +
-            `<span class="fk">Type</span><span>${type}</span>` +
+            `<span class="fk">What happened</span><span>${reason}</span>` +
+            `<span class="fk">Where</span><span>${origin}</span>` +
+            `<span class="fk">Category</span><span>${type}</span>` +
             `</div></div>`;
     } else if (status === 'TESTING') {
-        // Agent work is finished; awaiting manual testing before it moves to DONE.
-        outcome = `<div class="outcome ok"><span class="label">✓ Work complete</span> — awaiting manual testing to mark DONE.</div>`;
+        outcome = `<div class="outcome ok"><span class="label">✓ Complete</span> — final testing is underway.</div>`;
     } else {
         const STATES: Record<string, { label: string; note: string; active: boolean }> = {
-            EXECUTING: { label: 'In progress', note: 'currently executing.', active: true },
-            IN_PROGRESS: { label: 'In progress', note: 'currently running.', active: true },
-            REVIEW: { label: 'Under review', note: 'currently being reviewed.', active: true },
+            EXECUTING: { label: 'Working now', note: 'an agent is actively working on it.', active: true },
+            IN_PROGRESS: { label: 'In progress', note: 'work is underway.', active: true },
+            REVIEW: { label: 'Under review', note: 'waiting for a review decision.', active: true },
             TODO: { label: 'To do', note: 'not started yet.', active: false },
-            BACKLOG: { label: 'Backlog', note: 'not started yet.', active: false },
+            BACKLOG: { label: 'Backlog', note: 'planned for later.', active: false },
         };
         const st = STATES[status] || { label: prettyStatus(task.currentStatus), note: 'no final outcome recorded.', active: false };
         const color = st.active ? 'var(--prog-ink)' : 'var(--muted)';
@@ -161,23 +166,24 @@ function renderTask(task: Task): string {
   <details class="task${isFailed ? ' failed' : ''}"${isFailed ? ' open' : ''}>
     <summary>
       <span class="chev">&#9654;</span>
-      <span class="s-title">${title}</span>
+      <span class="s-title">Task ${esc(task.idShort)}: ${title}</span>
       <span class="badge ${badgeClass}">${badgeLabel}</span>
       <span class="s-meta">${agentSummary} · ${durationStr} · ${cost}</span>
     </summary>
     <div class="body">
       ${desc}
+      ${dependencyHtml}
       <dl class="kv">
-        <dt>Agent</dt><dd>${agentText}</dd>
-        <dt>Time in status</dt><dd>${tisCell}</dd>
-        <dt>Duration</dt><dd>${durationStr}</dd>
-        <dt>Tokens</dt><dd>${tokens}</dd>
-        <dt>Cost</dt><dd>${cost}</dd>
+        <dt>Assigned to</dt><dd>${agentText}</dd>
+        <dt>Where time went</dt><dd>${tisCell}</dd>
+        <dt>Execution time</dt><dd>${durationStr}</dd>
+        <dt>Tokens used</dt><dd>${tokens}</dd>
+        <dt>Estimated cost</dt><dd>${cost}</dd>
       </dl>
       ${outcome}
       <div style="margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line); display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px;">
-        <span style="color: var(--muted); font-weight: 600;">Offline Files:</span>
-        <a href="task_${task.idShort}/task_report.md" style="color: #4f46e5; text-decoration: none; font-weight: 500;">📄 Markdown Report</a>
+        <span style="color: var(--muted); font-weight: 600;">Included files:</span>
+        <a href="task_${task.idShort}/task_report.md" style="color: #4f46e5; text-decoration: none; font-weight: 500;">📄 Full task report</a>
         ${proofLinks}
         ${timelineLink}
       </div>
@@ -242,6 +248,12 @@ const STYLE = `
   .outcome .label { font-weight: 700; }
   .fail-grid { margin-top: 8px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; color: var(--ink); }
   .fail-grid .fk { color: var(--fail-ink); font-weight: 600; }
+  .dependencies { margin: 14px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .dependencies .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
+  .dep { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+  .dep-bad { color: var(--fail-ink); background: var(--fail-bg); border-color: var(--fail-line); }
+  .current-outcome { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 18px 0; }
+  .current-outcome p { margin: 4px 0 0; }
   footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
   @media print { body { background: #fff; } details.task, .stat { break-inside: avoid; } }
 `;
@@ -265,8 +277,19 @@ export function buildSpecHtml(spec: Spec, opts: BuildSpecHtmlOptions = {}): stri
     if (branch) metaItems.push(`<span>Branch: <b class="mono">${esc(branch)}</b></span>`);
     metaItems.push(`<span>Created: <b>${esc(formatDate(spec.createdAt))}</b></span>`);
 
+    const tasksById = new Map(spec.tasks.map(task => [task.id, task]));
+    const done = spec.tasks.filter(task => ['DONE', 'TESTING'].includes(task.currentStatus.toUpperCase())).length;
+    const failed = spec.tasks.filter(task => task.currentStatus.toUpperCase() === 'FAILED').length;
+    const active = spec.tasks.length - done - failed;
+    const blocker = spec.tasks.find(task => task.currentStatus.toUpperCase() === 'FAILED' || task.needsHuman || task.dependsOn?.some(id => {
+        const dependency = tasksById.get(id);
+        return dependency && ['FAILED', 'BLOCKED'].includes(dependency.currentStatus.toUpperCase());
+    }));
+    const blockerText = blocker
+        ? blocker.failureHumanReason || blocker.failureSuggestedAction || `${blocker.title || blocker.name} needs attention.`
+        : 'Nothing is currently blocking this work.';
     const tasksHtml = spec.tasks.length
-        ? spec.tasks.map(renderTask).join('\n')
+        ? spec.tasks.map(task => renderTask(task, tasksById)).join('\n')
         : `<div class="stat" style="text-align:center;color:var(--muted)">No tasks in this spec.</div>`;
 
     return `<!DOCTYPE html>
@@ -289,13 +312,18 @@ export function buildSpecHtml(spec: Spec, opts: BuildSpecHtmlOptions = {}): stri
       <div class="stat"><div class="k">Total tokens</div><div class="v">${totalTokens}</div>${tokenSub ? `<div class="sub">${esc(tokenSub)}</div>` : ''}</div>
       <div class="stat"><div class="k">Total duration</div><div class="v">${totalDuration}</div></div>
     </div>
+    <section class="current-outcome">
+      <strong>At a glance</strong>
+      <p>${done} completed · ${failed} need attention · ${active} still open</p>
+      <p><b>Main blocker:</b> ${esc(blockerText)}</p>
+    </section>
   </header>
 
   <h2 class="section">Tasks (${spec.tasks.length})</h2>
 ${tasksHtml}
 
   <footer>
-    Exported from TaskIt on ${esc(formatDate(exportedAt.toISOString()))} · static snapshot, generated client-side · self-contained (no network needed)
+    Read-only TaskIt snapshot created on ${esc(formatDate(exportedAt.toISOString()))}. Everything needed to read this report is included here.
   </footer>
 </div>
 </body>
