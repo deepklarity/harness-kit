@@ -407,3 +407,26 @@ class PatchSpecIdRegression(APITestCase):
         self.assertEqual(resp.status_code, 200)
         self.task.refresh_from_db()
         self.assertIsNone(self.task.spec_id)
+
+    @patch("tasks.dag_executor.execute_single_task")
+    def test_audit_task_without_opt_in_dispatches_in_project_root(self, mock_exec):
+        """Auditing task: the dispatch proceeds even without board opt-in, metadata flags project-root use."""
+        mock_exec.delay.return_value = MagicMock(id="fake-celery-audit")
+        task = self.make_task(
+            self.board,
+            title="AI Slop Detection",
+            status=TaskStatus.IN_PROGRESS,
+            assignee=self.user,
+            depends_on=[],
+        )
+
+        poll_and_execute()
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, TaskStatus.EXECUTING)
+        self.assertTrue(task.metadata.get("project_root_execution_used"))
+        self.assertNotIn(
+            "dispatch_blocked_reason",
+            (task.metadata or {}),
+        )
+        mock_exec.delay.assert_called_once()

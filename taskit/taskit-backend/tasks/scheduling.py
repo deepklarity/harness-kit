@@ -10,6 +10,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from .kanban_ordering import move_task
+import logging
+
+logger = logging.getLogger(__name__)
+
 from .models import (
     Label, ScheduleKind, ScheduleRunStatus, ScheduleStatus, Spec, Task,
     TaskComment, TaskHistory, TaskPriority, TaskSchedule, TaskScheduleRun, TaskStatus, User,
@@ -416,6 +420,16 @@ def release_schedule_occurrence(
         new_value=TaskStatus.IN_PROGRESS,
         changed_by="system@taskit",
     )
+    if task.assignee_id:
+        try:
+            from .execution import get_strategy
+            strategy = get_strategy()
+            if strategy:
+                logger.info("Firing execution strategy for scheduled task %s", task.id)
+                strategy.trigger(task)
+        except Exception as e:
+            logger.error("Failed to fire execution strategy for scheduled task %s: %s", task.id, e)
+
     return run, task, "released"
 
 

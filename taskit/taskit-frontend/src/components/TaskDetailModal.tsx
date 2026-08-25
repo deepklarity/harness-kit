@@ -55,6 +55,7 @@ import { IdeSetupModal } from './IdeSetupModal';
 import { getDispatchBlockReason } from './dispatchBlock';
 import { DispatchBlockBanner } from './DispatchBlockBanner';
 import { TaskReworkBox } from './TaskReworkBox';
+import { questionPauseMs } from '../utils/taskTime';
 
 interface TaskDetailModalProps {
     task: Task;
@@ -136,6 +137,7 @@ export function TaskDetailModal({
 
     const [showAllHistory, setShowAllHistory] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
+    const activitySectionRef = useRef<HTMLDivElement>(null);
     const [showAllComments, setShowAllComments] = useState(false);
     const [showDebugComments, setShowDebugComments] = useState(false);
     const [commentText, setCommentText] = useState('');
@@ -344,12 +346,17 @@ export function TaskDetailModal({
         if (!commentText.trim() || isPostingComment) return;
         setIsPostingComment(true);
         try {
-            await service.addComment(task.id, commentText.trim());
+            await service.addComment(task.id, commentText.trim(), authUser?.email ?? undefined);
             setCommentText('');
             // Refresh detail so the new comment appears immediately
             onRefresh?.(task.id);
-        } catch (e) {
+        } catch (e: any) {
             console.error('Failed to post comment:', e);
+            toast({
+                title: 'Failed to post comment',
+                description: e?.message || 'Network error occurred while posting comment.',
+                variant: 'destructive',
+            });
         } finally {
             setIsPostingComment(false);
         }
@@ -359,13 +366,18 @@ export function TaskDetailModal({
         if (!replyText.trim() || isPostingReply || !replyingTo) return;
         setIsPostingReply(true);
         try {
-            await service.replyToQuestion(task.id, replyingTo, replyText.trim());
+            await service.replyToQuestion(task.id, replyingTo, replyText.trim(), authUser?.email ?? undefined);
             setReplyText('');
             setReplyingTo(null);
             // Refresh detail so the reply appears immediately
             onRefresh?.(task.id);
-        } catch (e) {
+        } catch (e: any) {
             console.error('Failed to post reply:', e);
+            toast({
+                title: 'Failed to post reply',
+                description: e?.message || 'Network error occurred while replying to question.',
+                variant: 'destructive',
+            });
         } finally {
             setIsPostingReply(false);
         }
@@ -748,7 +760,14 @@ export function TaskDetailModal({
     const isOverBudget = budgetMs !== undefined && usedExecutionMs > budgetMs;
     const canSaveBudget = editValue.trim() !== '' && Number.isFinite(Number(editValue)) && Number(editValue) >= 0;
     const statusColor = getStatusColor(task.currentStatus);
-    const statusEntries = Object.entries(task.timeInStatuses);
+    // Show EXECUTING as the pause-adjusted (real) executing time to match the
+    // live timer, and surface the question-wait as its own segment so the
+    // breakdown still reconciles to the total.
+    const questionWaitMs = questionPauseMs(task.metadata);
+    const statusEntries: [string, number][] = Object.entries(task.timeInStatuses).map(
+        ([s, ms]) => s === 'EXECUTING' ? [s, Math.max(0, ms - questionWaitMs)] : [s, ms],
+    );
+    if (questionWaitMs > 0) statusEntries.push(['WAITING (question)', questionWaitMs]);
     const totalStatusTime = statusEntries.reduce((sum, [, ms]) => sum + ms, 0);
 
     return (
@@ -1889,12 +1908,22 @@ export function TaskDetailModal({
                             timeline competes with it in a different format, so it
                             tucks behind a single header line until the operator
                             asks for it. */}
-                        <div data-testid="activity-section">
+                        <div data-testid="activity-section" ref={activitySectionRef}>
                             <div className="flex items-center justify-between mb-2">
                                 <button
                                     data-testid="activity-toggle"
                                     className="flex items-center gap-1.5 text-sm font-bold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
-                                    onClick={() => setActivityOpen(o => !o)}
+                                    onClick={() => {
+                                        setActivityOpen(prev => {
+                                            const next = !prev;
+                                            if (next) {
+                                                setTimeout(() => {
+                                                    activitySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                                }, 60);
+                                            }
+                                            return next;
+                                        });
+                                    }}
                                     aria-expanded={activityOpen}
                                 >
                                     <ChevronRight className={`size-3.5 transition-transform ${activityOpen ? 'rotate-90' : ''}`} />
@@ -2744,20 +2773,28 @@ function JsonViewer({ data }: { data: any }) {
 }
 
 function ExecutingTimer({ task }: { task: Task }) {
-    const [now, setNow] = useState(Date.now());
+    // Cumulative, pause-adjusted executing time (sums all EXECUTING spans, so it
+    // never resets when the task re-enters EXECUTING after a retry). Ticks forward
+    // only while actively executing and not paused. Timestamps captured in effects
+    // (not during render) to keep render pure.
+    const isActive = task.currentStatus === 'EXECUTING' && !task.metadata?.has_pending_question;
+    const [now, setNow] = useState(() => Date.now());
+    const [capturedAt, setCapturedAt] = useState(() => Date.now());
     useEffect(() => {
-        const id = setInterval(() => setNow(Date.now()), 1000);
-        return () => clearInterval(id);
+        setCapturedAt(Date.now());
+        setNow(Date.now());
+    }, [task.executingTimeMs, task.currentStatus, task.id, task.metadata?.has_pending_question]);
+    useEffect(() => {
+        const id = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(id);
     }, []);
 
-    // Elapsed from EXECUTING time-in-statuses + time since last status change
-    const lastStatusMutation = [...task.mutations].reverse().find(m => m.fieldName === 'status' && m.newValue === 'EXECUTING');
-    const startedAt = lastStatusMutation ? new Date(lastStatusMutation.date).getTime() : 0;
-    const elapsed = startedAt ? now - startedAt : (task.timeInStatuses?.['EXECUTING'] || 0);
+    const delta = isActive ? Math.max(0, now - capturedAt) : 0;
+    const elapsed = task.executingTimeMs + delta;
 
     // Last comment timestamp
     const lastComment = task.comments[task.comments.length - 1];
-    const lastActivity = lastComment ? Math.floor((now - new Date(lastComment.createdAt).getTime()) / 1000) : null;
+    const lastActivity = (lastComment && now) ? Math.floor((now - new Date(lastComment.createdAt).getTime()) / 1000) : null;
 
     return (
         <span className="text-[10px] font-mono text-blue-400 ml-auto flex items-center gap-2">

@@ -1,4 +1,5 @@
-import type { IntegrationService, AuthState, DirectoryEntry, TaskSearchResult, StopExecutionResult, TaskScheduleRunResult } from '../integration/IntegrationService';
+import type { IntegrationService, AuthState, DirectoryEntry, DirectorySuggestResult, TaskSearchResult, StopExecutionResult, TaskScheduleRunResult } from '../integration/IntegrationService';
+import { computeActiveTimes } from '../../utils/taskTime';
 import type {
     AgentConfig,
     Board as DashBoard,
@@ -9,6 +10,9 @@ import type {
     MemberListQuery,
     PaginatedResponse,
     PresetsResponse,
+    SpecPresetsResponse,
+    SkillsResponse,
+    ImportSkillsResponse,
     Spec,
     SpecComment,
     SpecCommit,
@@ -34,6 +38,7 @@ import type {
     IdeOptions,
     IdeSettings,
     TaskIdeOptions,
+    RejectedSkill,
     KanbanColumnsResponse,
     KanbanLoadMoreResponse,
     FactorySnapshot,
@@ -74,6 +79,7 @@ interface HarnessBoard {
     working_dir?: string | null;
     timezone?: string;
     odin_initialized?: boolean;
+    claude_token_configured?: boolean;
     skip_reflection?: boolean;
     skip_proof?: boolean;
     auto_start_planned_tasks?: boolean;
@@ -298,6 +304,7 @@ interface PaginatedResponseBody<T> {
 
 interface DirectoryEntriesResponse {
     base_path: string;
+    parent_path?: string | null;
     entries: DirectoryEntry[];
 }
 
@@ -336,7 +343,10 @@ export class ApiError extends Error {
     readonly body: unknown;
 
     constructor(status: number, statusText: string, body?: unknown) {
-        super(`API Error ${status}: ${statusText}`);
+        const customMessage = (body && typeof body === 'object' && ('error' in body || 'message' in body))
+            ? String((body as any).error || (body as any).message)
+            : null;
+        super(customMessage || `API Error ${status}: ${statusText}`);
         this.name = 'ApiError';
         this.status = status;
         this.statusText = statusText;
@@ -486,10 +496,7 @@ export class HarnessTimeService implements IntegrationService {
                 const timeInStatuses = this.computeTimeInStatuses(mutations, task.created_at);
                 const endTime = task.completed_at ? new Date(task.completed_at).getTime() : Date.now();
                 const totalLifespanMs = endTime - new Date(task.created_at).getTime();
-                const workTimeMs = (timeInStatuses['IN_PROGRESS'] || 0) + (timeInStatuses['REVIEW'] || 0);
-                const executingTimeMs = HarnessTimeService.subtractQuestionPause(
-                    timeInStatuses['EXECUTING'] || 0, task.metadata,
-                );
+                const { workTimeMs, executingTimeMs } = computeActiveTimes(timeInStatuses, task.metadata);
 
                 const assigneeIds = task.assignee ? [String(task.assignee.id)] : [];
                 const assigneeNames = task.assignee ? [task.assignee.name] : [];
@@ -619,10 +626,7 @@ export class HarnessTimeService implements IntegrationService {
         const timeInStatuses = this.computeTimeInStatuses(mutations, raw.created_at);
         const endTime = raw.completed_at ? new Date(raw.completed_at).getTime() : Date.now();
         const totalLifespanMs = endTime - new Date(raw.created_at).getTime();
-        const workTimeMs = (timeInStatuses['IN_PROGRESS'] || 0) + (timeInStatuses['REVIEW'] || 0);
-        const executingTimeMs = HarnessTimeService.subtractQuestionPause(
-            timeInStatuses['EXECUTING'] || 0, raw.metadata,
-        );
+        const { workTimeMs, executingTimeMs } = computeActiveTimes(timeInStatuses, raw.metadata);
 
         const assigneeIds = raw.assignee ? [String(raw.assignee.id)] : [];
         const assigneeNames = raw.assignee ? [raw.assignee.name] : [];
@@ -822,6 +826,7 @@ export class HarnessTimeService implements IntegrationService {
                 createdAt: b.created_at || new Date().toISOString(),
                 taskCount: (b as HarnessBoard & { task_count?: number }).task_count || 0,
                 memberCount: (b as HarnessBoard & { member_count?: number }).member_count || 0,
+                totalActions: (b as HarnessBoard & { total_actions?: number }).total_actions || 0,
             };
         });
         return { ...raw, results: boards };
@@ -951,12 +956,16 @@ export class HarnessTimeService implements IntegrationService {
         await this.del(`/api/schedules/${Number(scheduleId)}/`);
     }
 
-    async suggestDirectories(query: string, limit: number = 20): Promise<DirectoryEntry[]> {
+    async suggestDirectories(query: string, limit: number = 50): Promise<DirectorySuggestResult> {
         const trimmed = query.trim();
-        if (!trimmed) return [];
+        if (!trimmed) return { base_path: '', parent_path: null, entries: [] };
         const qs = this.buildQuery({ q: trimmed, limit });
         const raw = await this.get<DirectoryEntriesResponse>(`/api/runtime/directories/suggest/${qs}`);
-        return raw.entries || [];
+        return {
+            base_path: raw.base_path || '',
+            parent_path: raw.parent_path ?? null,
+            entries: raw.entries || [],
+        };
     }
 
     async checkDirectory(
@@ -1052,6 +1061,7 @@ export class HarnessTimeService implements IntegrationService {
             dependsOn?: string[];
             workingDir?: string;
             skipReflection?: boolean;
+            status?: string;
         }
     ): Promise<unknown> {
         const body: Record<string, unknown> = {
@@ -1066,6 +1076,7 @@ export class HarnessTimeService implements IntegrationService {
         if (options?.dependsOn && options.dependsOn.length > 0) body.depends_on = options.dependsOn;
         if (options?.workingDir) body.metadata = { working_dir: options.workingDir };
         if (options?.skipReflection) body.skip_reflection = true;
+        if (options?.status) body.status = options.status;
 
         return this.post<HarnessTask>('/api/tasks/', body);
     }
@@ -1379,6 +1390,57 @@ export class HarnessTimeService implements IntegrationService {
         return this.get<PresetsResponse>('/api/presets/');
     }
 
+    async fetchSpecPresets(): Promise<SpecPresetsResponse> {
+        return this.get<SpecPresetsResponse>('/api/spec-presets/');
+    }
+
+    async fetchSkills(userOnly: boolean = true): Promise<SkillsResponse> {
+        return this.get<SkillsResponse>(`/api/skills/?user_only=${userOnly ? '1' : '0'}`);
+    }
+
+    async importSkills(source: string, force?: boolean, skillName?: string): Promise<ImportSkillsResponse> {
+        return this.post<ImportSkillsResponse>('/api/skills/import/', { source, force, skill_name: skillName });
+    }
+
+    async uploadSkill(file: File, force?: boolean): Promise<ImportSkillsResponse> {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (force) {
+            formData.append('force', 'true');
+        }
+        const auth = await this.authHeaders();
+        const response = await fetch(`${this.baseUrl}/api/skills/upload/`, {
+            method: 'POST',
+            headers: { ...auth },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || errData.message || 'Failed uploading skill');
+        }
+        return response.json();
+    }
+
+    async deleteSkill(skillName: string): Promise<SkillsResponse> {
+        return this.post<SkillsResponse>(`/api/skills/${encodeURIComponent(skillName)}/`, { skill_name: skillName }, 'DELETE');
+    }
+
+    async deleteAllSkills(): Promise<SkillsResponse> {
+        return this.post<SkillsResponse>('/api/skills/delete-all/', {}, 'DELETE');
+    }
+
+    async clearRejectedSkills(): Promise<{ status: string; rejected_skills: RejectedSkill[] }> {
+        return this.post<{ status: string; rejected_skills: RejectedSkill[] }>('/api/skills/clear-rejected/', {}, 'DELETE');
+    }
+
+    async installSkillDeps(skillName: string): Promise<SkillsResponse> {
+        return this.post<SkillsResponse>(`/api/skills/${encodeURIComponent(skillName)}/install-deps/`, { skill_name: skillName });
+    }
+
+    async toggleSkillPreset(skillName: string, enabled: boolean): Promise<SkillsResponse> {
+        return this.post<SkillsResponse>(`/api/skills/${encodeURIComponent(skillName)}/toggle-preset/`, { skill_name: skillName, enabled });
+    }
+
     async fetchFactorySnapshot(boardId: string): Promise<FactorySnapshot> {
         return this.get<FactorySnapshot>(`/api/boards/${boardId}/factory/`);
     }
@@ -1516,10 +1578,7 @@ export class HarnessTimeService implements IntegrationService {
         }
         const endTime = task.completed_at ? new Date(task.completed_at).getTime() : Date.now();
         const totalLifespanMs = endTime - new Date(task.created_at).getTime();
-        const workTimeMs = (timeInStatuses['IN_PROGRESS'] || 0) + (timeInStatuses['REVIEW'] || 0);
-        const executingTimeMs = HarnessTimeService.subtractQuestionPause(
-            timeInStatuses['EXECUTING'] || 0, task.metadata,
-        );
+        const { workTimeMs, executingTimeMs } = computeActiveTimes(timeInStatuses, task.metadata);
         const assigneeIds = task.assignee ? [String(task.assignee.id)] : [];
         const assigneeNames = task.assignee ? [task.assignee.name] : [];
         const devEtaHours = task.dev_eta_seconds ? task.dev_eta_seconds / 3600 : undefined;
@@ -1628,8 +1687,8 @@ export class HarnessTimeService implements IntegrationService {
                 comments: [],
                 timeInStatuses: t.time_in_statuses || {},
                 totalLifespanMs: Date.now() - new Date(t.created_at).getTime(),
-                workTimeMs: (t.time_in_statuses?.['IN_PROGRESS'] || 0) + (t.time_in_statuses?.['REVIEW'] || 0),
-                executingTimeMs: t.time_in_statuses?.['EXECUTING'] || 0,
+                workTimeMs: computeActiveTimes(t.time_in_statuses || {}, t.metadata).workTimeMs,
+                executingTimeMs: computeActiveTimes(t.time_in_statuses || {}, t.metadata).executingTimeMs,
                 description: t.description,
                 priority: t.priority,
                 specId: String(s.id),
@@ -1707,20 +1766,6 @@ export class HarnessTimeService implements IntegrationService {
 
         times[currentStatus] = (times[currentStatus] || 0) + (Date.now() - lastTime);
         return times;
-    }
-
-    /** Subtract question-pause time from raw EXECUTING ms. */
-    private static subtractQuestionPause(
-        rawMs: number,
-        metadata?: Record<string, unknown> | null,
-    ): number {
-        if (!metadata || rawMs <= 0) return rawMs;
-        let pauseMs = (metadata.executing_paused_ms as number) || 0;
-        const pausedAt = metadata.question_paused_at as string | undefined;
-        if (pausedAt) {
-            pauseMs += Date.now() - new Date(pausedAt).getTime();
-        }
-        return Math.max(0, rawMs - pauseMs);
     }
 
     private async authHeaders(): Promise<Record<string, string>> {
@@ -1848,7 +1893,7 @@ export class HarnessTimeService implements IntegrationService {
         return this.post('/api/notifications/preferences/', prefs, 'PUT');
     }
 
-    private async post<T>(path: string, body: unknown, method: 'POST' | 'PUT' | 'PATCH' = 'POST'): Promise<T> {
+    private async post<T>(path: string, body: unknown, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'POST'): Promise<T> {
         const auth = await this.authHeaders();
         const res = await fetch(`${this.baseUrl}${path}`, {
             method,

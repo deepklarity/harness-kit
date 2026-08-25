@@ -71,6 +71,16 @@
           "input_price_per_1m_tokens": 5.0,
           "output_price_per_1m_tokens": 30.0,
           "cache_read_price_per_1m_tokens": 0.5
+        },
+        {
+          "name": "gpt-5.3-codex",
+          "description": "Retired — gpt-5.3-codex, kept for historical cost lookups",
+          "is_default": false,
+          "retired": true,
+          "supports_image_input": true,
+          "input_price_per_1m_tokens": 1.75,
+          "output_price_per_1m_tokens": 14.0,
+          "cache_read_price_per_1m_tokens": 0.5
         }
       ]
     },
@@ -93,6 +103,16 @@
           "input_price_per_1m_tokens": 0.3,
           "output_price_per_1m_tokens": 1.2,
           "cache_read_price_per_1m_tokens": 0.06
+        },
+        {
+          "name": "minimax-coding-plan/MiniMax-M2.5",
+          "description": "Retired — MiniMax-M2.5, kept for historical cost lookups",
+          "is_default": false,
+          "retired": true,
+          "supports_image_input": false,
+          "input_price_per_1m_tokens": 0.3,
+          "output_price_per_1m_tokens": 1.2,
+          "cache_read_price_per_1m_tokens": 0.08
         }
       ]
     },
@@ -115,6 +135,16 @@
           "input_price_per_1m_tokens": 1.4,
           "output_price_per_1m_tokens": 4.4,
           "cache_read_price_per_1m_tokens": 0.26
+        },
+        {
+          "name": "zai-coding-plan/glm-4.7",
+          "description": "Retired — zai-coding-plan/glm-4.7, kept for historical cost lookups",
+          "is_default": false,
+          "retired": true,
+          "supports_image_input": false,
+          "input_price_per_1m_tokens": 0.6,
+          "output_price_per_1m_tokens": 2.2,
+          "cache_read_price_per_1m_tokens": 0.15
         }
       ]
     },

@@ -420,7 +420,7 @@ function KanbanView({ selectedBoard, refreshKey = 0, filteredMemberId, memberMap
 
     usePolling(() => load({ silent: true }), {
         enabled: pollingEnabled,
-        intervalMs: Number(import.meta.env.VITE_POLL_INTERVAL_MS || 15000),
+        intervalMs: Number(import.meta.env.VITE_POLL_INTERVAL_MS || 3000),
         immediate: false,
     });
 

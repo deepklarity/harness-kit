@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import type { TaskSchedule } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
@@ -109,11 +110,55 @@ const SORT_OPTIONS = [
     { label: 'Start time', value: 'starts_at_utc' },
 ];
 
+function TaskBrief({ description }: { description: string }) {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [isOverflowing, setIsOverflowing] = useState(false);
+    const textRef = useRef<HTMLDivElement>(null);
+
+    useLayoutEffect(() => {
+        const checkOverflow = () => {
+            const el = textRef.current;
+            if (el && !isExpanded) {
+                setIsOverflowing(el.scrollHeight > el.clientHeight + 1);
+            }
+        };
+
+        checkOverflow();
+        window.addEventListener('resize', checkOverflow);
+        return () => window.removeEventListener('resize', checkOverflow);
+    }, [description, isExpanded]);
+
+    if (!description) return null;
+
+    return (
+        <div className="mb-3">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Task brief</div>
+            <div
+                ref={textRef}
+                className={cn(
+                    "rounded-md border bg-muted/25 px-3 py-2 text-sm text-foreground whitespace-pre-wrap transition-all",
+                    isExpanded ? "max-h-72 overflow-y-auto" : "line-clamp-2 overflow-hidden"
+                )}
+            >
+                {description}
+            </div>
+            {(isOverflowing || isExpanded) && (
+                <button
+                    type="button"
+                    className="mt-1 text-xs font-medium text-primary hover:underline"
+                    onClick={() => setIsExpanded(prev => !prev)}
+                >
+                    {isExpanded ? 'Hide full brief' : 'Show full brief'}
+                </button>
+            )}
+        </div>
+    );
+}
+
 export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: SchedulingPageProps) {
     const service = useService();
     const { toast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
-    const [expandedBriefs, setExpandedBriefs] = useState<Set<number>>(new Set());
     const [schedules, setSchedules] = useState<TaskSchedule[]>([]);
     const [count, setCount] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -364,29 +409,7 @@ export function SchedulingPage({ selectedBoard, refreshKey = 0, onTaskClick }: S
                             </div>
 
                             {schedule.template.description ? (
-                                <div className="mb-3">
-                                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Task brief</div>
-                                    {expandedBriefs.has(schedule.id) ? (
-                                        <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-foreground whitespace-pre-wrap max-h-72 overflow-y-auto">
-                                            {schedule.template.description}
-                                        </div>
-                                    ) : (
-                                        <div className="text-sm text-muted-foreground">
-                                            {compactText(schedule.template.description, 180)}
-                                        </div>
-                                    )}
-                                    <button
-                                        type="button"
-                                        className="mt-1 text-xs text-primary hover:underline"
-                                        onClick={() => setExpandedBriefs(prev => {
-                                            const next = new Set(prev);
-                                            if (next.has(schedule.id)) next.delete(schedule.id); else next.add(schedule.id);
-                                            return next;
-                                        })}
-                                    >
-                                        {expandedBriefs.has(schedule.id) ? 'Hide full brief' : 'Show full brief'}
-                                    </button>
-                                </div>
+                                <TaskBrief description={schedule.template.description} />
                             ) : null}
 
                             {Array.isArray(schedule.runs) && schedule.runs.length > 0 ? (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import type { AgentConfig, Board } from '@/types';
+import type { AgentConfig, Board, SpecPreset, PresetCategory } from '@/types';
 import { useService } from '@/contexts/ServiceContext';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -19,6 +19,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { OdinGuideContent } from '@/components/OdinGuideModal';
 import { MarkdownEditor } from '@/components/MarkdownEditor';
+import { SpecPresetPicker } from '@/components/SpecPresetPicker';
 import { ChevronDown, FileText, FolderOpen, Sparkles, Terminal, Upload } from 'lucide-react';
 
 interface CreateSpecModalProps {
@@ -111,6 +112,8 @@ export function CreateSpecModal({ open, onClose, boardId, board, onCreated, onOp
     const [specFiles, setSpecFiles] = useState<{ name: string; path: string }[]>([]);
     const [specFilesLoading, setSpecFilesLoading] = useState(false);
     const [specFileKey, setSpecFileKey] = useState(0);
+    const [specPresets, setSpecPresets] = useState<SpecPreset[]>([]);
+    const [specCategories, setSpecCategories] = useState<PresetCategory[]>([]);
 
     // Save flags to localStorage whenever they change
     useEffect(() => {
@@ -138,6 +141,8 @@ export function CreateSpecModal({ open, onClose, boardId, board, onCreated, onOp
             setContentError('');
             setSpecFiles([]);
             setSpecFilesLoading(false);
+            setSpecPresets([]);
+            setSpecCategories([]);
         }
     }, [open]);
 
@@ -181,8 +186,24 @@ export function CreateSpecModal({ open, onClose, boardId, board, onCreated, onOp
             }
         };
 
+        const loadSpecPresets = async () => {
+            try {
+                const res = await service.fetchSpecPresets();
+                if (!cancelled) {
+                    setSpecPresets(res.presets || []);
+                    setSpecCategories(res.categories || []);
+                }
+            } catch {
+                if (!cancelled) {
+                    setSpecPresets([]);
+                    setSpecCategories([]);
+                }
+            }
+        };
+
         void loadAgents();
         void loadSpecFiles();
+        void loadSpecPresets();
         return () => {
             cancelled = true;
         };
@@ -244,6 +265,20 @@ export function CreateSpecModal({ open, onClose, boardId, board, onCreated, onOp
             // Reset the select so the same file can be picked again.
             setSpecFileKey((k) => k + 1);
         }
+    };
+
+    const handleSpecPresetSelect = (preset: SpecPreset) => {
+        const titleText = preset.title || preset.id;
+        const comment = `<!-- Skill Preset: ${titleText} -->`;
+        const textToAdd = `${comment}\n${preset.directive}`;
+        setContent((prev) => {
+            const trimmed = prev.trimEnd();
+            if (!trimmed) {
+                return textToAdd;
+            }
+            return `${trimmed}\n\n${textToAdd}`;
+        });
+        if (contentError) setContentError('');
     };
 
     const handleSubmit = async () => {
@@ -359,6 +394,13 @@ export function CreateSpecModal({ open, onClose, boardId, board, onCreated, onOp
                                 <div className="flex items-center justify-between gap-3">
                                     <Label htmlFor="create-spec-content" className="text-xs">Spec content</Label>
                                     <div className="flex items-center gap-1.5">
+                                        {specPresets.length > 0 && (
+                                            <SpecPresetPicker
+                                                presets={specPresets}
+                                                categories={specCategories}
+                                                onSelect={handleSpecPresetSelect}
+                                            />
+                                        )}
                                         {specFiles.length > 0 && (
                                             <Select key={specFileKey} onValueChange={handleSpecFileSelect}>
                                                 <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:text-foreground">

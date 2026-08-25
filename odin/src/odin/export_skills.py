@@ -40,7 +40,7 @@ def _first_sentence(text: str, limit: int = 160) -> str:
     return line
 
 
-def render_skill_markdown(preset: dict[str, Any]) -> str:
+def render_skill_markdown(preset: dict[str, Any], body_override: str | None = None) -> str:
     """Render one preset as SKILL.md text. Pure function: same preset in, same bytes out."""
     pid = preset["id"]
     title = preset.get("title", pid)
@@ -57,7 +57,8 @@ def render_skill_markdown(preset: dict[str, Any]) -> str:
         "generated_from": f"data/task_presets.json#{pid}",
     }
     fm_yaml = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True)
-    body = f"# {title}\n\n{preset['description']}\n"
+    body_text = body_override if body_override is not None else preset["description"]
+    body = f"# {title}\n\n{body_text}\n"
     return f"---\n{fm_yaml}---\n\n{body}"
 
 
@@ -87,13 +88,26 @@ def export_presets_to_skills(
         pid = preset["id"]
         skill_dir = output_dir / _skill_name(pid)
         skill_path = skill_dir / "SKILL.md"
-        if skill_path.exists() and GENERATED_MARKER not in skill_path.read_text():
-            raise ExportError(
-                f"refusing to overwrite {skill_path}: it exists and isn't "
-                "marked 'generated: true' (looks hand-authored)"
-            )
+        body_override = None
+        if skill_path.exists():
+            text = skill_path.read_text()
+            if GENERATED_MARKER not in text:
+                raise ExportError(
+                    f"refusing to overwrite {skill_path}: it exists and isn't "
+                    "marked 'generated: true' (looks hand-authored)"
+                )
+            if preset.get("description", "").strip().startswith("Use skill /hk-"):
+                try:
+                    _, body = parse_skill_md_text(text, label=str(skill_path))
+                    body = body.lstrip()
+                    title_prefix = f"# {preset.get('title', pid)}\n"
+                    if body.startswith(title_prefix):
+                        body = body[len(title_prefix):].lstrip()
+                    body_override = body.strip()
+                except Exception:
+                    body_override = None
         skill_dir.mkdir(parents=True, exist_ok=True)
-        skill_path.write_text(render_skill_markdown(preset))
+        skill_path.write_text(render_skill_markdown(preset, body_override=body_override))
         written.append(skill_path)
     return written
 

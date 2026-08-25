@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "slug": "code-quality",
+      "name": "Code Quality & Slop Prevention",
+      "description": "Enforce clean code, prevent AI slop, and perform inline reviews during task execution",
+      "icon": "shield-check",
+      "sort_order": 1
+    },
+    {
+      "slug": "testing-discipline",
+      "name": "Testing & Execution Discipline",
+      "description": "Drive TDD loops, systematic bug diagnosis, security checks, and test coverage",
+      "icon": "terminal",
+      "sort_order": 2
+    },
+    {
+      "slug": "architecture-domain",
+      "name": "Architecture & Domain Alignment",
+      "description": "Maintain domain models, deep module boundaries, and architectural ADRs",
+      "icon": "building",
+      "sort_order": 3
+    },
+    {
+      "slug": "planning-clarity",
+      "name": "Planning & Requirements Clarity",
+      "description": "Grill requirements, create tracer-bullet tickets, and handle agent handoffs",
+      "icon": "map",
+      "sort_order": 4
+    }
+  ],
+  "presets": [
+    {
+      "id": "prevent-ai-slop",
+      "title": "Prevent AI Slop",
+      "description": "Directs agent to prevent AI slop, copy-paste duplication, and dead code during task execution.",
+      "category": "code-quality",
+      "icon": "scan",
+      "directive": "Use skill /hk-ai-slop-detection to prevent AI slop, copy-paste duplication, and dead code during task execution.",
+      "sort_order": 1
+    },
+    {
+      "id": "prevent-frontend-slop",
+      "title": "Prevent Frontend Slop",
+      "description": "Directs agent to avoid UI over-engineering, unnecessary wrappers, and prop-drilling.",
+      "category": "code-quality",
+      "icon": "monitor",
+      "directive": "Use skill /hk-frontend-slop-review to prevent UI over-engineering, unnecessary wrappers, and prop-drilling.",
+      "sort_order": 2
+    },
+    {
+      "id": "prevent-backend-slop",
+      "title": "Prevent Backend Slop",
+      "description": "Directs agent to avoid over-abstracted stores, unused endpoints, and redundant backend logic.",
+      "category": "code-quality",
+      "icon": "server",
+      "directive": "Use skill /hk-backend-slop-review to avoid over-abstracted stores, unused endpoints, and redundant logic.",
+      "sort_order": 3
+    },
+    {
+      "id": "inline-code-review",
+      "title": "Inline Code Review",
+      "description": "Directs agent to self-review all code diffs against standards before completing tasks.",
+      "category": "code-quality",
+      "icon": "code",
+      "directive": "Use skill /hk-code-review to self-review all diffs against project standards before completing tasks.",
+      "sort_order": 4
+    },
+    {
+      "id": "tdd-loop",
+      "title": "Test-Driven Development (TDD)",
+      "description": "Directs agent to drive feature implementation via a strict red-green-refactor testing loop.",
+      "category": "testing-discipline",
+      "icon": "play-circle",
+      "directive": "Use skill /hk-tdd to drive implementation through a strict red-green-refactor testing loop.",
+      "sort_order": 1
+    },
+    {
+      "id": "diagnosing-bugs",
+      "title": "Systematic Bug Prevention",
+      "description": "Directs agent to build a deterministic feedback loop and reproduce errors before applying fixes.",
+      "category": "testing-discipline",
+      "icon": "bug",
+      "directive": "Use skill /hk-diagnosing-bugs to build a deterministic feedback loop and reproduce errors before fixing.",
+      "sort_order": 2
+    },
+    {
+      "id": "test-case-coverage",
+      "title": "Comprehensive Test Coverage",
+      "description": "Directs agent to identify and cover critical edge cases during implementation.",
+      "category": "testing-discipline",
+      "icon": "check-square",
+      "directive": "Use skill /hk-test-case-audit to identify and cover critical edge cases during implementation.",
+      "sort_order": 3
+    },
+    {
+      "id": "security-prevention",
+      "title": "Security & Secret Prevention",
+      "description": "Directs agent to ensure no hardcoded secrets, unsafe queries, or security flaws are introduced.",
+      "category": "testing-discipline",
+      "icon": "shield-alert",
+      "directive": "Use skill /hk-security-audit to ensure no hardcoded secrets or security vulnerabilities are introduced.",
+      "sort_order": 4
+    },
+    {
+      "id": "domain-modeling",
+      "title": "Domain Model Alignment",
+      "description": "Directs agent to maintain domain terms in CONTEXT.md and write clean domain models.",
+      "category": "architecture-domain",
+      "icon": "book-open",
+      "directive": "Use skill /hk-domain-modeling to maintain domain terms in CONTEXT.md and write clean domain models.",
+      "sort_order": 1
+    },
+    {
+      "id": "deep-module-design",
+      "title": "Deep Module Design",
+      "description": "Directs agent to build deep modules with simple interfaces and avoid shallow abstractions.",
+      "category": "architecture-domain",
+      "icon": "layers",
+      "directive": "Use skill /hk-codebase-design to build deep modules with simple interfaces and avoid shallow abstractions.",
+      "sort_order": 2
+    },
+    {
+      "id": "architectural-validation",
+      "title": "Architectural Validation",
+      "description": "Directs agent to validate architectural decisions and maintain project ADRs.",
+      "category": "architecture-domain",
+      "icon": "file-text",
+      "directive": "Use skill /hk-grill-with-docs to validate architectural decisions and maintain project ADRs.",
+      "sort_order": 3
+    },
+    {
+      "id": "primary-source-research",
+      "title": "Primary Source Research",
+      "description": "Directs agent to investigate technical requirements against primary documentation.",
+      "category": "architecture-domain",
+      "icon": "search",
+      "directive": "Use skill /hk-research to investigate technical requirements against primary documentation.",
+      "sort_order": 4
+    },
+    {
+      "id": "merge-safety",
+      "title": "Merge Safety",
+      "description": "Directs agent to safely resolve git merge/rebase conflicts without losing functionality.",
+      "category": "architecture-domain",
+      "icon": "git-merge",
+      "directive": "Use skill /hk-resolving-merge-conflicts to safely resolve git conflicts without losing functionality.",
+      "sort_order": 5
+    },
+    {
+      "id": "design-interview",
+      "title": "Design Interview Alignment",
+      "description": "Directs agent to interview on plan and design decisions before generating tasks.",
+      "category": "planning-clarity",
+      "icon": "help-circle",
+      "directive": "Use skill /hk-grill-me to resolve underspecified requirements before creating implementation tasks.",
+      "sort_order": 1
+    },
+    {
+      "id": "to-tickets",
+      "title": "Clean Ticket Breakdown",
+      "description": "Directs agent to break implementation into clear tracer-bullet tickets.",
+      "category": "planning-clarity",
+      "icon": "list",
+      "directive": "Use skill /hk-to-tickets to break implementation into clear tracer-bullet tickets.",
+      "sort_order": 2
+    },
+    {
+      "id": "agent-handoff",
+      "title": "Agent Handoff",
+      "description": "Directs agent to capture stateful handoffs when passing work between subagents.",
+      "category": "planning-clarity",
+      "icon": "repeat",
+      "directive": "Use skill /hk-handoff to capture stateful handoffs when passing work between subagents.",
+      "sort_order": 3
+    }
+  ]
+}

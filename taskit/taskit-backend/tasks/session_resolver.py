@@ -134,7 +134,7 @@ def _rotate_leftover_trace_files_for_task(
 
 def _reflection_trace_path(log_dir: Path, report_id: int) -> Path:
     jsonl = log_dir / f"reflect_{report_id}.trace.jsonl"
-    if jsonl.exists():
+    if jsonl.exists() and jsonl.stat().st_size > 0:
         return jsonl
     out = log_dir / f"reflect_{report_id}.out"
     if out.exists():
@@ -160,10 +160,10 @@ def _task_trace_path(task: Task, log_dir: Path, task_id: int) -> Path:
     meta_path = (task.metadata or {}).get("trace_file")
     if meta_path:
         p = Path(meta_path)
-        if p.exists():
+        if p.exists() and p.stat().st_size > 0:
             return p
     jsonl = log_dir / f"task_{task_id}.trace.jsonl"
-    if jsonl.exists():
+    if jsonl.exists() and jsonl.stat().st_size > 0:
         return jsonl
     out = log_dir / f"task_{task_id}.out"
     if out.exists():
@@ -175,8 +175,14 @@ def _task_trace_path(task: Task, log_dir: Path, task_id: int) -> Path:
             Path(working_dir) / ".odin" / "worktrees" / spec_odin_id
             / str(task_id) / ".odin" / "logs" / f"task_{task_id}.trace.jsonl"
         )
-        if wt.exists():
+        if wt.exists() and wt.stat().st_size > 0:
             return wt
+        wt_out = (
+            Path(working_dir) / ".odin" / "worktrees" / spec_odin_id
+            / str(task_id) / ".odin" / "logs" / f"task_{task_id}.out"
+        )
+        if wt_out.exists():
+            return wt_out
     # Nothing exists yet — return the preferred path (may be created soon).
     return jsonl
 

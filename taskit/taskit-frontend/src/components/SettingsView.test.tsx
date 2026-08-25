@@ -255,13 +255,13 @@ describe('SettingsView — Account tab', () => {
 describe('SettingsView — board agent roster toggle (W10.4)', () => {
     it('renders a switch per agent and PATCHes the board on toggle', async () => {
         const mockToggle = vi.fn().mockResolvedValue({ name: 'glm', enabled: false });
-        mockService.toggleBoardAgent = mockToggle;
+        (mockService as any).toggleBoardAgent = mockToggle;
 
         mockService.fetchBoardsPage = vi.fn().mockResolvedValue({
             results: [makeBoard({
                 agents: [
-                    { name: 'claude', enabled: true, models: [] } as unknown as Board['agents'] extends infer A ? A : never,
-                    { name: 'glm', enabled: true, models: [] } as unknown as Board['agents'] extends infer A ? A : never,
+                    { name: 'claude', enabled: true, models: [] } as any,
+                    { name: 'glm', enabled: true, models: [] } as any,
                 ],
             })],
             count: 1,

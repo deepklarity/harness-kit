@@ -23,6 +23,7 @@ import { Switch } from '@/components/ui/switch';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ManageMembersModal } from './ManageMembersModal';
 import { IdeBadge, IdeSetupModal } from './IdeSetupModal';
+import { SkillImporterCard } from './SkillImporterCard';
 
 import {
     Popover,
@@ -286,6 +287,13 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
     );
     const [reviewerOrderPrunedNote, setReviewerOrderPrunedNote] = useState<string | null>(null);
     const prunedForBoardRef = useRef<string | null>(null);
+    const [reflectionModel, setReflectionModel] = useState<string>(currentBoard?.reflectionModel ?? '');
+    const [reflectionReviewStrategy, setReflectionReviewStrategy] = useState<Record<string, string> | null>(
+        currentBoard?.reflectionReviewStrategy ?? null
+    );
+    const [scaleBySize, setScaleBySize] = useState<boolean>(
+        !!(currentBoard?.reflectionReviewStrategy && Object.keys(currentBoard.reflectionReviewStrategy).length > 0)
+    );
 
     // Routing (task #328) — effective policy for display, and the editable
     // standing preference order (board.routing_policy.preference_order).
@@ -371,6 +379,10 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
         setEscalationPrunedNote(null);
         setReviewerOrderPrunedNote(null);
         prunedForBoardRef.current = null;
+        setReflectionModel(currentBoard?.reflectionModel ?? '');
+        const strat = currentBoard?.reflectionReviewStrategy ?? null;
+        setReflectionReviewStrategy(strat);
+        setScaleBySize(!!(strat && Object.keys(strat).length > 0));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentBoard?.id]);
 
@@ -973,7 +985,96 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                                                     onCheckedChange={v => handleCurrentBoardReflection({ skip_reflection: v })}
                                                 />
                                             </div>
-                                            {/* Reviewer order — deterministic quota-aware walk (board.reviewer_order) */}
+                                            {/* Reviewer model select */}
+                                            {!currentSkip && (() => {
+                                                const allModelNames = Array.from(enabledAgentModelNames);
+                                                return (
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <label htmlFor="reviewer-model-select" className="text-sm">Reviewer model</label>
+                                                            <Select
+                                                                value={reflectionModel || ''}
+                                                                onValueChange={async (val) => {
+                                                                    setReflectionModel(val);
+                                                                    if (!currentBoard) return;
+                                                                    try {
+                                                                        await service.updateBoard(currentBoard.id, { reflection_model: val });
+                                                                        toast({ title: 'Board updated' });
+                                                                    } catch {
+                                                                        setReflectionModel(currentBoard.reflectionModel ?? '');
+                                                                        toast({ title: 'Error', description: 'Failed to update reviewer model.', variant: 'destructive' });
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <SelectTrigger id="reviewer-model-select" aria-label="Reviewer model" className="w-48 h-7 text-xs">
+                                                                    <SelectValue placeholder="Select model" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {allModelNames.map(m => (
+                                                                        <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        {/* Scale reviewer by review size toggle */}
+                                                        <div className="flex items-center justify-between">
+                                                            <label htmlFor="scale-reviewer-toggle" className="text-sm">Scale reviewer by review size</label>
+                                                            <Switch
+                                                                id="scale-reviewer-toggle"
+                                                                aria-label="Scale reviewer by review size"
+                                                                checked={scaleBySize}
+                                                                onCheckedChange={async (val) => {
+                                                                    setScaleBySize(val);
+                                                                    if (!currentBoard) return;
+                                                                    if (!val) {
+                                                                        setReflectionReviewStrategy(null);
+                                                                        try {
+                                                                            await service.updateBoard(currentBoard.id, { reflection_review_strategy: {} });
+                                                                            toast({ title: 'Board updated' });
+                                                                        } catch {
+                                                                            setScaleBySize(true);
+                                                                            toast({ title: 'Error', description: 'Failed to update reviewer strategy.', variant: 'destructive' });
+                                                                        }
+                                                                    } else {
+                                                                        setReflectionReviewStrategy({});
+                                                                    }
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        {/* Per-size bucket selects (only when scaleBySize is on) */}
+                                                        {scaleBySize && (['small', 'medium', 'large'] as const).map((size) => (
+                                                            <div key={size} className="flex items-center justify-between pl-4">
+                                                                <label htmlFor={`reviewer-${size}-select`} className="text-xs text-muted-foreground capitalize">{size} review model</label>
+                                                                <Select
+                                                                    value={(reflectionReviewStrategy ?? {})[size] ?? ''}
+                                                                    onValueChange={async (val) => {
+                                                                        const updated = { ...(reflectionReviewStrategy ?? {}), [size]: val };
+                                                                        setReflectionReviewStrategy(updated);
+                                                                        if (!currentBoard) return;
+                                                                        try {
+                                                                            await service.updateBoard(currentBoard.id, { reflection_review_strategy: updated });
+                                                                            toast({ title: 'Board updated' });
+                                                                        } catch {
+                                                                            setReflectionReviewStrategy(reflectionReviewStrategy);
+                                                                            toast({ title: 'Error', description: 'Failed to update reviewer strategy.', variant: 'destructive' });
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    <SelectTrigger id={`reviewer-${size}-select`} aria-label={`${size} review model`} className="w-48 h-7 text-xs">
+                                                                        <SelectValue placeholder="Select model" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {allModelNames.map(m => (
+                                                                            <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })()}
+                                                                                        {/* Reviewer order — deterministic quota-aware walk (board.reviewer_order) */}
                                             {(() => {
                                                 const defaultOrder = computeDefaultOrder();
                                                 const isCustomized = reviewerOrder.length > 0;
@@ -1849,6 +1950,7 @@ export function SettingsView({ members, currentBoard, onDataChange, onCreateBoar
                             )}
                         </CardContent>
                     </Card>
+                    <SkillImporterCard service={service} />
                 </TabsContent>
 
                 {/* ── Sandbox Tab ── */}

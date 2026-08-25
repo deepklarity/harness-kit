@@ -41,6 +41,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from .audit_presets import is_auditing_task
 from .dependencies import DepStatus, check_deps
 from .execution.base import _terminate_pid
 from .execution.utils import resolve_working_dir
@@ -76,6 +77,263 @@ DEP_BLOCKED_REASONS = {
     DepStatus.WAITING: "deps_not_complete",
     DepStatus.BLOCKED: "deps_blocked_failed",
 }
+
+
+def _audit_last_baseline_sha(board):
+    """Return the HEAD SHA recorded at the last successful audit, or None.
+
+    Stored at <working_dir>/.odin/.last_audit_sha by
+    views._record_audit_baseline when an audit report is compiled.
+    """
+    wd = (getattr(board, "working_dir", None) or "").strip()
+    if not wd:
+        return None
+    sha_file = os.path.join(wd, ".odin", ".last_audit_sha")
+    try:
+        with open(sha_file, "r", encoding="utf-8") as f:
+            sha = f.read().strip()
+        return sha or None
+    except Exception:
+        return None
+
+
+# Paths excluded from the audit change check. These are kit/audit/vendor
+# artifacts, NOT audited source. Two reasons they MUST be excluded:
+#   1. Harness outputs (reports, .odin, .proof) change every audit run, so
+#      counting them would create a feedback loop that blocks every skip.
+#   2. Agent MCP configs (opencode.json, .mcp.json, .claude/...) are
+#      rewritten with task-specific values on each dispatch, so they would
+#      always look "changed".
+# The same excludes are applied to BOTH the tracked-diff and the untracked
+# scan so the two checks see a consistent view of "audited code".
+_AUDIT_DIFF_EXCLUDES = [
+    ":(exclude)Audit Reports",   # compiled HTML reports (harness output)
+    ":(exclude).odin",           # kit internals: .last_audit_sha, worktrees, logs, specs
+    ":(exclude).proof",          # proof artifacts
+    ":(exclude).claude",
+    ":(exclude).codex",
+    ":(exclude).gemini",
+    ":(exclude).kilocode",
+    ":(exclude).mcp.json",
+    ":(exclude)opencode.json",
+]
+
+
+def _audit_category_subfolder(task_or_data) -> str | None:
+    """Return the subfolder under Audit Reports/ corresponding to task's audit category."""
+    if not task_or_data:
+        return None
+    title = (getattr(task_or_data, "title", None) or (task_or_data.get("title") if isinstance(task_or_data, dict) else "") or "").lower()
+    desc = (getattr(task_or_data, "description", None) or (task_or_data.get("description") if isinstance(task_or_data, dict) else "") or "").lower()
+    t = f"{title} {desc}"
+
+    if "security" in t:
+        return "Security Audit"
+    elif "performance" in t:
+        return "Performance Audit"
+    elif "web app" in t or "web_app" in t or "web-app" in t:
+        return "Web App UI"
+    elif "mobile" in t:
+        return "Mobile App UI"
+    elif "website" in t:
+        return "Website UX"
+    elif "chart" in t:
+        return "Chart Validation"
+    elif "frontend" in t:
+        return "Frontend Slop"
+    elif "backend" in t:
+        return "Backend Slop"
+    elif "test" in t:
+        return "Test Case"
+    elif "gaps" in t or "ui gap" in t or "ui-gap" in t:
+        return "UI Gaps"
+    elif "ai" in t or "slop" in t:
+        return "AI Slop"
+    elif "roadmap" in t or "fable" in t:
+        return "Roadmap"
+    elif "hygiene" in t:
+        return "Hygiene"
+    elif "lint" in t or "autolint" in t:
+        return "Autolint"
+    elif "architecture" in t or "arch" in t:
+        return "Architecture Audit"
+    elif "loop" in t or "autonomy" in t:
+        return "Loop Audit"
+    elif "prompt" in t:
+        return "Prompt Audit"
+    return None
+
+
+def _audit_existing_report_present(wd, subfolder: str | None = None) -> bool:
+    """True if the board already has at least one compiled audit report
+    under <wd>/Audit Reports/[<subfolder>/]."""
+    reports_dir = os.path.join(wd, "Audit Reports")
+    if subfolder:
+        reports_dir = os.path.join(reports_dir, subfolder)
+    if not os.path.isdir(reports_dir):
+        return False
+    for _root, _dirs, files in os.walk(reports_dir):
+        for fn in files:
+            if fn.endswith(".html"):
+                return True
+    return False
+
+
+def _audit_latest_report_path(wd, subfolder: str | None = None):
+    """Return the path to the most recently compiled audit report (.html
+    with the newest mtime under <wd>/Audit Reports/[<subfolder>/]), or None."""
+    reports_dir = os.path.join(wd, "Audit Reports")
+    if subfolder:
+        reports_dir = os.path.join(reports_dir, subfolder)
+    if not os.path.isdir(reports_dir):
+        return None
+    latest, latest_mtime = None, -1.0
+    for root, _dirs, files in os.walk(reports_dir):
+        for fn in files:
+            if not fn.endswith(".html"):
+                continue
+            p = os.path.join(root, fn)
+            try:
+                m = os.path.getmtime(p)
+            except OSError:
+                continue
+            if m > latest_mtime:
+                latest_mtime, latest = m, p
+    return latest
+
+
+def _audit_sha_filename(subfolder: str | None = None) -> str:
+    if subfolder:
+        slug = subfolder.lower().replace(" ", "_")
+        return f".last_audit_sha_{slug}"
+    return ".last_audit_sha"
+
+
+def _audit_last_baseline_sha(board, subfolder: str | None = None):
+    """Return the HEAD SHA recorded at the last successful audit for subfolder, or None."""
+    wd = (getattr(board, "working_dir", None) or "").strip()
+    if not wd:
+        return None
+
+    if subfolder:
+        slug_file = os.path.join(wd, ".odin", _audit_sha_filename(subfolder))
+        try:
+            if os.path.isfile(slug_file):
+                with open(slug_file, "r", encoding="utf-8") as f:
+                    sha = f.read().strip()
+                if sha:
+                    return sha
+            return None
+        except Exception:
+            return None
+
+    sha_file = os.path.join(wd, ".odin", ".last_audit_sha")
+    try:
+        with open(sha_file, "r", encoding="utf-8") as f:
+            sha = f.read().strip()
+        return sha or None
+    except Exception:
+        return None
+
+
+def _seed_audit_baseline_head(wd, subfolder: str | None = None) -> None:
+    """Record current HEAD as the audit baseline. Used when an existing
+    board already has a report but no recorded SHA (feature predates it),
+    so unchanged code doesn't trigger a needless re-audit. Best-effort."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", wd, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30,
+        )
+        sha = (result.stdout or "").strip()
+        if result.returncode != 0 or not sha:
+            return
+        odin_dir = os.path.join(wd, ".odin")
+        os.makedirs(odin_dir, exist_ok=True)
+
+        sha_file = os.path.join(odin_dir, ".last_audit_sha")
+        with open(sha_file, "w", encoding="utf-8") as f:
+            f.write(sha)
+
+        if subfolder:
+            cat_file = os.path.join(odin_dir, _audit_sha_filename(subfolder))
+            with open(cat_file, "w", encoding="utf-8") as f:
+                f.write(sha)
+    except Exception:
+        logger.warning("[audit-skip] failed to seed baseline SHA", exc_info=True)
+
+
+def _run_system_security_prescan(board_wd: str, task) -> bool:
+    """Pre-Scan Tool Execution: Run multi-tool security sweep (GitLeaks, Bandit,
+    Semgrep, eslint-plugin-security, npm/pip audit) locally before agent dispatch.
+    Generates initial SECURITY_AUDIT_REPORT.md on disk for the agent to inspect
+    and enhance with general security observations."""
+    if not board_wd or not os.path.isdir(board_wd):
+        return False
+
+    script_paths = [
+        os.path.expanduser("~/.odin/bin/security_audit.py"),
+        os.path.join(str(Path(__file__).resolve().parents[3]), "scripts", "security_audit.py"),
+    ]
+    script_file = None
+    for p in script_paths:
+        if os.path.isfile(p):
+            script_file = p
+            break
+    if not script_file:
+        return False
+
+    report_md = os.path.join(board_wd, "SECURITY_AUDIT_REPORT.md")
+    try:
+        proc = subprocess.run(
+            [sys.executable, script_file, "--target", board_wd, "--report", report_md],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if proc.returncode != 0 and not os.path.exists(report_md):
+            logger.warning("[security-prescan] pre-scan tool returned exit %s: %s", proc.returncode, proc.stderr)
+            return False
+    except Exception as e:
+        logger.warning("[security-prescan] failed to execute pre-scan tool: %s", e)
+        return False
+
+    return os.path.exists(report_md)
+
+
+def _audit_codebase_unchanged_since_last(board, task=None) -> bool:
+    """Cost guard for audit tasks: True when the current branch's commit has
+    no diff vs the commit recorded at the last successful audit for this audit type,
+    so re-auditing would reproduce the same report for full token cost.
+    """
+    wd = (getattr(board, "working_dir", None) or "").strip()
+    if not wd or not os.path.isdir(wd):
+        return False
+
+    subfolder = _audit_category_subfolder(task) if task else None
+
+    # Only skip when a report for THIS SPECIFIC AUDIT TYPE already exists.
+    if not _audit_existing_report_present(wd, subfolder=subfolder):
+        return False
+
+    baseline = _audit_last_baseline_sha(board, subfolder=subfolder)
+    if not baseline:
+        _seed_audit_baseline_head(wd, subfolder=subfolder)
+        return True
+    try:
+        result = subprocess.run(
+            ["git", "-C", wd, "diff", "--quiet", baseline, "HEAD",
+             "--", ".", *_AUDIT_DIFF_EXCLUDES],
+            capture_output=True, timeout=30,
+        )
+        return result.returncode == 0
+    except Exception:
+        logger.warning(
+            "[audit-skip] commit-diff check failed for board %s",
+            getattr(board, "id", None), exc_info=True,
+        )
+        return False
+
 
 
 class AgentNotEnabledOnBoard(Exception):
@@ -200,7 +458,11 @@ def _auto_assign_from_suggested(task):
 
     suggested = (task.metadata or {}).get("suggested_agent")
     if not suggested:
-        return None, False
+        from .audit_presets import is_auditing_task
+        if is_auditing_task(task):
+            suggested = "glm"
+        else:
+            return None, False
 
     suggested_lower = str(suggested).strip().lower()
     if not suggested_lower:
@@ -506,6 +768,69 @@ def poll_and_execute():
                 getattr(board, "allow_project_root_execution", False)
             )
 
+            is_audit = is_auditing_task(locked_task)
+            if is_audit:
+                allow_project_root = True
+                # Cost guard: skip re-auditing an unchanged codebase. A fresh
+                # audit would reproduce the last report for full token cost.
+                # Covers both a first dispatch and a re-run (user moving a
+                # DONE audit back to IN_PROGRESS) -- both reach IN_PROGRESS
+                # and are caught here before the agent is dispatched.
+                subfolder = _audit_category_subfolder(locked_task)
+                if _audit_codebase_unchanged_since_last(board, locked_task):
+                    baseline_short = (_audit_last_baseline_sha(board, subfolder) or "")[:8]
+                    board_wd = (getattr(board, "working_dir", None) or "").strip()
+                    latest_report = _audit_latest_report_path(board_wd, subfolder) if board_wd else None
+                    report_line = (
+                        f"\n\nExisting report (already generated for this codebase):\n{latest_report}"
+                        if latest_report else ""
+                    )
+                    skip_msg = (
+                        "Audit skipped — the codebase hasn't changed since the last "
+                        f"report (baseline {baseline_short}), so a fresh audit would "
+                        f"produce an identical result.{report_line}\n\n"
+                        "To get a new report, make code changes first and re-run this "
+                        "task. (Skipped to avoid the cost of regenerating a duplicate report.)"
+                    )
+                    metadata["audit_skipped_reason"] = "no_code_changes_since_last_audit"
+                    metadata["audit_skipped_at"] = timezone.now().isoformat()
+                    locked_task.metadata = metadata
+                    locked_task.status = TaskStatus.DONE
+                    locked_task.kanban_position = move_task(
+                        locked_task, target_status=TaskStatus.DONE, target_index=None,
+                    )
+                    locked_task.save(update_fields=[
+                        "status", "kanban_position", "metadata", "last_updated_at",
+                    ])
+                    TaskHistory.objects.create(
+                        task=locked_task,
+                        schedule_run=locked_task.current_schedule_run,
+                        field_name="status",
+                        old_value=TaskStatus.IN_PROGRESS,
+                        new_value=TaskStatus.DONE,
+                        changed_by="odin+dag-executor@system",
+                    )
+                    TaskComment.objects.create(
+                        task=locked_task,
+                        schedule_run=locked_task.current_schedule_run,
+                        author_email="odin+dag-executor@system",
+                        author_label="odin-dag-executor",
+                        content=skip_msg,
+                        comment_type=CommentType.STATUS_UPDATE,
+                    )
+                    maybe_finalize_schedule_run(locked_task, TaskStatus.DONE)
+                    logger.info(
+                        "[task:%s] Audit skipped: codebase unchanged since last audit",
+                        locked_task.id,
+                    )
+                    continue
+
+                title = (getattr(locked_task, "title", None) or "").lower()
+                board_wd = (getattr(board, "working_dir", None) or "").strip()
+                if "security" in title and board_wd:
+                    if _run_system_security_prescan(board_wd, locked_task):
+                        logger.info("[task:%s] System security pre-scan generated initial SECURITY_AUDIT_REPORT.md for agent review", locked_task.id)
+
             if not worktree_path and not allow_project_root:
                 # F43 guardrail: never silently dispatch into the board's
                 # project root. Mark the task FAILED with a visible reason
@@ -734,7 +1059,8 @@ def execute_single_task(task_id, run_token=None):
         verb = "Stopped"
         excerpt = ""
     elif exit_code == 0:
-        new_status = TaskStatus.REVIEW
+        is_audit = is_auditing_task(task)
+        new_status = TaskStatus.DONE if is_audit else TaskStatus.REVIEW
         actor = "odin+dag-executor@system"
         verb = "Completed"
         excerpt = ""

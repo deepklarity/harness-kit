@@ -270,3 +270,42 @@ def save_presets(data: dict, filepath: str | Path | None = None) -> None:
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(data, indent=2) + "\n")
     tmp_path.replace(path)
+
+
+AUDIT_KEYWORDS = ("slop", "hygiene", "audit", "validation", "gaps", "gap", "performance", "review", "ux")
+
+
+def is_auditing_task(task_or_data: Any) -> bool:
+    """Return True if task_or_data represents an audit or validation task.
+
+    Matches titles, descriptions, or schedule titles containing audit keywords
+    or skill references.
+    """
+    if not task_or_data:
+        return False
+    if hasattr(task_or_data, "title"):
+        title = (getattr(task_or_data, "title", "") or "").lower()
+        description = (getattr(task_or_data, "description", "") or "").lower()
+        schedule = getattr(task_or_data, "schedule", None)
+        if schedule:
+            sch_title = (getattr(schedule, "template_title", "") or "").lower()
+            if any(k in sch_title for k in AUDIT_KEYWORDS) or "_audit_report" in sch_title:
+                return True
+    else:
+        title = (task_or_data.get("title") or "").lower()
+        description = (task_or_data.get("description") or "").lower()
+        schedule_id = task_or_data.get("schedule_id") or task_or_data.get("schedule")
+        if schedule_id:
+            try:
+                from tasks.models import TaskSchedule
+                sch = TaskSchedule.objects.get(id=schedule_id)
+                sch_title = (sch.template_title or "").lower()
+                if any(k in sch_title for k in AUDIT_KEYWORDS) or "_audit_report" in sch_title:
+                    return True
+            except Exception:
+                pass
+
+    if any(k in title or k in description for k in AUDIT_KEYWORDS) or "_audit_report" in description or "_audit_report" in title or "/hk-" in description:
+        return True
+    return False
+

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
-import type { DirectoryEntry, DirectoryCheckResult } from '../services/integration/IntegrationService';
+import type { DirectoryCheckResult } from '../services/integration/IntegrationService';
 import type { Member } from '../types';
 import { useService } from '../contexts/ServiceContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -8,11 +8,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { Badge } from '@/components/ui/badge';
 import { FolderOpen, CheckCircle2, AlertCircle, Loader2, Bot } from 'lucide-react';
+import { DirectoryPicker } from './DirectoryPicker';
 
 interface CreateBoardModalProps {
     onClose: () => void;
@@ -44,24 +44,17 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
     const [workingDir, setWorkingDir] = useState('~/');
     const [parentDirectory, setParentDirectory] = useState('~/');
     const [directoryName, setDirectoryName] = useState('');
-    const [dirSuggestions, setDirSuggestions] = useState<DirectoryEntry[]>([]);
-    const [dirInputFocused, setDirInputFocused] = useState(false);
-    const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
     const [loading, setLoading] = useState(false);
-    const blurTimerRef = useRef<number | null>(null);
 
     const [dirCheck, setDirCheck] = useState<DirCheckStatus>({ checking: false, result: null });
     const [disabledAgents, setDisabledAgents] = useState<Set<string>>(new Set());
     const [availableAgents, setAvailableAgents] = useState<Member[]>([]);
     const [agentsLoading, setAgentsLoading] = useState(false);
 
-    const activeDirectoryInput = directoryMode === 'existing' ? workingDir : parentDirectory;
-    const debouncedDirectoryInput = useDebouncedValue(activeDirectoryInput, 220);
     const debouncedDirForCheck = useDebouncedValue(
         directoryMode === 'existing' ? workingDir : `${parentDirectory}::${directoryName}`,
         500,
     );
-    const showSuggestions = dirInputFocused && dirSuggestions.length > 0;
     const resolvedPath = dirCheck.result?.resolved_path
         || (directoryMode === 'create' && parentDirectory.trim() && directoryName.trim()
             ? `${parentDirectory.trim().replace(/[\\/]+$/, '')}/${directoryName.trim()}`
@@ -82,29 +75,6 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
     useEffect(() => {
         loadAgents();
     }, [loadAgents]);
-
-    useEffect(() => {
-        let cancelled = false;
-        const query = debouncedDirectoryInput.trim();
-        if (!query) {
-            setDirSuggestions([]);
-            setActiveSuggestionIndex(-1);
-            return;
-        }
-        service
-            .suggestDirectories(query, 8)
-            .then(entries => {
-                if (cancelled) return;
-                setDirSuggestions(entries);
-                setActiveSuggestionIndex(-1);
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setDirSuggestions([]);
-                setActiveSuggestionIndex(-1);
-            });
-        return () => { cancelled = true; };
-    }, [debouncedDirectoryInput, service]);
 
     useEffect(() => {
         let cancelled = false;
@@ -147,50 +117,6 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
             });
         return () => { cancelled = true; };
     }, [debouncedDirForCheck, directoryMode, parentDirectory, directoryName, service]);
-
-    useEffect(() => {
-        return () => {
-            if (blurTimerRef.current !== null) window.clearTimeout(blurTimerRef.current);
-        };
-    }, []);
-
-    const handleDirInputBlur = () => {
-        blurTimerRef.current = window.setTimeout(() => {
-            setDirInputFocused(false);
-            setActiveSuggestionIndex(-1);
-        }, 120);
-    };
-
-    const applySuggestion = (entry: DirectoryEntry) => {
-        if (directoryMode === 'existing') setWorkingDir(entry.path);
-        else setParentDirectory(entry.path);
-        setDirInputFocused(false);
-        setDirSuggestions([]);
-        setActiveSuggestionIndex(-1);
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (!showSuggestions) return;
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setActiveSuggestionIndex(prev => (prev + 1) % dirSuggestions.length);
-            return;
-        }
-        if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setActiveSuggestionIndex(prev => (prev <= 0 ? dirSuggestions.length - 1 : prev - 1));
-            return;
-        }
-        if (e.key === 'Enter' && activeSuggestionIndex >= 0 && activeSuggestionIndex < dirSuggestions.length) {
-            e.preventDefault();
-            applySuggestion(dirSuggestions[activeSuggestionIndex]);
-            return;
-        }
-        if (e.key === 'Escape') {
-            setDirInputFocused(false);
-            setActiveSuggestionIndex(-1);
-        }
-    };
 
     const canSubmit = Boolean(
         name.trim()
@@ -308,67 +234,21 @@ export function CreateBoardModal({ onClose, onCreate }: CreateBoardModalProps) {
 
                         {directoryMode === 'existing' ? (
                             <div className="flex flex-col gap-2 relative">
-                                <Input
-                                    required
+                                <DirectoryPicker
                                     value={workingDir}
-                                    onChange={e => setWorkingDir(e.target.value)}
-                                    onFocus={() => setDirInputFocused(true)}
-                                    onBlur={handleDirInputBlur}
-                                    onKeyDown={handleKeyDown}
+                                    onChange={setWorkingDir}
                                     placeholder="/absolute/path/to/project"
-                                    className="font-mono text-xs"
                                 />
-                                {showSuggestions && (
-                                    <div className="absolute top-[40px] left-0 right-0 z-50 rounded border bg-popover shadow-md">
-                                        <ScrollArea className="max-h-[180px]">
-                                            <div className="p-1">
-                                                {dirSuggestions.map((entry, idx) => (
-                                                    <button
-                                                        key={entry.path}
-                                                        type="button"
-                                                        className={`w-full rounded px-2 py-1.5 text-left text-xs font-mono ${idx === activeSuggestionIndex ? 'bg-accent' : 'hover:bg-accent/70'}`}
-                                                        onMouseDown={e => { e.preventDefault(); applySuggestion(entry); }}
-                                                    >
-                                                        {entry.path}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </ScrollArea>
-                                    </div>
-                                )}
                             </div>
                         ) : (
                             <div className="grid gap-3 sm:grid-cols-[1.4fr,1fr]">
                                 <div className="flex flex-col gap-2 relative">
                                     <Label className="text-xs text-muted-foreground">Parent Directory</Label>
-                                    <Input
-                                        required
+                                    <DirectoryPicker
                                         value={parentDirectory}
-                                        onChange={e => setParentDirectory(e.target.value)}
-                                        onFocus={() => setDirInputFocused(true)}
-                                        onBlur={handleDirInputBlur}
-                                        onKeyDown={handleKeyDown}
+                                        onChange={setParentDirectory}
                                         placeholder="/absolute/path/to/parent"
-                                        className="font-mono text-xs"
                                     />
-                                    {showSuggestions && (
-                                        <div className="absolute top-[58px] left-0 right-0 z-50 rounded border bg-popover shadow-md">
-                                            <ScrollArea className="max-h-[180px]">
-                                                <div className="p-1">
-                                                    {dirSuggestions.map((entry, idx) => (
-                                                        <button
-                                                            key={entry.path}
-                                                            type="button"
-                                                            className={`w-full rounded px-2 py-1.5 text-left text-xs font-mono ${idx === activeSuggestionIndex ? 'bg-accent' : 'hover:bg-accent/70'}`}
-                                                            onMouseDown={e => { e.preventDefault(); applySuggestion(entry); }}
-                                                        >
-                                                            {entry.path}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </ScrollArea>
-                                        </div>
-                                    )}
                                 </div>
                                 <div className="flex flex-col gap-2">
                                     <Label className="text-xs text-muted-foreground">New Folder Name</Label>

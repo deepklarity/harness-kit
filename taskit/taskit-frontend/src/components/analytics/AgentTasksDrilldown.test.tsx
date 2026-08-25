@@ -78,6 +78,7 @@ describe('AgentTasksDrilldown — spec filter selector', () => {
                         boards={boards}
                         boardFilter=""
                         searchParams={new URLSearchParams('view=agent-tasks&agent=plan')}
+                        onParamsChange={vi.fn()}
                         onTaskClick={vi.fn()}
                         onBack={vi.fn()}
                     />
@@ -109,6 +110,7 @@ describe('AgentTasksDrilldown — spec filter selector', () => {
                         boards={boards}
                         boardFilter="5"
                         searchParams={new URLSearchParams('view=agent-tasks&agent=plan')}
+                        onParamsChange={vi.fn()}
                         onTaskClick={vi.fn()}
                         onBack={vi.fn()}
                     />
@@ -137,6 +139,7 @@ describe('AgentTasksDrilldown — spec filter selector', () => {
                         boards={boards}
                         boardFilter="5"
                         searchParams={params}
+                        onParamsChange={vi.fn()}
                         onTaskClick={vi.fn()}
                         onBack={vi.fn()}
                     />

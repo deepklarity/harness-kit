@@ -25,6 +25,8 @@
     "date-fns": "^4.1.0",
     "firebase": "^12.9.0",
     "geist": "^1.7.0",
+    "html2canvas-pro": "^2.2.1",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.564.0",
     "radix-ui": "^1.4.3",
     "react": "^19.2.0",

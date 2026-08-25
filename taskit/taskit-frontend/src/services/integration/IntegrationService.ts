@@ -8,6 +8,9 @@ import type {
     MemberListQuery,
     PaginatedResponse,
     PresetsResponse,
+    SpecPresetsResponse,
+    SkillsResponse,
+    ImportSkillsResponse,
     FactorySnapshot,
     InboxSnapshot,
     Spec,
@@ -33,6 +36,7 @@ import type {
     ExecutorCapacity,
     ExecutorMaxConcurrency,
     RoutingConfig,
+    RejectedSkill,
 } from '../../types';
 
 export interface AuthState {
@@ -45,6 +49,12 @@ export interface DirectoryEntry {
     name: string;
     path: string;
     has_children: boolean;
+}
+
+export interface DirectorySuggestResult {
+    base_path: string;
+    parent_path: string | null;
+    entries: DirectoryEntry[];
 }
 
 export interface StopExecutionResult {
@@ -104,7 +114,7 @@ export interface IntegrationService {
     cancelSchedule(scheduleId: string): Promise<TaskSchedule>;
     runScheduleNow(scheduleId: string): Promise<TaskScheduleRunResult>;
     deleteSchedule(scheduleId: string): Promise<void>;
-    suggestDirectories(query: string, limit?: number): Promise<DirectoryEntry[]>;
+    suggestDirectories(query: string, limit?: number): Promise<DirectorySuggestResult>;
     listDirectoryChildren(path: string, limit?: number): Promise<DirectoryEntry[]>;
 
     checkDirectory(path: string, options?: { mode?: 'existing' | 'create'; parentDirectory?: string; directoryName?: string }): Promise<DirectoryCheckResult>;
@@ -133,6 +143,7 @@ export interface IntegrationService {
             dependsOn?: string[];
             workingDir?: string;
             skipReflection?: boolean;
+            status?: string;
         }
     ): Promise<unknown>;
     updateTask(taskId: string, updates: {
@@ -200,8 +211,17 @@ export interface IntegrationService {
     fetchLeague(boardId: string, params?: { since_spec?: string }): Promise<LeagueResponse>;
     fetchQuotaStatus(): Promise<ProviderQuota[]>;
 
-    // Presets
+    // Presets & Skills
     fetchPresets(): Promise<PresetsResponse>;
+    fetchSpecPresets(): Promise<SpecPresetsResponse>;
+    fetchSkills(userOnly?: boolean): Promise<SkillsResponse>;
+    importSkills(source: string, force?: boolean, skillName?: string): Promise<ImportSkillsResponse>;
+    uploadSkill(file: File, force?: boolean): Promise<ImportSkillsResponse>;
+    deleteSkill(skillName: string): Promise<SkillsResponse>;
+    deleteAllSkills(): Promise<SkillsResponse>;
+    clearRejectedSkills(): Promise<{ status: string; rejected_skills: RejectedSkill[] }>;
+    installSkillDeps(skillName: string): Promise<SkillsResponse>;
+    toggleSkillPreset(skillName: string, enabled: boolean): Promise<SkillsResponse>;
 
     // Factory floor (live board operations dashboard)
     fetchFactorySnapshot(boardId: string): Promise<FactorySnapshot>;

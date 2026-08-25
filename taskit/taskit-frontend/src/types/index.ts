@@ -751,6 +751,70 @@ export interface PresetsResponse {
     presets: TaskPreset[];
 }
 
+export interface SpecPreset {
+    id: string;
+    title: string;
+    description: string;
+    category: string;
+    icon: string;
+    directive: string;
+    sort_order: number;
+}
+
+export interface SpecPresetsResponse {
+    version: number;
+    categories: PresetCategory[];
+    presets: SpecPreset[];
+}
+
+export interface InstalledSkill {
+    name: string;
+    title: string;
+    description: string;
+    path: string;
+    directory: string;
+    category?: string;
+    imported_from?: string;
+    is_generated?: boolean;
+    is_imported?: boolean;
+    preset_target?: 'task' | 'spec' | 'both' | 'none';
+    preset_enabled?: boolean;
+    is_task_preset?: boolean;
+    is_spec_preset?: boolean;
+    is_backend_only?: boolean;
+    dependencies_status?: 'ready' | 'needs_install' | 'missing_system_cli' | 'partial_error';
+    python_dependencies?: string[];
+    missing_system_cli?: string[];
+    scanned_files?: string[];
+}
+
+export interface SkillsResponse {
+    status: string;
+    skills: InstalledSkill[];
+    rejected_skills?: RejectedSkill[];
+}
+
+export interface RejectedSkill {
+    name: string;
+    title?: string;
+    description?: string;
+    directory?: string;
+    source?: string;
+    category?: string;
+    reason: string;
+    usefulness_score?: number;
+}
+
+export interface ImportSkillsResponse {
+    status: string;
+    imported: string[];
+    skipped: (string | { name: string; reason: string; title?: string; description?: string; directory?: string; source?: string; category?: string; usefulness_score?: number })[];
+    messages: string[];
+    skills: InstalledSkill[];
+    rejected?: RejectedSkill[];
+    rejected_skills?: RejectedSkill[];
+}
+
 export type ViewMode = 'overview' | 'board' | 'specs' | 'settings' | 'reflections' | 'notifications' | 'analytics' | 'scheduling'| 'providers' | 'factory' | 'league';
 
 // ─── Factory Types ────────────────────────────────────────────

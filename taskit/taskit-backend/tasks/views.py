@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import uuid
 from datetime import datetime, time
@@ -17,7 +18,8 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import status, viewsets
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, parser_classes
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -518,7 +520,528 @@ def _validate_forced_task_target(assignee=None, model_name=None):
     return
 
 
-def _validate_dispatch_readiness(board, spec_id, is_dispatch_transition):
+def _is_auditing_task(task_or_data):
+    from .audit_presets import is_auditing_task
+    return is_auditing_task(task_or_data)
+
+
+def _record_audit_baseline(task):
+    """Record the current HEAD SHA after a successful audit so the next
+    audit can skip when the codebase is unchanged (cost guard in
+    dag_executor._audit_codebase_unchanged_since_last).
+
+    Stored at <working_dir>/.odin/.last_audit_sha and
+    <working_dir>/.odin/.last_audit_sha_<category_slug>. Best-effort — never
+    raises; a recording failure just means the next audit won't be skippable.
+    """
+    import subprocess
+    board_root = _board_project_root(task)
+    if not board_root:
+        return
+    try:
+        result = subprocess.run(
+            ["git", "-C", board_root, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30,
+        )
+        sha = (result.stdout or "").strip()
+        if result.returncode != 0 or not sha:
+            return
+        odin_dir = os.path.join(board_root, ".odin")
+        os.makedirs(odin_dir, exist_ok=True)
+
+        sha_file = os.path.join(odin_dir, ".last_audit_sha")
+        with open(sha_file, "w", encoding="utf-8") as f:
+            f.write(sha)
+
+        from .dag_executor import _audit_category_subfolder, _audit_sha_filename
+        subfolder = _audit_category_subfolder(task)
+        if subfolder:
+            cat_file = os.path.join(odin_dir, _audit_sha_filename(subfolder))
+            with open(cat_file, "w", encoding="utf-8") as f:
+                f.write(sha)
+
+        logger.info("Recorded audit baseline SHA %s (subfolder: %s) at %s", sha[:8], subfolder, sha_file)
+    except Exception:
+        logger.warning("Failed to record audit baseline SHA", exc_info=True)
+
+
+
+# Map audit categories to their specific primary report filenames
+AUDIT_CATEGORY_MAPPINGS = [
+    (["frontend slop", "frontend_slop", "hk-frontend-slop-review", "frontend"], ["FRONTEND_SLOP_AUDIT_REPORT.md", "frontend_slop_report.md"]),
+    (["backend slop", "backend_slop", "hk-backend-slop-review", "backend"], ["BACKEND_SLOP_AUDIT_REPORT.md", "backend_slop_report.md"]),
+    (["ai slop", "ai_slop", "hk-ai-slop-review", "hk-slop-audit", "slop audit", "code slop"], ["AI_SLOP_AUDIT_REPORT.md", "AI_SLOP_AUDIT.md", "audit_slop_report.md", "slop_report.md", "ai-slop-report.md"]),
+    (["security", "hk-security-audit"], ["SECURITY_AUDIT_REPORT.md", "audit_security_report.md"]),
+    (["performance", "hk-performance-audit"], ["PERFORMANCE_AUDIT_REPORT.md"]),
+    (["test case", "test_case", "hk-test-case-audit", "test audit"], ["TEST_CASE_AUDIT_REPORT.md", "audit_test_report.md"]),
+    (["website ux", "hk-website-ux-audit"], ["WEBSITE_UX_AUDIT_REPORT.md"]),
+    (["web app ui", "hk-web-app-ui-audit"], ["WEB_APP_UI_AUDIT_REPORT.md"]),
+    (["mobile app", "hk-mobile-app-ui-audit"], ["MOBILE_APP_UI_AUDIT_REPORT.md"]),
+    (["ui gap", "ui_gap", "hk-ui-gaps-audit"], ["UI_GAPS_AUDIT_REPORT.md"]),
+    (["chart validation", "hk-chart-validation-audit"], ["CHART_VALIDATION_AUDIT_REPORT.md"]),
+    (["hygiene", "hk-hygiene-audit"], ["HYGIENE_AUDIT_REPORT.md"]),
+    (["loop audit", "hk-loop-audit", "loop_audit"], ["LOOP_AUDIT_REPORT.md", "audit_loop_report.md"]),
+    (["prompt comparison", "hk-prompt-comparison-audit"], ["PROMPT_COMPARISON_AUDIT_REPORT.md"]),
+    (["prompt quality", "hk-prompt-quality-audit"], ["PROMPT_QUALITY_AUDIT_REPORT.md"]),
+    (["architecture", "hk-architecture-audit"], ["ARCHITECTURE_AUDIT_REPORT.md", "ARCHITECTURE_REVIEW_REPORT.md"]),
+]
+
+ALL_KNOWN_AUDIT_REPORT_NAMES = [
+    "AI_SLOP_AUDIT_REPORT.md",
+    "BACKEND_SLOP_AUDIT_REPORT.md",
+    "FRONTEND_SLOP_AUDIT_REPORT.md",
+    "SECURITY_AUDIT_REPORT.md",
+    "TEST_CASE_AUDIT_REPORT.md",
+    "PERFORMANCE_AUDIT_REPORT.md",
+    "WEBSITE_UX_AUDIT_REPORT.md",
+    "WEB_APP_UI_AUDIT_REPORT.md",
+    "MOBILE_APP_UI_AUDIT_REPORT.md",
+    "UI_GAPS_AUDIT_REPORT.md",
+    "CHART_VALIDATION_AUDIT_REPORT.md",
+    "HYGIENE_AUDIT_REPORT.md",
+    "LOOP_AUDIT_REPORT.md",
+    "PROMPT_QUALITY_AUDIT_REPORT.md",
+    "PROMPT_COMPARISON_AUDIT_REPORT.md",
+    "ARCHITECTURE_AUDIT_REPORT.md",
+    "ARCHITECTURE_REVIEW_REPORT.md",
+    "AI_SLOP_AUDIT.md",
+    "report.md",
+    "audit_slop_report.md",
+    "audit_report.md",
+    "slop_report.md",
+    "frontend_slop_report.md",
+    "backend_slop_report.md",
+    "audit_security_report.md",
+    "audit_loop_report.md",
+    "audit_test_report.md",
+    "ai-slop-report.md",
+]
+
+
+def _clean_task_filesystem_artifacts(instance):
+    """Clean all proof dirs, logs, audit baselines, and audit report files associated with a task."""
+    wd = (getattr(instance.board, "working_dir", None) or "").strip() if getattr(instance, "board", None) else None
+    if not wd or not os.path.isdir(wd):
+        return
+
+    import shutil
+    import glob
+    import subprocess
+
+    task_id = instance.id
+    cat = (getattr(instance, "category", "") or "").lower()
+    title = (getattr(instance, "title", "") or "").lower()
+    desc = (getattr(instance, "description", "") or "").lower()
+
+    # 1. Clean up proof directories (.proof/task-<ID>, .proof/task_<ID>)
+    proof_dirs = [
+        os.path.join(wd, ".proof", f"task-{task_id}"),
+        os.path.join(wd, ".proof", f"task_{task_id}"),
+    ]
+    for pd in proof_dirs:
+        if os.path.isdir(pd):
+            try:
+                shutil.rmtree(pd)
+                logger.info("Removed task proof directory on deletion: %s", pd)
+            except Exception as e:
+                logger.warning("Failed removing proof dir %s: %s", pd, e)
+
+    # 2. Clean up task execution logs in .odin/logs/
+    odin_logs_dir = os.path.join(wd, ".odin", "logs")
+    if os.path.isdir(odin_logs_dir):
+        for pattern in (f"*{task_id}*", f"task_{task_id}.*", f"tmux_{task_id}.*"):
+            for log_file in glob.glob(os.path.join(odin_logs_dir, pattern)):
+                try:
+                    os.remove(log_file)
+                except Exception:
+                    pass
+
+    # 3. Clean up recorded audit baseline files and generated audit report files
+    if "audit" in cat or "audit" in title or "audit" in desc or "slop" in cat or "slop" in title or "slop" in desc:
+        odin_dir = os.path.join(wd, ".odin")
+        if os.path.isdir(odin_dir):
+            try:
+                from .dag_executor import _audit_category_subfolder, _audit_sha_filename
+                subfolder = _audit_category_subfolder(instance)
+                sha_files = [os.path.join(odin_dir, ".last_audit_sha")]
+                if subfolder:
+                    sha_files.append(os.path.join(odin_dir, _audit_sha_filename(subfolder)))
+                for sf in sha_files:
+                    if os.path.isfile(sf):
+                        try:
+                            os.remove(sf)
+                            logger.info("Removed audit baseline file on task deletion: %s", sf)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        # Also remove any matching audit report files in the project root or slop_review dir
+        context_text = f"{title} {desc} {cat}"
+        for keywords, file_names in AUDIT_CATEGORY_MAPPINGS:
+            if any(k in context_text for k in keywords):
+                for fn in file_names:
+                    for search_path in (os.path.join(wd, fn), os.path.join(wd, "slop_review", fn)):
+                        if os.path.isfile(search_path):
+                            try:
+                                os.remove(search_path)
+                                logger.info("Removed audit report on task deletion: %s", search_path)
+                            except Exception:
+                                pass
+
+    # 4. If HEAD git commit was created specifically for this deleted task, roll back HEAD
+    try:
+        res = subprocess.run(
+            ["git", "-C", wd, "log", "-1", "--pretty=%B"],
+            capture_output=True, text=True, timeout=5,
+        )
+        commit_msg = (res.stdout or "").strip()
+        if f"task {task_id}" in commit_msg.lower() or f"task-{task_id}" in commit_msg.lower():
+            subprocess.run(
+                ["git", "-C", wd, "reset", "--hard", "HEAD~1"],
+                capture_output=True, text=True, timeout=10,
+            )
+            logger.info("Reset git HEAD commit for deleted task %s", task_id)
+    except Exception:
+        pass
+
+
+def _clean_board_filesystem_artifacts(board):
+    """Clean all task proof dirs, task logs, audit baselines, and audit report files on board clear."""
+    wd = (getattr(board, "working_dir", None) or "").strip()
+    if not wd or not os.path.isdir(wd):
+        return
+
+    import shutil
+    import glob
+
+    # 1. Clean all proof directories (.proof/task-*, .proof/task_*)
+    proof_dir = os.path.join(wd, ".proof")
+    if os.path.isdir(proof_dir):
+        for item in os.listdir(proof_dir):
+            item_path = os.path.join(proof_dir, item)
+            if os.path.isdir(item_path) and (item.startswith("task-") or item.startswith("task_")):
+                try:
+                    shutil.rmtree(item_path)
+                    logger.info("Removed proof directory on board clear: %s", item_path)
+                except Exception as e:
+                    logger.warning("Failed removing proof dir %s: %s", item_path, e)
+
+    # 2. Clean task logs in .odin/logs/ (task_*, prompt_*, tmux_*, plan_*)
+    odin_logs_dir = os.path.join(wd, ".odin", "logs")
+    if os.path.isdir(odin_logs_dir):
+        for pattern in ("task_*", "prompt_*", "tmux_*", "plan_*"):
+            for log_file in glob.glob(os.path.join(odin_logs_dir, pattern)):
+                try:
+                    os.remove(log_file)
+                except Exception:
+                    pass
+
+    # 3. Clean audit sha baselines in .odin/
+    odin_dir = os.path.join(wd, ".odin")
+    if os.path.isdir(odin_dir):
+        for sha_file in glob.glob(os.path.join(odin_dir, ".last_audit_sha*")):
+            try:
+                os.remove(sha_file)
+            except Exception:
+                pass
+
+    # 4. Clean all known audit report markdown files from root and slop_review
+    for fn in ALL_KNOWN_AUDIT_REPORT_NAMES:
+        for target_file in (os.path.join(wd, fn), os.path.join(wd, "slop_review", fn)):
+            if os.path.isfile(target_file):
+                try:
+                    os.remove(target_file)
+                    logger.info("Removed audit report on board clear: %s", target_file)
+                except Exception:
+                    pass
+
+
+def _find_generated_markdown_reports(task):
+    if not task or not _is_auditing_task(task):
+        return []
+
+    if getattr(task, 'is_deleted', False) is True:
+        return []
+
+    from .execution.utils import resolve_working_dir
+    exec_dir = resolve_working_dir(task)
+    board_root = _board_project_root(task)
+
+    import os
+    import re
+    search_dirs = []
+    for d in (exec_dir, board_root):
+        if d:
+            cleaned = os.path.expanduser(str(d).strip())
+            if os.path.isdir(cleaned) and cleaned not in search_dirs:
+                search_dirs.append(cleaned)
+
+    if not search_dirs:
+        return []
+
+    task_context_text = f"{(task.title or '')} {(task.description or '')}"
+    if getattr(task, "schedule", None):
+        task_context_text += f" {(task.schedule.template_title or '')}"
+    task_context_lower = task_context_text.lower()
+
+    # Also inspect deliverables/comments from the agent to see if a specific report file was named
+    mentioned_report_names = set()
+    try:
+        for c in task.comments.all():
+            c_text = c.content or ""
+            for match in re.findall(r'[\w\-]+_AUDIT_REPORT\.md|[\w\-]+_report\.md', c_text, re.IGNORECASE):
+                mentioned_report_names.add(match)
+    except Exception:
+        pass
+
+    # 1. First priority: Check if a specific audit category matches the task and its report exists
+    primary_candidate_names = []
+    for keywords, file_names in AUDIT_CATEGORY_MAPPINGS:
+        if any(k in task_context_lower for k in keywords):
+            primary_candidate_names.extend(file_names)
+            break
+
+    # Add any explicitly mentioned report files to high priority candidates
+    for m_name in mentioned_report_names:
+        if m_name not in primary_candidate_names:
+            primary_candidate_names.append(m_name)
+
+    if primary_candidate_names:
+        matched_primary = []
+        for s_dir in search_dirs:
+            for name in primary_candidate_names:
+                path = os.path.join(s_dir, name)
+                if os.path.isfile(path) and path not in matched_primary:
+                    matched_primary.append(path)
+        if matched_primary:
+            return matched_primary
+
+    # 2. Fallback: Generic scan across all known audit report names if no specific category matched
+    all_known_names = ALL_KNOWN_AUDIT_REPORT_NAMES
+
+    md_files = []
+    for s_dir in search_dirs:
+        for name in all_known_names:
+            path = os.path.join(s_dir, name)
+            if os.path.isfile(path) and path not in md_files:
+                md_files.append(path)
+        try:
+            for root, dirs, files in os.walk(s_dir):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "build", "dist", ".next", "out", ".proof")]
+                for file in files:
+                    if file.lower().endswith(".md") and not file.lower().startswith("proof") and ".proof" not in root:
+                        path = os.path.join(root, file)
+                        try:
+                            with open(path, 'r', encoding='utf-8') as f_read:
+                                file_head = f_read.read(4096)
+                                head_upper = file_head.upper()
+                                if any(k in head_upper for k in ("EXECUTIVE OVERVIEW", "DETAILED FINDINGS", "RANKED PROBLEMS", "SLOP REVIEW", "FRONTEND SLOP", "BACKEND SLOP", "AUDIT REPORT", "FINDINGS", "SLOP SUMMARY")):
+                                    if path not in md_files:
+                                        md_files.append(path)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error("Failed to recursively scan directory %s: %s", s_dir, e)
+
+    return md_files
+
+
+def _request_audit_compilation_confirmation(task):
+    """Post a question comment asking if user wants the markdown report compiled to HTML."""
+    if not task or not _is_auditing_task(task):
+        return
+
+    if getattr(task, 'is_deleted', False) is True:
+        return
+
+    task_status = str(getattr(task, 'status', '')).upper()
+    if task_status in ('CANCELED', 'DELETED'):
+        return
+
+    md_files = _find_generated_markdown_reports(task)
+    if not md_files:
+        return
+
+    task.metadata = task.metadata or {}
+    pending_info = task.metadata.get("pending_compile_audit")
+    if (
+        pending_info
+        and isinstance(pending_info, dict)
+        and set(pending_info.get("report_files", [])) == set(md_files)
+        and task.metadata.get("has_pending_question")
+    ):
+        return
+
+    file_labels = ", ".join([f"`{os.path.basename(f)}`" for f in md_files])
+    question_content = (
+        f"Audit report generated: {file_labels}.\n\n"
+        f"Would you like to compile this into an interactive HTML report? Reply with **Yes** or **No**."
+    )
+
+    try:
+        from .models import CommentType, TaskComment, BoardMembership
+        comment = TaskComment.objects.create(
+            task=task,
+            schedule_run=getattr(task, "current_schedule_run", None),
+            author_email="system@odin.agent",
+            author_label="audit-compiler",
+            content=question_content,
+            attachments=[{
+                "type": "question",
+                "question_type": "compile_audit",
+                "report_files": md_files,
+                "status": "pending",
+            }],
+            comment_type=CommentType.QUESTION,
+        )
+
+        task.metadata["has_pending_question"] = True
+        task.metadata["pending_compile_audit"] = {
+            "question_comment_id": comment.id,
+            "report_files": md_files,
+        }
+        task.save(update_fields=["metadata"])
+
+        try:
+            from .notification_service import notify
+            member_ids = list(
+                BoardMembership.objects.filter(board=task.board).values_list("user_id", flat=True)
+            )
+            if member_ids:
+                notify(
+                    recipient_ids=member_ids,
+                    notification_type="question_asked",
+                    title=f'Compile audit report for "{task.title}"?',
+                    body=f"Audit report generated: {file_labels}. Would you like to compile to HTML?",
+                    task=task,
+                    board=task.board,
+                    actor_email="system@odin.agent",
+                )
+        except Exception:
+            logger.warning("Failed sending notification for audit compilation question", exc_info=True)
+
+        logger.info("Posted audit compilation confirmation question for task %s (files: %s)", task.id, file_labels)
+    except Exception as exc:
+        logger.error("Failed to request audit compilation confirmation for task %s: %s", task.id, exc, exc_info=True)
+
+
+def _compile_generated_markdown_reports(task, md_files=None):
+    if not task or not _is_auditing_task(task):
+        return []
+
+    if getattr(task, 'is_deleted', False) is True:
+        return []
+
+    if md_files is None:
+        task_status = str(getattr(task, 'status', '')).upper()
+        if task_status not in ('DONE', 'REVIEW') and task_status in ('CANCELED', 'DELETED'):
+            return []
+        md_files = _find_generated_markdown_reports(task)
+
+    if not md_files:
+        return []
+
+    import sys
+    from pathlib import Path
+    harness_kit_dir = str(Path(__file__).resolve().parents[3])
+    if harness_kit_dir not in sys.path:
+        sys.path.insert(0, harness_kit_dir)
+
+    try:
+        from compile_audit import parse_markdown, generate_html_report, get_next_audit_info
+    except ImportError:
+        logger.error("Could not import compile_audit from %s", harness_kit_dir)
+        return []
+
+    board_root = _board_project_root(task)
+    board_root_clean = os.path.expanduser(board_root.strip()) if board_root else None
+
+    from .dag_executor import _audit_category_subfolder
+    task_cat_subfolder = _audit_category_subfolder(task)
+
+    compiled_paths = []
+    for md_path in md_files:
+        filename = os.path.basename(md_path).lower()
+        is_test_report = "test" in filename
+        
+        cat_subfolder = None
+        if "security" in filename:
+            cat_subfolder = "Security Audit"
+        elif "frontend" in filename:
+            cat_subfolder = "Frontend Slop"
+        elif "backend" in filename:
+            cat_subfolder = "Backend Slop"
+        elif "test" in filename:
+            cat_subfolder = "Test Case"
+        elif "performance" in filename:
+            cat_subfolder = "Performance Audit"
+        elif "mobile" in filename:
+            cat_subfolder = "Mobile UX"
+        elif "web" in filename or "ux" in filename or "website" in filename:
+            cat_subfolder = "Website UX"
+        elif "gaps" in filename:
+            cat_subfolder = "UI Gaps"
+        elif "chart" in filename:
+            cat_subfolder = "Chart Audit"
+        elif "hygiene" in filename:
+            cat_subfolder = "Hygiene Audit"
+        elif "loop" in filename:
+            cat_subfolder = "Loop Audit"
+        elif "prompt" in filename:
+            cat_subfolder = "Prompt Audit"
+        elif "arch" in filename or "architecture" in filename:
+            cat_subfolder = "Architecture Audit"
+        elif "ai_slop" in filename or "ai-slop" in filename or "slop_audit" in filename:
+            cat_subfolder = "AI Slop"
+        else:
+            cat_subfolder = task_cat_subfolder or "AI Slop"
+
+        if board_root_clean:
+            target_root = board_root_clean
+        else:
+            target_root = os.path.dirname(os.path.abspath(md_path))
+            
+        html_path, previous_score, next_idx, previous_findings = get_next_audit_info(
+            target_root, is_test_report, category_subfolder=cat_subfolder
+        )
+
+        try:
+            logger.info("Compiling %s to %s (previous score: %s)", md_path, html_path, previous_score)
+            title, metadata, disclaimer, sections = parse_markdown(md_path)
+            generate_html_report(
+                title, metadata, disclaimer, sections, html_path,
+                previous_score=previous_score,
+                previous_findings=previous_findings,
+                next_idx=next_idx
+            )
+            compiled_paths.append(html_path)
+
+            # Record current HEAD as the audit baseline so the cost guard can
+            # detect an unchanged codebase on the next dispatch and skip re-auditing.
+            # This is the ONLY place the SHA is written after a successful audit.
+            _record_audit_baseline(task)
+
+            # Always delete the compiled markdown source report so it is not re-compiled on future runs.
+            # Avoid deleting proof files (.proof/) and kit internal files (.odin/).
+            abs_md = os.path.abspath(md_path)
+            is_protected = False
+            if board_root_clean:
+                proof_dir = os.path.join(os.path.abspath(board_root_clean), ".proof")
+                odin_dir = os.path.join(os.path.abspath(board_root_clean), ".odin")
+                if abs_md.startswith(proof_dir) or abs_md.startswith(odin_dir):
+                    is_protected = True
+
+            if not is_protected and os.path.exists(abs_md):
+                logger.info("Removing source markdown report: %s", md_path)
+                os.remove(abs_md)
+        except Exception as exc:
+            logger.error("Failed compiling report %s: %s", md_path, exc, exc_info=True)
+
+    return compiled_paths
+
+
+def _validate_dispatch_readiness(board, spec_id, is_dispatch_transition, task_or_data=None):
     """Refuse a transition into IN_PROGRESS for a task with no spec on a
     board that hasn't opted into project-root execution.
 
@@ -539,6 +1062,8 @@ def _validate_dispatch_readiness(board, spec_id, is_dispatch_transition):
     if spec_id:
         return
     if board.allow_project_root_execution:
+        return
+    if task_or_data and _is_auditing_task(task_or_data):
         return
     raise ValidationError({
         "status": (
@@ -1658,12 +2183,12 @@ def _validate_dependency_selection(board, depends_on, task=None):
         if dep_id in existing_ids:
             continue
         dep = dep_map[dep_id]
-        if dep.status not in {TaskStatus.TODO, TaskStatus.IN_PROGRESS}:
+        if dep.status not in {TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.EXECUTING}:
             invalid_statuses.append(f"{dep_id}:{dep.status}")
     if invalid_statuses:
         raise ValidationError({
             "depends_on": (
-                "New dependencies must be in TODO or IN_PROGRESS. "
+                "New dependencies must be in TODO, IN_PROGRESS, or EXECUTING. "
                 f"Invalid: {', '.join(invalid_statuses)}"
             )
         })
@@ -2662,8 +3187,10 @@ class BoardViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def clear(self, request, *args, **kwargs):
-        """Delete all tasks (and their history via cascade) and specs for this board."""
+        """Delete all tasks (and their history via cascade) and specs for this board,
+        and clean up all task proof dirs, logs, and audit artifacts from the project directory."""
         board = self.get_object()
+        _clean_board_filesystem_artifacts(board)
         tasks_deleted, _ = Task.objects.filter(board=board).delete()
         specs_deleted, _ = Spec.objects.filter(board=board).delete()
         return Response({
@@ -3256,6 +3783,10 @@ def _attempt_odin_stop(task, force=False):
     }
 
 
+
+
+
+
 def _apply_stop_transition(task, target_status, updated_by, reason, stop_result):
     """Persist post-stop status/metadata/history/comment updates.
 
@@ -3264,6 +3795,9 @@ def _apply_stop_transition(task, target_status, updated_by, reason, stop_result)
     pending_* keys (they've been applied) while keeping the durable guards
     in place so any late execution_result webhook still gets discarded.
     """
+    if _is_auditing_task(task):
+        target_status = TaskStatus.DONE
+
     run_token = ((task.metadata or {}).get("active_execution") or {}).get("run_token")
     task_runs.finish_run(run_token, state=TaskRunState.KILLED)
     metadata = dict(task.metadata or {})
@@ -3307,6 +3841,12 @@ def _apply_stop_transition(task, target_status, updated_by, reason, stop_result)
         comment_type=CommentType.STATUS_UPDATE,
     )
     maybe_finalize_schedule_run(task, target_status)
+
+    # Request user confirmation for compiling any generated markdown reports on stop
+    try:
+        _request_audit_compilation_confirmation(task)
+    except Exception as e:
+        logger.error("Failed to request audit compilation confirmation on stop: %s", e)
 
     return {"task": _task_response(task.id), "stop": stop_result}
 
@@ -3462,6 +4002,10 @@ class TaskViewSet(viewsets.ModelViewSet):
         }))
         return qs
 
+    def perform_destroy(self, instance):
+        _clean_task_filesystem_artifacts(instance)
+        super().perform_destroy(instance)
+
     def get_serializer_class(self):
         if self.action == "list":
             return TaskListSerializer
@@ -3504,6 +4048,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             board=board,
             spec_id=d.get("spec_id"),
             is_dispatch_transition=d.get("status", "TODO") == TaskStatus.IN_PROGRESS,
+            task_or_data=d,
         )
 
         task = Task.objects.create(
@@ -3550,6 +4095,18 @@ class TaskViewSet(viewsets.ModelViewSet):
             task.id, task.title, task.spec_id, assignee.name if assignee else None,
             model_name, task.status,
         )
+
+        if task.status == TaskStatus.IN_PROGRESS:
+            logger.important(
+                "Task %s created directly in IN_PROGRESS (assignee=%s)",
+                task.id, task.assignee_id,
+            )
+            if task.assignee_id:
+                from .execution import get_strategy
+                strategy = get_strategy()
+                if strategy:
+                    logger.info("Firing execution strategy for task %s on creation", task.id)
+                    strategy.trigger(task)
 
         return Response(_task_response(task.id), status=status.HTTP_201_CREATED)
 
@@ -3728,6 +4285,7 @@ class TaskViewSet(viewsets.ModelViewSet):
                 target_status == TaskStatus.IN_PROGRESS
                 and old_status not in (TaskStatus.IN_PROGRESS, TaskStatus.EXECUTING)
             ),
+            task_or_data=task,
         )
 
         if target_index is not None or old_status != target_status:
@@ -4256,7 +4814,44 @@ class TaskViewSet(viewsets.ModelViewSet):
             task.metadata["executing_paused_ms"] = (
                 task.metadata.get("executing_paused_ms", 0) + pause_ms
             )
+
+        # Check if this reply answers an audit compilation question
+        pending_audit = task.metadata.pop("pending_compile_audit", None)
+        is_compile_audit_q = False
+        for att in (question_comment.attachments or []):
+            if isinstance(att, dict) and att.get("question_type") == "compile_audit":
+                is_compile_audit_q = True
+                break
+
         task.save(update_fields=["metadata"])
+
+        if pending_audit or is_compile_audit_q:
+            reply_text = ser.validated_data["content"].strip().lower()
+            if re.search(r'\b(yes|y|compile|sure|ok|proceed|yep|yeah)\b', reply_text, re.IGNORECASE):
+                specific_files = pending_audit.get("report_files") if isinstance(pending_audit, dict) else None
+                try:
+                    compiled = _compile_generated_markdown_reports(task, md_files=specific_files)
+                    if compiled:
+                        compiled_summary = ", ".join([f"`{os.path.basename(c)}`" for c in compiled])
+                        TaskComment.objects.create(
+                            task=task,
+                            schedule_run=task.current_schedule_run,
+                            author_email="system@odin.agent",
+                            author_label="audit-compiler",
+                            content=f"Compiled interactive HTML report: {compiled_summary}.",
+                            comment_type=CommentType.STATUS_UPDATE,
+                        )
+                except Exception as exc:
+                    logger.error("Failed to compile audit report after user confirmation: %s", exc)
+            else:
+                TaskComment.objects.create(
+                    task=task,
+                    schedule_run=task.current_schedule_run,
+                    author_email="system@odin.agent",
+                    author_label="audit-compiler",
+                    content="Audit HTML compilation skipped. Raw markdown report retained.",
+                    comment_type=CommentType.STATUS_UPDATE,
+                )
 
         return Response(
             TaskCommentSerializer(reply_comment, context={"request": request}).data, status=status.HTTP_201_CREATED
@@ -4329,6 +4924,9 @@ class TaskViewSet(viewsets.ModelViewSet):
         success = exec_result["success"]
         if parsed_success is not None:
             success = parsed_success
+
+        if success and _is_auditing_task(task):
+            new_status = TaskStatus.DONE
 
         # 3. Compose comment
         verb = "Completed" if success else "Failed"
@@ -4476,6 +5074,12 @@ class TaskViewSet(viewsets.ModelViewSet):
         # Trigger auto-reflection when execution result moves task to REVIEW
         if new_status == TaskStatus.REVIEW and old_status != TaskStatus.REVIEW:
             _trigger_auto_reflection(task)
+
+        # Request user confirmation for compiling any generated markdown reports on execution completion
+        try:
+            _request_audit_compilation_confirmation(task)
+        except Exception as e:
+            logger.error("Failed to request audit compilation confirmation on execution complete: %s", e)
 
         return Response(_task_response(task.id))
 
@@ -5824,6 +6428,8 @@ class SpecViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         spec = self.get_object()
+        for task in Task.objects.filter(spec=spec):
+            _clean_task_filesystem_artifacts(task)
         Task.objects.filter(spec=spec).delete()
         spec.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -6404,12 +7010,222 @@ def sandbox_config(request):
 
 
 @api_view(["GET"])
+def list_skills(request):
+    """Return list of installed skills in .claude/skills/ with classification metadata."""
+    from .skill_importer import list_installed_skills, load_rejected_skills
+    user_only = request.query_params.get("user_only") != "0" and request.query_params.get("all") not in ("1", "true", "True")
+    skills = list_installed_skills(user_only=user_only)
+    rejected_skills = load_rejected_skills()
+    return Response({"status": "success", "skills": skills, "rejected_skills": rejected_skills})
+
+
+@api_view(["POST"])
+def import_skills(request):
+    """Import skills from a Git URL, local directory path, raw link, or zip archive."""
+    from .skill_importer import import_skills_from_source
+    source = request.data.get("source", "")
+    force = bool(request.data.get("force", False))
+    skill_name = request.data.get("skill_name") or request.data.get("name") or request.data.get("target_skill_name")
+    try:
+        res = import_skills_from_source(source, force=force, target_skill_name=skill_name)
+        return Response(res)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.error("Failed importing skills from %s: %s", source, exc)
+        return Response({"error": f"Failed importing skills: {exc}"}, status=500)
+
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def upload_skill(request):
+    """Upload a skill archive (.zip, .tar.gz) or SKILL.md file directly."""
+    from .skill_importer import import_skills_from_upload, MAX_IMPORT_FILE_SIZE_BYTES
+
+    uploaded_file = request.FILES.get("file")
+    if not uploaded_file:
+        return Response({"error": "No file provided in payload"}, status=400)
+
+    if uploaded_file.size > MAX_IMPORT_FILE_SIZE_BYTES:
+        return Response({"error": f"File '{uploaded_file.name}' exceeds maximum allowed upload size of 15 MB."}, status=400)
+
+    force = str(request.data.get("force", "")).lower() in ("1", "true", "True")
+    try:
+        res = import_skills_from_upload(uploaded_file, uploaded_file.name, force=force)
+        return Response(res)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.error("Failed uploading skill %s: %s", uploaded_file.name, exc)
+        return Response({"error": f"Failed uploading skill: {exc}"}, status=500)
+
+
+@api_view(["DELETE", "POST"])
+def delete_skill(request, skill_name=None):
+    """Delete an installed skill directory from .claude/skills/."""
+    from .skill_importer import delete_installed_skill
+    target_name = skill_name or (request.data.get("skill_name") if isinstance(request.data, dict) else None) or (request.data.get("name") if isinstance(request.data, dict) else None)
+    
+    if not target_name and request.body:
+        import json
+        try:
+            body_json = json.loads(request.body.decode("utf-8"))
+            if isinstance(body_json, dict):
+                target_name = body_json.get("skill_name") or body_json.get("name")
+        except Exception:
+            pass
+
+    if not target_name:
+        return Response({"error": "'skill_name' is required"}, status=400)
+
+    try:
+        res = delete_installed_skill(target_name)
+        return Response(res)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=404)
+    except Exception as exc:
+        logger.error("Failed deleting skill %s: %s", target_name, exc)
+        return Response({"error": f"Failed deleting skill: {exc}"}, status=500)
+
+
+@api_view(["DELETE", "POST"])
+def delete_all_skills(request):
+    """Delete all installed user/imported skills from .claude/skills/ on disk."""
+    from .skill_importer import delete_all_installed_skills
+    try:
+        res = delete_all_installed_skills(user_only=True)
+        return Response(res)
+    except Exception as exc:
+        logger.error("Failed deleting all skills: %s", exc)
+        return Response({"error": f"Failed deleting all skills: {exc}"}, status=500)
+
+
+@api_view(["DELETE", "POST"])
+def clear_rejected_skills_view(request):
+    """Clear all uninstalled / rejected skills from persistence."""
+    from .skill_importer import clear_rejected_skills
+    try:
+        res = clear_rejected_skills()
+        return Response(res)
+    except Exception as exc:
+        logger.error("Failed clearing rejected skills: %s", exc)
+        return Response({"error": f"Failed clearing rejected skills: {exc}"}, status=500)
+
+
+@api_view(["POST"])
+def install_skill_deps(request, skill_name=None):
+    """Pre-install dependencies for a specific installed skill into .venv."""
+    from .skill_importer import install_skill_dependencies, list_installed_skills
+    target_name = skill_name or (request.data.get("skill_name") if isinstance(request.data, dict) else None)
+    if not target_name:
+        return Response({"error": "Skill name is required"}, status=400)
+
+    try:
+        res = install_skill_dependencies(target_name)
+        res["skills"] = list_installed_skills(user_only=True)
+        return Response(res)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.error("Failed pre-installing dependencies for skill %s: %s", target_name, exc)
+        return Response({"error": f"Failed installing dependencies: {exc}"}, status=500)
+
+
+@api_view(["POST"])
+def toggle_skill_preset(request, skill_name=None):
+    """Toggle preset_enabled status for an installed skill."""
+    from .skill_importer import toggle_skill_preset as toggle_preset
+    target_name = skill_name or (request.data.get("skill_name") if isinstance(request.data, dict) else None)
+    if not target_name:
+        return Response({"error": "Skill name is required"}, status=400)
+
+    enabled = request.data.get("enabled")
+    if enabled is None:
+        enabled = request.data.get("preset_enabled")
+    if enabled is None:
+        enabled = True
+    else:
+        enabled = str(enabled).lower() in ("1", "true", "True")
+
+    try:
+        res = toggle_preset(target_name, enabled)
+        return Response(res)
+    except ValueError as exc:
+        return Response({"error": str(exc)}, status=404)
+    except Exception as exc:
+        logger.error("Failed toggling preset for skill %s: %s", target_name, exc)
+        return Response({"error": f"Failed toggling skill preset: {exc}"}, status=500)
+
+
+
+CUSTOM_SKILLS_CATEGORY = {
+    "slug": "custom-skills",
+    "name": "Custom & Imported Skills",
+    "description": "Skills imported or added to .claude/skills/",
+    "icon": "sparkles",
+    "sort_order": 99,
+}
+
+
+@api_view(["GET"])
 def list_presets(request):
     # load_presets validates any preset carrying an `audit` block against the
     # audit-preset contract (tasks/audit_presets.py) and enforces unique ids.
+    from .skill_importer import get_skills_as_presets
     data = load_presets()
     if request.query_params.get("include_disabled") not in ("1", "true", "True"):
         data = {**data, "presets": [p for p in data["presets"] if not p.get("disabled")]}
+
+    # Dynamically merge custom task presets from .claude/skills/
+    custom_task_presets, _ = get_skills_as_presets()
+    existing_ids = {p["id"] for p in data["presets"]}
+    new_custom_presets = [p for p in custom_task_presets if p["id"] not in existing_ids and f"hk-{p['id']}" not in existing_ids]
+
+    if new_custom_presets:
+        categories = list(data.get("categories", []))
+        if not any(c.get("slug") == "custom-skills" for c in categories):
+            categories.append(CUSTOM_SKILLS_CATEGORY)
+        data = {
+            **data,
+            "categories": categories,
+            "presets": data["presets"] + new_custom_presets,
+        }
+
+    return Response(data)
+
+
+@api_view(["GET"])
+def list_spec_presets(request):
+    """
+    Returns the spec skill directives catalog from data/spec_presets.json.
+    """
+    from .skill_importer import get_skills_as_presets
+    spec_presets_path = Path(__file__).resolve().parents[1] / "data" / "spec_presets.json"
+    if not spec_presets_path.is_file():
+        data = {"version": 1, "categories": [], "presets": []}
+    else:
+        try:
+            with open(spec_presets_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as exc:
+            logger.error("Failed loading spec_presets.json: %s", exc)
+            data = {"version": 1, "categories": [], "presets": []}
+
+    # Dynamically merge custom spec directives from .claude/skills/
+    _, custom_spec_presets = get_skills_as_presets()
+    existing_ids = {p["id"] for p in data.get("presets", [])}
+    new_custom_presets = [p for p in custom_spec_presets if p["id"] not in existing_ids and f"hk-{p['id']}" not in existing_ids]
+
+    if new_custom_presets:
+        categories = list(data.get("categories", []))
+        if not any(c.get("slug") == "custom-skills" for c in categories):
+            categories.append(CUSTOM_SKILLS_CATEGORY)
+        data = {
+            **data,
+            "categories": categories,
+            "presets": data.get("presets", []) + new_custom_presets,
+        }
+
     return Response(data)
 
 
@@ -6420,6 +7236,7 @@ def manage_preset(request):
     disk (no DB-backed shadow copy) so every preset change is a git diff.
     """
     from .audit_presets import PresetValidationError, save_presets, validate_preset_shape
+    from .skill_importer import delete_installed_skill
 
     action = (request.data.get("action") or "").strip().lower()
     if action not in ("add", "update", "delete", "disable", "enable"):
@@ -6454,16 +7271,31 @@ def manage_preset(request):
     else:
         pid = request.data.get("id")
         if pid not in index_by_id:
+            if action == "delete":
+                from .skill_importer import get_skills_dir
+                s_dir = get_skills_dir()
+                target_skill = s_dir / pid if (s_dir / pid).exists() else (s_dir / f"hk-{pid}" if (s_dir / f"hk-{pid}").exists() else None)
+                if target_skill is not None:
+                    try:
+                        delete_installed_skill(target_skill.name)
+                        return Response(list_presets(request._request).data)
+                    except Exception:
+                        pass
             return Response({"error": f"preset {pid!r} not found"}, status=404)
         if action == "delete":
             presets.pop(index_by_id[pid])
+            try:
+                delete_installed_skill(pid)
+                delete_installed_skill(f"hk-{pid}")
+            except Exception:
+                pass
         elif action == "disable":
             presets[index_by_id[pid]]["disabled"] = True
         elif action == "enable":
             presets[index_by_id[pid]].pop("disabled", None)
 
     save_presets(data)
-    return Response(load_presets())
+    return Response(list_presets(request._request).data)
 
 
 # ── Executor Capacity ──────────────────────────────────────────────────────

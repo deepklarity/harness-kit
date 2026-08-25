@@ -12,7 +12,7 @@ const DEBOUNCE_MS = 1500;
  */
 export function useTaskCardAutoRefresh(
     selectedTask: Task | null,
-    setSelectedTask: (task: Task) => void,
+    setSelectedTask: (task: Task | ((prev: Task | null) => Task | null)) => void,
     service: IntegrationService,
 ) {
     const { subscribeToIncoming } = useNotifications();
@@ -20,10 +20,11 @@ export function useTaskCardAutoRefresh(
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
-        const unsubscribe = subscribeToIncoming((incoming: Notification[]) => {
-            const taskId = selectedTask?.id;
-            if (!taskId) return;
+        const taskId = selectedTask?.id;
+        if (!taskId) return;
 
+        // 1. Subscribe to incoming notifications for instant updates on notification triggers
+        const unsubscribe = subscribeToIncoming((incoming: Notification[]) => {
             const matches = incoming.some(n => n.task !== null && String(n.task) === taskId);
             if (!matches) return;
 
@@ -40,7 +41,13 @@ export function useTaskCardAutoRefresh(
                 service.fetchTaskDetail(taskId)
                     .then(detail => {
                         if (!controller.signal.aborted) {
-                            setSelectedTask(detail);
+                            setSelectedTask(prev => {
+                                if (!prev || prev.id !== taskId) return prev;
+                                if (prev.boardName && !detail.boardName) {
+                                    detail.boardName = prev.boardName;
+                                }
+                                return detail;
+                            });
                         }
                     })
                     .catch(err => {
@@ -51,10 +58,41 @@ export function useTaskCardAutoRefresh(
             }, DEBOUNCE_MS);
         });
 
+        // 2. Setup active polling while task modal is open to stream live execution status,
+        // comments, activity logs, and timing updates without requiring close/reopen.
+        const isExecuting = ['EXECUTING', 'IN_PROGRESS', 'PENDING', 'RUNNING'].includes(
+            (selectedTask?.currentStatus || '').toUpperCase()
+        );
+        const pollIntervalMs = isExecuting ? 2500 : 6000;
+
+        const intervalId = setInterval(() => {
+            const controller = new AbortController();
+            abortRef.current = controller;
+
+            service.fetchTaskDetail(taskId)
+                .then(detail => {
+                    if (!controller.signal.aborted) {
+                        setSelectedTask(prev => {
+                            if (!prev || prev.id !== taskId) return prev;
+                            if (prev.boardName && !detail.boardName) {
+                                detail.boardName = prev.boardName;
+                            }
+                            return detail;
+                        });
+                    }
+                })
+                .catch(err => {
+                    if (err?.name !== 'AbortError') {
+                        // Silently ignore polling network errors
+                    }
+                });
+        }, pollIntervalMs);
+
         return () => {
             unsubscribe();
+            clearInterval(intervalId);
             if (timerRef.current) clearTimeout(timerRef.current);
             if (abortRef.current) abortRef.current.abort();
         };
-    }, [selectedTask?.id, subscribeToIncoming, service, setSelectedTask]);
+    }, [selectedTask?.id, selectedTask?.currentStatus, subscribeToIncoming, service, setSelectedTask]);
 }

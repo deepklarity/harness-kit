@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils'
 import {
     parseTrace,
+    buildTimeline,
     buildTimelineWithMeta,
     extractTokenSummary,
     formatTokens,
@@ -20,6 +21,8 @@ import {
 
 // Re-export for callers that imported these names from TraceViewer.
 export type { TraceEvent, TimelineNode };
+export { parseTrace, buildTimeline };
+
 
 // ---------------------------------------------------------------------------
 // Timeline Parsing & Rendering
@@ -287,7 +290,7 @@ function CollapsibleTextNode({ node }: { node: TimelineNode & { type: 'text' } }
     );
 }
 
-function TimelineNodeRenderer({ node }: { node: TimelineNode }) {
+export function TimelineNodeRenderer({ node }: { node: TimelineNode }) {
     if (node.type === 'text') {
         return <CollapsibleTextNode node={node} />;
     }

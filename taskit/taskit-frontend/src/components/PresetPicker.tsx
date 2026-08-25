@@ -21,6 +21,7 @@ const CATEGORY_COLORS: Record<string, string> = {
     'analysis': '#f97316',
     'quality-process': '#8b5cf6',
     'development': '#ec4899',
+    'custom-skills': '#3b82f6',
 };
 
 export function PresetPicker({ presets, categories, selectedPreset, onSelect, onClear }: PresetPickerProps) {

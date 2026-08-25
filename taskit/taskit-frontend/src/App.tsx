@@ -1,3 +1,4 @@
+import { GameSetupScreen } from './components/game/GameSetupScreen';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Routes, Route, useNavigate, useLocation, useParams, Navigate, useSearchParams } from 'react-router-dom';
 import type { Board, Label, Member, Spec, Task, ViewMode } from './types';
@@ -417,7 +418,7 @@ function App() {
         boardId: string, title: string, description: string, priority: string,
         assigneeId: number, modelName: string | undefined, devEta?: number,
         labelIds?: number[], dependsOn?: string[], workingDir?: string,
-        skipReflection?: boolean
+        skipReflection?: boolean, status?: string
     ): Promise<string> => {
         const result = await service.createTask(
             boardId,
@@ -433,6 +434,7 @@ function App() {
                 dependsOn,
                 workingDir,
                 skipReflection,
+                status,
             },
         ) as { id: number };
         await refreshDependencyTasksForBoard(boardId);
@@ -653,6 +655,7 @@ function App() {
                 <main className={`flex-1 w-full py-6 px-4 sm:px-6 lg:px-8 ${isFullWidthBoard ? 'max-w-none' : 'max-w-[90vw] mx-auto'}`}>
                     <Routes>
                         <Route path="/" element={<Navigate to="/board" replace />} />
+                        <Route path="/game-setup" element={<GameSetupScreen />} />
                         <Route path="/stats" element={
                             <>
                                 <SectionHeader title="Stats" />
@@ -701,7 +704,7 @@ function App() {
                             </>
                         } />
                         <Route path="/specs/:specId" element={
-                            <SpecDetailRoute onTaskClick={handleTaskSelect} onDeleteSpec={handleDeleteSpec} specs={specs} />
+                            <SpecDetailRoute onTaskClick={handleTaskSelect} onDeleteSpec={handleDeleteSpec} specs={specs} boards={boards} />
                         } />
                         <Route path="/specs/:specId/debug" element={
                             <SpecDebugRoute onTaskClick={handleTaskSelect} />
@@ -812,10 +815,11 @@ function App() {
     );
 }
 
-function SpecDetailRoute({ onTaskClick, onDeleteSpec, specs }: {
+function SpecDetailRoute({ onTaskClick, onDeleteSpec, specs, boards }: {
     onTaskClick: (taskId: string) => void;
     onDeleteSpec: (specId: string) => void;
     specs?: Spec[];
+    boards?: Board[];
 }) {
     const { specId } = useParams();
     const navigate = useNavigate();
@@ -823,12 +827,14 @@ function SpecDetailRoute({ onTaskClick, onDeleteSpec, specs }: {
     if (!specId) return <Navigate to="/specs" replace />;
     const cachedSpec = specs?.find(s => s.id === specId);
     const board = searchParams.get('board');
+    const boardName = boards?.find(b => b.id === (cachedSpec?.boardId || board || ''))?.name;
     return (
         <>
             <SectionHeader title="Specs" />
             <SpecDetailView
                 specId={specId}
                 spec={cachedSpec}
+                boardName={boardName}
                 onBack={() => navigate(board ? `/specs?board=${board}` : '/specs')}
                 onTaskClick={onTaskClick}
                 onDeleteSpec={onDeleteSpec}

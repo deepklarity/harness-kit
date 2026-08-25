@@ -37,6 +37,13 @@ def auto_comment_on_status_transition(sender, instance, created, **kwargs):
         return
 
     new_status = (instance.new_value or "").upper()
+    if new_status in ("DONE", "REVIEW"):
+        try:
+            from .views import _request_audit_compilation_confirmation
+            _request_audit_compilation_confirmation(instance.task)
+        except Exception as e:
+            logger.error("Failed to request audit compilation confirmation in signal: %s", e)
+
     if new_status not in ("FAILED", "DONE"):
         return
 

@@ -17,6 +17,8 @@ const emptySummary: AnalyticsCostSummary = {
         task_count: 0,
         avg_cost_per_task: 0,
         reflection_cost: 0,
+        plan_cost: 0,
+        merge_cost: 0,
     },
     time_series: [],
     cost_by_model: [],

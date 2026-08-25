@@ -237,6 +237,8 @@ tmp/
 
 # odin-worktree-agent-configs
 /.claude
+!.claude/skills/
+!.claude/skills/**
 /.codex
 /.gemini
 /.gemini/settings.json

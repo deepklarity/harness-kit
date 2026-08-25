@@ -982,6 +982,67 @@ class TestBoardClear(APITestCase):
         self.assertEqual(Task.objects.count(), 1)
         self.assertEqual(Task.objects.first().title, "B2 task")
 
+    def test_clear_cleans_filesystem_artifacts(self):
+        import tempfile, os, shutil
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            board = self.make_board(working_dir=tmp_dir)
+            t1 = self.make_task(board, title="Task 1")
+            t2 = self.make_task(board, title="Performance Audit")
+
+            # Create test artifact directories and files
+            proof_dir = os.path.join(tmp_dir, ".proof", f"task-{t1.id}")
+            os.makedirs(proof_dir, exist_ok=True)
+            with open(os.path.join(proof_dir, "proof.md"), "w") as f:
+                f.write("proof")
+
+            odin_logs_dir = os.path.join(tmp_dir, ".odin", "logs")
+            os.makedirs(odin_logs_dir, exist_ok=True)
+            with open(os.path.join(odin_logs_dir, f"task_{t1.id}.out"), "w") as f:
+                f.write("log")
+
+            with open(os.path.join(tmp_dir, "PERFORMANCE_AUDIT_REPORT.md"), "w") as f:
+                f.write("report")
+
+            resp = self.client.post(f"/boards/{board.id}/clear/")
+            self.assertEqual(resp.status_code, 200)
+
+            # Filesystem artifacts should be removed
+            self.assertFalse(os.path.exists(proof_dir))
+            self.assertFalse(os.path.exists(os.path.join(odin_logs_dir, f"task_{t1.id}.out")))
+            self.assertFalse(os.path.exists(os.path.join(tmp_dir, "PERFORMANCE_AUDIT_REPORT.md")))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_delete_task_cleans_filesystem_artifacts(self):
+        import tempfile, os, shutil
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            board = self.make_board(working_dir=tmp_dir)
+            t = self.make_task(board, title="Performance Audit")
+
+            proof_dir = os.path.join(tmp_dir, ".proof", f"task-{t.id}")
+            os.makedirs(proof_dir, exist_ok=True)
+            with open(os.path.join(proof_dir, "proof.md"), "w") as f:
+                f.write("proof")
+
+            odin_logs_dir = os.path.join(tmp_dir, ".odin", "logs")
+            os.makedirs(odin_logs_dir, exist_ok=True)
+            with open(os.path.join(odin_logs_dir, f"task_{t.id}.out"), "w") as f:
+                f.write("log")
+
+            with open(os.path.join(tmp_dir, "PERFORMANCE_AUDIT_REPORT.md"), "w") as f:
+                f.write("report")
+
+            resp = self.client.delete(f"/tasks/{t.id}/")
+            self.assertEqual(resp.status_code, 204)
+
+            self.assertFalse(os.path.exists(proof_dir))
+            self.assertFalse(os.path.exists(os.path.join(odin_logs_dir, f"task_{t.id}.out")))
+            self.assertFalse(os.path.exists(os.path.join(tmp_dir, "PERFORMANCE_AUDIT_REPORT.md")))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Odin integration flow: plan → create tasks → assign → execute → done

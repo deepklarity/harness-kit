@@ -503,6 +503,16 @@ def _default_config(source: str) -> OdinConfig:
             default_model="zai-coding-plan/glm-4.7",
             premium_model="zai-coding-plan/glm-5.1",
         ),
+        "agy": AgentConfig(
+            cli_command="agy",
+            capabilities=["coding", "writing", "run_shell_command", "read_file", "write_file"],
+            cost_tier=CostTier.LOW,
+            models={
+                "Gemini 3.5 Flash (High)": "default — Gemini 3.5 Flash high-effort",
+            },
+            default_model="Gemini 3.5 Flash (High)",
+            premium_model="Gemini 3.5 Flash (High)",
+        ),
     }
     # Yolo mode: auto-enable API agents when keys are present
     _apply_yolo_mode(agents)

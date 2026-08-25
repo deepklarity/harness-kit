@@ -8,6 +8,7 @@ import { formatCost } from '../utils/costEstimation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import JSZip from 'jszip';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { SpecStoryView } from './SpecStoryView';
 
@@ -49,13 +50,57 @@ import {
   Package,
   Search,
   X,
+  Share,
   LayoutGrid,
   BookOpen,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { TraceViewer, TerminalOutputView } from './TraceViewer';
+import { TraceViewer, TerminalOutputView, parseTrace, buildTimeline, TimelineNodeRenderer } from './TraceViewer';
 import { parseCommentBody } from '../utils/commentParser';
 import { PlanningTerminal } from './PlanningTerminal';
+import { createRoot } from 'react-dom/client';
+import html2canvas from 'html2canvas-pro';
+import { buildSpecHtml } from '../utils/specHtmlExport';
+
+function getTraceText(comment: any): string {
+    const [metricsLine, ...bodyLines] = comment.content.split('\n');
+    const hasMetrics = metricsLine.startsWith('Completed in ') || metricsLine.startsWith('Failed in ');
+    const rawBody = hasMetrics ? bodyLines.join('\n').trim() : comment.content;
+    const { traceData } = parseCommentBody(rawBody);
+    return traceData || '';
+}
+
+function TimelineCaptureView({ traceText }: { traceText: string }) {
+    const events = useMemo(() => parseTrace(traceText), [traceText]);
+    const nodes = useMemo(() => buildTimeline(events), [events]);
+    
+    // Slice to get the end of the timeline (last 10 nodes, or all if less than 10)
+    const nodesToRender = useMemo(() => {
+        return nodes.length > 10 ? nodes.slice(-10) : nodes;
+    }, [nodes]);
+
+    return (
+        <div className="flex flex-col w-full bg-[#0e0e11] text-[#c9c9c9] rounded-lg border border-zinc-800/80 overflow-hidden font-sans">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border/40 shrink-0 bg-[#141417] border-[#2b2b2e]">
+                <div className="flex items-center gap-2">
+                    <Activity className="size-4 text-violet-400" strokeWidth={1.5} />
+                    <span className="text-xs font-semibold text-zinc-300">Task Execution</span>
+                    <span className="inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-700/50 text-zinc-300">
+                        ended
+                    </span>
+                </div>
+                <div className="text-[10px] text-muted-foreground/80 font-mono">
+                    last run
+                </div>
+            </div>
+            <div className="flex-1 p-5 space-y-6 bg-[#0e0e11]">
+                {nodesToRender.map((n, i) => (
+                    <TimelineNodeRenderer key={i} node={n} />
+                ))}
+            </div>
+        </div>
+    );
+}
 
 const PLANNER_AGENT_COLORS: Record<string, string> = {
     claude: '#8b5cf6',
@@ -80,15 +125,184 @@ function ContentWithHighlight({ text, search }: { text: string; search: string }
     );
 }
 
+function generateSpecReport(spec: Spec, tasks: any[]): string {
+    const costSummary = spec.costSummary;
+    const branch = (spec.metadata?.branch as string) || '—';
+    const cwd = spec.cwd || '—';
+    const plannerConfig = spec.plannerConfig || {};
+
+    const totalCost = costSummary?.total_cost_usd !== undefined ? `$${costSummary.total_cost_usd.toFixed(4)}` : '—';
+    const totalTokens = costSummary?.total_tokens !== undefined ? `${(costSummary.total_tokens / 1000).toFixed(1)}k` : '—';
+    const inputTokens = costSummary?.total_input_tokens !== undefined ? `${(costSummary.total_input_tokens / 1000).toFixed(1)}k` : '—';
+    const outputTokens = costSummary?.total_output_tokens !== undefined ? `${(costSummary.total_output_tokens / 1000).toFixed(1)}k` : '—';
+    const duration = costSummary?.total_duration_ms !== undefined ? formatDuration(costSummary.total_duration_ms) : '—';
+
+    let markdown = `# SPEC REPORT: ${spec.title} (ID: #${spec.id})\n`;
+    markdown += `Status: ${spec.status || 'active'} | Branch: \`${branch}\`  \n`;
+    markdown += `CWD: \`${cwd}\` | Spec Path: \`${spec.fileName || '—'}\`  \n\n`;
+    markdown += `--- \n\n`;
+    markdown += `## Cost & Resource Breakdown\n`;
+    markdown += `- Total Cost (USD): ${totalCost}\n`;
+    markdown += `- Total Duration: ${duration}\n`;
+    markdown += `- Total Tokens: ${totalTokens} (${inputTokens} In, ${outputTokens} Out)\n`;
+    markdown += `- Planner Agent: ${plannerConfig.agent || '—'}\n`;
+    markdown += `- Planner Model: ${plannerConfig.model || '—'}\n\n`;
+    markdown += `--- \n\n`;
+    markdown += `## Task Summary Table\n\n`;
+    markdown += `| #   | Task                                     | Status     | Model                | Duration   | Cost       | Report                                |\n`;
+    markdown += `|-----|------------------------------------------|------------|----------------------|------------|------------|---------------------------------------|\n`;
+
+    tasks.forEach(task => {
+        const taskCost = task.estimatedCostUsd !== undefined && task.estimatedCostUsd !== null ? `$${task.estimatedCostUsd.toFixed(4)}` : '—';
+        const taskDuration = task.executingTimeMs !== undefined ? formatDuration(task.executingTimeMs) : '—';
+        
+        const rawTitle = task.title || task.name || '';
+        const displayTitle = rawTitle.length > 40 ? rawTitle.substring(0, 37) + '...' : rawTitle;
+        const displayModel = shortModelName(task.modelName || task.metadata?.selected_model || '');
+
+        const colId = `${task.idShort}`.padEnd(3);
+        const colTitle = displayTitle.padEnd(40);
+        const colStatus = task.currentStatus.padEnd(10);
+        const colModel = displayModel.padEnd(20);
+        const colDuration = taskDuration.padEnd(10);
+        const colCost = taskCost.padEnd(10);
+        const colLink = `[View Report](task_${task.idShort}/task_report.md)`.padEnd(37);
+
+        markdown += `| ${colId} | ${colTitle} | ${colStatus} | ${colModel} | ${colDuration} | ${colCost} | ${colLink} |\n`;
+    });
+
+    markdown += `\n--- \n\n`;
+    markdown += `## Spec Content (Master AI Prompt)\n`;
+    markdown += `\`\`\`markdown\n${spec.content}\n\`\`\`\n`;
+    return markdown;
+}
+
+function generateTaskReport(task: any, hasTimelineEnd?: boolean): string {
+    const branch = (task.metadata)?.branch || '—';
+    const worktree = (task.metadata)?.worktree_path || '—';
+    const taskCost = task.estimatedCostUsd !== undefined && task.estimatedCostUsd !== null ? `$${task.estimatedCostUsd.toFixed(4)}` : '—';
+    const taskDuration = task.executingTimeMs !== undefined ? formatDuration(task.executingTimeMs) : '—';
+    
+    // Extract failure logs or error traces (only if task failed!)
+    const failureReason = task.currentStatus === 'FAILED'
+        ? ((task.metadata as any)?.last_failure_reason || (task.metadata as any)?.failure_reason || 'Unknown error — check task comments for details')
+        : null;
+
+    let markdown = `# TASK REPORT: ${task.title || task.name} (ID: #${task.idShort})\n\n`;
+    markdown += `## Metadata\n`;
+    markdown += `- Status: ${task.currentStatus}\n`;
+    markdown += `- Assignee: ${task.assignees?.join(', ') || 'Unassigned'}\n`;
+    markdown += `- Model Used for Execution: ${task.modelName || '—'}\n`;
+    markdown += `- Execution Time: ${taskDuration}\n`;
+    markdown += `- Execution Cost: ${taskCost}\n`;
+    markdown += `- Git Branch: \`${branch}\`\n`;
+    markdown += `- Worktree Path: \`${worktree}\`\n\n`;
+    
+    if (task.currentStatus === 'FAILED') {
+        markdown += `--- \n\n`;
+        markdown += `## Failure Detail / Error Log\n`;
+        const lastFailureType = (task.metadata as any)?.last_failure_type;
+        const lastFailureOrigin = (task.metadata as any)?.last_failure_origin;
+        if (lastFailureType) {
+            markdown += `- **Failure Type**: ${lastFailureType}\n`;
+        }
+        if (lastFailureOrigin) {
+            markdown += `- **Failure Origin**: ${lastFailureOrigin}\n`;
+        }
+        if (lastFailureType || lastFailureOrigin) {
+            markdown += `\n`;
+        }
+        markdown += `\`\`\`text\n${failureReason}\n\`\`\`\n\n`;
+    } else if (task.currentStatus === 'TESTING' || task.currentStatus === 'COMPLETED') {
+        markdown += `--- \n\n`;
+        markdown += `## Execution Status\n`;
+        markdown += `Task completed successfully and is in ${task.currentStatus.toLowerCase()} state. All integration checks have passed.\n\n`;
+    }
+
+    markdown += `--- \n\n`;
+    markdown += `## Description\n`;
+    markdown += `${task.description || 'No description provided.'}\n\n`;
+
+    // Extract Proof of Work comment and attachments
+    const proofComment = (task.comments || []).find((c: any) => c.commentType === 'proof');
+    if (proofComment) {
+        // Truncate proof content for brevity if it's too long
+        let proofContent = proofComment.content || '';
+        if (proofContent.length > 300) {
+            proofContent = proofContent.substring(0, 300) + '... (truncated for brevity)';
+        }
+
+        markdown += `--- \n\n`;
+        markdown += `## Proof of Work\n`;
+        markdown += `${proofContent}\n\n`;
+        if (proofComment.fileAttachments && proofComment.fileAttachments.length > 0) {
+            proofComment.fileAttachments.forEach((fa: any) => {
+                markdown += `### Proof Image: ${fa.originalFilename}\n`;
+                markdown += `![Proof Image](${fa.originalFilename})\n\n`;
+            });
+        }
+    }
+
+    markdown += `--- \n\n`;
+    markdown += `## Activity Log\n\n`;
+
+    if (task.mutations && task.mutations.length > 0) {
+        task.mutations.forEach((m: any) => {
+            let desc = m.description || '';
+            // Simplify: status changed from EXECUTING to FAILED -> EXECUTING ➔ FAILED
+            desc = desc.replace(/status changed from (\w+) to (\w+)/i, '$1 ➔ $2');
+            markdown += `- **[${m.date}]** ${desc}\n`;
+        });
+        markdown += `\n`;
+    } else {
+        markdown += `No activity transitions recorded.\n\n`;
+    }
+
+    // Normal non-proof comments
+    const normalComments = (task.comments || []).filter((c: any) => c.commentType !== 'proof');
+    if (normalComments.length > 0) {
+        markdown += `--- \n\n`;
+        markdown += `## Comments Log\n\n`;
+        normalComments.forEach((c: any) => {
+            let commentText = c.content || '';
+            if (commentText.length > 300) {
+                commentText = commentText.substring(0, 300) + '... (truncated for brevity)';
+            }
+            markdown += `#### ${c.authorLabel} (${c.authorEmail}) - *${new Date(c.createdAt).toLocaleString()}*\n`;
+            markdown += `${commentText.replace(/\n/g, '  \n')}\n\n`;
+        });
+    }
+
+    if (hasTimelineEnd) {
+        markdown += `--- \n\n`;
+        markdown += `## Execution Timeline (End)\n`;
+        markdown += `![Execution Timeline](timeline_${task.idShort}.png)\n\n`;
+    }
+
+    return markdown;
+}
+
 interface SpecDetailViewProps {
     specId: string;
     spec?: Spec;
+    boardName?: string;
     onBack: () => void;
     onTaskClick: (taskId: string) => void;
     onDeleteSpec?: (specId: string) => void;
 }
 
-export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, onDeleteSpec }: SpecDetailViewProps) {
+function dataURLtoUint8Array(dataurl: string): Uint8Array {
+    const arr = dataurl.split(',');
+    const bstr = atob(arr[1] || '');
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return u8arr;
+}
+
+export function SpecDetailView({ specId, spec: cachedSpec, boardName, onBack, onTaskClick, onDeleteSpec }: SpecDetailViewProps) {
     const service = useService();
     const [searchParams, setSearchParams] = useSearchParams();
     const rawView = searchParams.get('view');
@@ -120,6 +334,8 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
     const [createdPrUrl, setCreatedPrUrl] = useState<string | null>(null);
     const [showCommits, setShowCommits] = useState(false);
     const [commits, setCommits] = useState<SpecCommit[]>([]);
+    const [isExporting, setIsExporting] = useState(false);
+    const [exportProgress, setExportProgress] = useState('0%');
 
     const refetchSpec = useCallback(() => {
         service.fetchSpecDetail(specId)
@@ -160,6 +376,153 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
         const tasks = spec?.tasks ?? [];
         return [...tasks].sort((a, b) => a.idShort - b.idShort);
     }, [spec?.tasks]);
+
+    const handleExportZip = useCallback(async () => {
+        if (!spec) return;
+        setIsExporting(true);
+        setExportProgress('0%');
+        try {
+            const detailedTasks: any[] = [];
+            const total = sortedTasks.length;
+
+            // 1. Fetch detailed tasks
+            for (let i = 0; i < total; i++) {
+                setExportProgress(`Fetching ${i + 1}/${total}`);
+                const detailed = await service.fetchTaskDetail(sortedTasks[i].id);
+                detailedTasks.push(detailed);
+            }
+
+            const zip = new JSZip();
+
+            // 2. Generate Spec master reports
+            const specReportMd = generateSpecReport(spec, detailedTasks);
+            zip.file('spec_report.md', specReportMd);
+
+            // Construct detailed spec so the HTML report has full details for all tasks
+            const detailedSpec = {
+                ...spec,
+                tasks: detailedTasks
+            };
+            const specReportHtml = buildSpecHtml(detailedSpec, { boardName });
+            zip.file('spec_report.html', specReportHtml);
+
+            // 3. Compile Task reports & download proof screenshots
+            for (const task of detailedTasks) {
+                const folderName = `task_${task.idShort}`;
+                
+                // Check for proof comment and download its file attachments
+                const proofComment = (task.comments || []).find((c: any) => c.commentType === 'proof');
+                if (proofComment && proofComment.fileAttachments && proofComment.fileAttachments.length > 0) {
+                    for (const fa of proofComment.fileAttachments) {
+                        try {
+                            setExportProgress(`Proof ${task.idShort}`);
+                            const res = await fetch(fa.url);
+                            if (res.ok) {
+                                const buffer = await res.arrayBuffer();
+                                // Write binary image directly to the task directory next to report
+                                zip.file(`${folderName}/${fa.originalFilename}`, buffer);
+                            }
+                        } catch (err) {
+                            console.error(`Failed to download proof attachment:`, err);
+                        }
+                    }
+                }
+
+                // Check for trace comment and capture the end of the timeline
+                let hasTimelineEnd = false;
+                let traceText = '';
+                for (const comment of task.comments || []) {
+                    const text = getTraceText(comment);
+                    if (text && text.length > traceText.length) {
+                        traceText = text;
+                    }
+                }
+
+                if (traceText) {
+                    const captureDivId = `timeline-capture-${task.idShort}`;
+                    try {
+                        setExportProgress(`Timeline ${task.idShort}`);
+                        
+                        // 1. Create a container element and append to body
+                        const captureDiv = document.createElement('div');
+                        captureDiv.id = captureDivId;
+                        captureDiv.className = 'dark';
+                        captureDiv.style.position = 'fixed';
+                        captureDiv.style.left = '-9999px';
+                        captureDiv.style.top = '-9999px';
+                        captureDiv.style.width = '750px';
+                        captureDiv.style.backgroundColor = '#0e0e11';
+                        captureDiv.style.color = '#c9c9c9';
+                        captureDiv.style.padding = '16px';
+                        captureDiv.style.borderRadius = '8px';
+                        captureDiv.style.fontFamily = 'monospace';
+                        document.body.appendChild(captureDiv);
+
+                        // 2. Render React component
+                        const root = createRoot(captureDiv);
+                        root.render(<TimelineCaptureView traceText={traceText} />);
+
+                        // 3. Wait for layout/render
+                        await new Promise(resolve => setTimeout(resolve, 300));
+
+                        // 4. Capture using html2canvas
+                        const canvas = await html2canvas(captureDiv, {
+                            backgroundColor: '#0e0e11',
+                            width: 750,
+                            logging: false,
+                            onclone: (clonedDoc) => {
+                                const clonedDiv = clonedDoc.getElementById(captureDivId);
+                                if (clonedDiv) {
+                                    clonedDiv.style.position = 'fixed';
+                                    clonedDiv.style.left = '0';
+                                    clonedDiv.style.top = '0';
+                                }
+                            }
+                        });
+
+                        // 5. Convert to buffer and add to zip
+                        const imgDataUrl = canvas.toDataURL('image/png');
+                        const u8arr = dataURLtoUint8Array(imgDataUrl);
+                        zip.file(`${folderName}/timeline_${task.idShort}.png`, u8arr);
+                        hasTimelineEnd = true;
+
+                        // 6. Cleanup asynchronously
+                        setTimeout(() => {
+                            try {
+                                root.unmount();
+                            } catch (e) {
+                                console.error('Unmount failed:', e);
+                            }
+                            if (captureDiv.parentNode) {
+                                document.body.removeChild(captureDiv);
+                            }
+                        }, 500);
+                    } catch (err) {
+                        console.error(`Failed to capture timeline for task ${task.idShort}:`, err);
+                        setExportProgress(`Err ${task.idShort}: ${err instanceof Error ? err.message : String(err)}`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                }
+
+                const taskReportMd = generateTaskReport(task, hasTimelineEnd);
+                zip.file(`${folderName}/task_report.md`, taskReportMd);
+            }
+
+            // 4. Download ZIP
+            const blob = await zip.generateAsync({ type: 'blob' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `spec_${spec.id}_report.zip`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        } catch (err) {
+            console.error("Export failed:", err);
+        } finally {
+            setIsExporting(false);
+        }
+    }, [spec, sortedTasks, service, boardName]);
+
+
 
     // Max active time (EXECUTING+REVIEW only) for proportional timeline bars
     const maxActiveTime = useMemo(() =>
@@ -416,6 +779,20 @@ export function SpecDetailView({ specId, spec: cachedSpec, onBack, onTaskClick, 
                             <CardTitle className="text-xl">{spec.title}</CardTitle>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                            <button
+                                onClick={handleExportZip}
+                                disabled={isExporting}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isExporting ? (
+                                    <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                    <Share className="size-3" />
+                                )}
+                                <span>
+                                    {isExporting ? `Exporting (${exportProgress})` : 'Export'}
+                                </span>
+                            </button>
                             {specWorktreePath && <EditorLink cwd={specWorktreePath} />}
                             <Badge variant="secondary">{spec.taskCount} task{spec.taskCount !== 1 ? 's' : ''}</Badge>
                         </div>
@@ -1036,7 +1413,7 @@ function PlanningCommentItem({ comment }: { comment: SpecComment }) {
     const [showFullTrace, setShowFullTrace] = useState(false);
 
     // Check if this comment has trace data (either via attachments or embedded JSONL)
-    const hasTraceAttachment = comment.attachments?.some(a => a === 'trace:execution_jsonl');
+    const hasTraceAttachment = Array.isArray(comment.attachments) && comment.attachments.some(a => a === 'trace:execution_jsonl');
 
     // Split content into metrics line and body, then separate trace from summary
     const lines = comment.content.split('\n');

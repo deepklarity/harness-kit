@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import type { AgentConfig, Board, Label as LabelType, ModelInfo, Task, TaskPreset, PresetCategory } from '../types';
@@ -12,12 +12,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ChevronDown, Plus, Bot, User, AlertTriangle } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
+import { ChevronDown, Plus, Bot, User, AlertTriangle, Calendar as CalendarIcon, Clock } from 'lucide-react';
 import { PresetPicker } from './PresetPicker';
 import { ImageDropZone } from './ImageDropZone';
 import { LabelPicker } from './LabelPicker';
 
 const WEEKDAY_KEYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
+
+function formatLocalIso(date: Date): string {
+    const offsetMs = date.getTimezoneOffset() * 60000;
+    const localDate = new Date(date.getTime() - offsetMs);
+    return localDate.toISOString().slice(0, 16);
+}
 
 export interface ApiUser {
     id: number;
@@ -46,10 +55,12 @@ interface CreateTaskModalProps {
         labelIds?: number[],
         dependsOn?: string[],
         workingDir?: string,
-        skipReflection?: boolean
+        skipReflection?: boolean,
+        status?: string
     ) => Promise<string | void>;
     onCreateSchedule?: (payload: Record<string, unknown>) => Promise<void>;
     availableLabels?: LabelType[];
+    defaultCreateMode?: 'TASK' | 'SCHEDULE';
 }
 
 export function CreateTaskModal({
@@ -63,6 +74,7 @@ export function CreateTaskModal({
     onCreate,
     onCreateSchedule,
     availableLabels,
+    defaultCreateMode,
 }: CreateTaskModalProps) {
     const service = useService();
     const { toast } = useToast();
@@ -75,14 +87,25 @@ export function CreateTaskModal({
     const [devEta, setDevEta] = useState<string>('');
     const [loading, setLoading] = useState(false);
     const [showExtra, setShowExtra] = useState(false);
+    const extraSettingsRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (showExtra && extraSettingsRef.current) {
+            const timer = setTimeout(() => {
+                extraSettingsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 50);
+            return () => clearTimeout(timer);
+        }
+    }, [showExtra]);
     const [stagedFiles, setStagedFiles] = useState<File[]>([]);
     const [uploadingScreenshots, setUploadingScreenshots] = useState(false);
     const [selectedDependencyIds, setSelectedDependencyIds] = useState<string[]>([]);
     const [skipReflection, setSkipReflection] = useState(false);
     const [dependencyDialogOpen, setDependencyDialogOpen] = useState(false);
-    const [createMode, setCreateMode] = useState<'TASK' | 'SCHEDULE'>('TASK');
+    const [createMode, setCreateMode] = useState<'TASK' | 'SCHEDULE'>(defaultCreateMode || 'TASK');
     const [scheduleKind, setScheduleKind] = useState<'ONE_TIME' | 'RECURRING'>('ONE_TIME');
-    const [scheduleAt, setScheduleAt] = useState('');
+    const [scheduleAt, setScheduleAt] = useState<string>(() => formatLocalIso(new Date()));
+    const [datePopoverOpen, setDatePopoverOpen] = useState(false);
     const [recurrenceFreq, setRecurrenceFreq] = useState<'DAILY' | 'WEEKLY' | 'MONTHLY'>('WEEKLY');
     const [recurrenceInterval, setRecurrenceInterval] = useState('1');
     const [recurrenceWeekdays, setRecurrenceWeekdays] = useState<string[]>([]);
@@ -131,7 +154,7 @@ export function CreateTaskModal({
     );
     const dependencyTasksLoading = boardId ? !!dependencyTasksLoadingByBoard?.[boardId] : false;
     const activeDependencyTasks = useMemo(
-        () => dependencyBoardTasks.filter(task => task.currentStatus === 'TODO' || task.currentStatus === 'IN_PROGRESS'),
+        () => dependencyBoardTasks.filter(task => task.currentStatus === 'TODO' || task.currentStatus === 'IN_PROGRESS' || task.currentStatus === 'EXECUTING'),
         [dependencyBoardTasks],
     );
 
@@ -190,9 +213,10 @@ export function CreateTaskModal({
     }, [boardId, boardUsers, disabledAgentEmails, selectedUserId]);
 
     useEffect(() => {
+        if (dependencyTasksLoading) return;
         const allowed = new Set(activeDependencyTasks.map(task => task.id));
         setSelectedDependencyIds(prev => prev.filter(id => allowed.has(id)));
-    }, [activeDependencyTasks]);
+    }, [activeDependencyTasks, dependencyTasksLoading]);
 
     const selectedAssignee = useMemo(
         () => boardUsers.find(u => String(u.id) === selectedUserId),
@@ -215,11 +239,25 @@ export function CreateTaskModal({
         return Number.isNaN(parsed.getTime()) ? null : parsed;
     }, [scheduleAt]);
 
-    const minScheduleAt = useMemo(() => {
-        const now = new Date();
-        const offsetMs = now.getTimezoneOffset() * 60000;
-        return new Date(now.getTime() - offsetMs).toISOString().slice(0, 16);
-    }, []);
+    useEffect(() => {
+        if (createMode === 'SCHEDULE' && !scheduleAt) {
+            setScheduleAt(formatLocalIso(new Date()));
+        }
+    }, [createMode, scheduleAt]);
+
+    const [scheduleDatePart, scheduleTimePart] = useMemo(() => {
+        if (!scheduleAt) return ['', ''];
+        const parts = scheduleAt.split('T');
+        return [parts[0] || '', parts[1] || ''];
+    }, [scheduleAt]);
+
+    const formattedDateDisplay = useMemo(() => {
+        if (!scheduleDatePart) return 'Select date';
+        const [y, m, d] = scheduleDatePart.split('-').map(Number);
+        if (!y || !m || !d) return scheduleDatePart;
+        const dateObj = new Date(y, m - 1, d);
+        return format(dateObj, 'EEE, MMM d, yyyy');
+    }, [scheduleDatePart]);
 
     const selectedScheduleWeekday = useMemo(() => {
         if (!parsedScheduleDate) return null;
@@ -394,12 +432,25 @@ export function CreateTaskModal({
                 selectedDependencyIds.length > 0 ? selectedDependencyIds : undefined,
                 undefined,
                 skipReflection || undefined,
+                'IN_PROGRESS',
             );
             taskId = result || undefined;
-        } catch {
+        } catch (err: any) {
+            let errorMsg = createMode === 'SCHEDULE' ? 'Failed to create schedule' : 'Failed to create task';
+            if (err?.body) {
+                if (typeof err.body === 'string') {
+                    errorMsg = err.body;
+                } else if (typeof err.body === 'object') {
+                    const messages = Object.entries(err.body)
+                        .map(([k, v]) => `${k}: ${Array.isArray(v) ? (v as any[]).join(', ') : v}`);
+                    if (messages.length > 0) errorMsg = messages.join('; ');
+                }
+            } else if (err?.message) {
+                errorMsg = err.message;
+            }
             toast({
                 title: 'Error',
-                description: createMode === 'SCHEDULE' ? 'Failed to create schedule' : 'Failed to create task',
+                description: errorMsg,
                 variant: 'destructive',
             });
             setLoading(false);
@@ -473,7 +524,7 @@ export function CreateTaskModal({
                                         <Badge variant="outline" className="text-[10px]">{localTimezone}</Badge>
                                     </div>
 
-                                    <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
+                                    <div className="grid gap-3 sm:grid-cols-3">
                                         <div className="flex flex-col gap-2">
                                             <Label>Schedule Type</Label>
                                             <Select value={scheduleKind} onValueChange={(value) => setScheduleKind(value as 'ONE_TIME' | 'RECURRING')}>
@@ -486,14 +537,68 @@ export function CreateTaskModal({
                                         </div>
 
                                         <div className="flex flex-col gap-2">
-                                            <Label>Scheduled Time</Label>
-                                            <Input
-                                                type="datetime-local"
-                                                value={scheduleAt}
-                                                min={minScheduleAt}
-                                                onChange={(e) => setScheduleAt(e.target.value)}
-                                                required={createMode === 'SCHEDULE'}
-                                            />
+                                            <Label>Date</Label>
+                                            <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+                                                <PopoverTrigger asChild>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className={cn(
+                                                            "w-full justify-start text-left font-normal h-9 px-3",
+                                                            !scheduleDatePart && "text-muted-foreground"
+                                                        )}
+                                                    >
+                                                        <CalendarIcon className="mr-2 size-4 shrink-0 opacity-70" />
+                                                        <span className="truncate">{formattedDateDisplay}</span>
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent align="start" className="w-auto p-0">
+                                                    <Calendar
+                                                        mode="single"
+                                                        selected={
+                                                            scheduleDatePart
+                                                                ? (() => {
+                                                                      const [y, m, d] = scheduleDatePart.split('-').map(Number);
+                                                                      return new Date(y, m - 1, d);
+                                                                  })()
+                                                                : undefined
+                                                        }
+                                                        onSelect={(date) => {
+                                                            if (date) {
+                                                                const y = date.getFullYear();
+                                                                const m = String(date.getMonth() + 1).padStart(2, '0');
+                                                                const d = String(date.getDate()).padStart(2, '0');
+                                                                const newDateStr = `${y}-${m}-${d}`;
+                                                                const currentTime = scheduleTimePart || formatLocalIso(new Date()).split('T')[1] || '12:00';
+                                                                setScheduleAt(`${newDateStr}T${currentTime}`);
+                                                                setDatePopoverOpen(false);
+                                                            }
+                                                        }}
+                                                        disabled={(date) => {
+                                                            const today = new Date();
+                                                            today.setHours(0, 0, 0, 0);
+                                                            return date < today;
+                                                        }}
+                                                        initialFocus
+                                                    />
+                                                </PopoverContent>
+                                            </Popover>
+                                        </div>
+
+                                        <div className="flex flex-col gap-2">
+                                            <Label>Time</Label>
+                                            <div className="relative flex items-center">
+                                                <Clock className="absolute left-2.5 size-4 text-muted-foreground pointer-events-none" />
+                                                <Input
+                                                    type="time"
+                                                    value={scheduleTimePart}
+                                                    onChange={(e) => {
+                                                        const currentDate = scheduleDatePart || formatLocalIso(new Date()).split('T')[0];
+                                                        setScheduleAt(`${currentDate}T${e.target.value}`);
+                                                    }}
+                                                    className="pl-8 h-9 text-sm font-mono"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
 
@@ -561,7 +666,7 @@ export function CreateTaskModal({
                                     </Button>
                                 </div>
                                 <p className="text-xs text-muted-foreground">
-                                    Only active tasks in To Do or In Progress can be used as new dependencies.
+                                    Only active tasks can be used as new dependencies.
                                 </p>
                                 {selectedDependencyIds.length > 0 ? (
                                     <div className="flex flex-wrap gap-1.5">
@@ -693,7 +798,7 @@ export function CreateTaskModal({
                             </button>
 
                             {showExtra && (
-                                <div className="flex flex-col gap-4 pl-2 border-l-2 border-muted">
+                                <div ref={extraSettingsRef} className="flex flex-col gap-4 pl-2 border-l-2 border-muted">
                                     <div className="flex items-center gap-2">
                                         <Checkbox
                                             id="skip-reflection"

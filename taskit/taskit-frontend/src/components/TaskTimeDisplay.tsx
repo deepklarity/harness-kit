@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react';
 import type { Task } from '../types';
 import { formatDuration, getStatusColor } from '../utils/transformer';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -9,11 +10,36 @@ interface TaskTimeDisplayProps {
 }
 
 export function TaskTimeDisplay({ task, className = '' }: TaskTimeDisplayProps) {
-    // Always the actual execution time (user directive) — never the
-    // in-progress/review wall-clock, which mostly measures queueing.
-    // 0s is honest for tasks that haven't executed yet; the tooltip
-    // still carries the full breakdown.
-    const displayMs = task.executingTimeMs;
+    const isExecuting = ['in_progress', 'executing', 'doing'].includes(task.currentStatus?.toLowerCase() ?? '');
+
+    const baselineRef = useRef<{ taskId: string; baseMs: number; startTime: number }>({
+        taskId: task.id,
+        baseMs: task.executingTimeMs || 0,
+        startTime: Date.now(),
+    });
+
+    if (baselineRef.current.taskId !== task.id) {
+        baselineRef.current = {
+            taskId: task.id,
+            baseMs: task.executingTimeMs || 0,
+            startTime: Date.now(),
+        };
+    }
+
+    const [now, setNow] = useState(() => Date.now());
+
+    useEffect(() => {
+        if (!isExecuting) return;
+        const timer = setInterval(() => {
+            setNow(Date.now());
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [isExecuting, task.id]);
+
+    const displayMs = isExecuting
+        ? baselineRef.current.baseMs + Math.max(0, now - baselineRef.current.startTime)
+        : (task.executingTimeMs || 0);
+
     const label = 'Executing time';
 
     const stagesWithTime = Object.entries(task.timeInStatuses)
