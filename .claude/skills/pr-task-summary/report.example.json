@@ -1,0 +1,110 @@
+{
+  "title": "Team PR & Task Summary",
+  "generated_date": "August 5, 2026",
+  "period": "Jul 29 - Aug 5, 2026",
+  "people": [
+    {
+      "name": "Contributor Alpha",
+      "open_tasks": [
+        {
+          "title": "Refresh Dashboard Filters",
+          "summary": "Updates the dashboard filters so saved views keep the selected status and owner values across reloads.",
+          "status": "PR raised; awaiting review",
+          "status_type": "review",
+          "action": "Review needed from the dashboard owner",
+          "opened_date": "Aug 1, 2026",
+          "prs": [
+            {
+              "label": "Web #101",
+              "url": "https://example.com/org/web/pull/101"
+            }
+          ],
+          "slack_thread": "https://example.com/slack/thread/dashboard-filters"
+        },
+        {
+          "title": "Queue Retry Visibility",
+          "summary": "Adds clearer retry-state handling so operators can see when a queued job is waiting on an upstream service.",
+          "status": "Waiting on worker API changes before this can merge",
+          "status_type": "waiting",
+          "action": "Waiting for the worker API contract to land",
+          "opened_date": "Aug 2, 2026",
+          "prs": [
+            {
+              "label": "Backend #204",
+              "url": "https://example.com/org/backend/pull/204"
+            }
+          ]
+        }
+      ],
+      "closed_tasks": [
+        {
+          "title": "Tighten Empty-State Copy",
+          "summary": "Replaces vague empty-state text with specific next steps for users who have no active tasks.",
+          "status": "Merged",
+          "status_type": "merged",
+          "opened_date": "Jul 30, 2026",
+          "prs": [
+            {
+              "label": "Web #99",
+              "url": "https://example.com/org/web/pull/99"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Contributor Beta",
+      "open_tasks": [
+        {
+          "title": "Tenant Export Permissions",
+          "summary": "Adds a permission check before exporting tenant data and keeps the response shape aligned with the existing export endpoint.",
+          "status": "Blocked by failing permission checks in this PR",
+          "status_type": "blocked",
+          "action": "Developer needs to fix the denied-export path",
+          "opened_date": "Aug 3, 2026",
+          "prs": [
+            {
+              "label": "Core #315",
+              "url": "https://example.com/org/core/pull/315"
+            },
+            {
+              "label": "Web #106",
+              "url": "https://example.com/org/web/pull/106"
+            }
+          ],
+          "slack_thread": "https://example.com/slack/thread/tenant-export"
+        },
+        {
+          "title": "Report Download Naming",
+          "summary": "Standardizes generated report filenames so downloaded files include the report type and date range.",
+          "status": "Implementation in progress",
+          "status_type": "in_progress",
+          "action": "Finish filename coverage for weekly reports",
+          "opened_date": "Aug 4, 2026",
+          "prs": [
+            {
+              "label": "Web #106",
+              "url": "https://example.com/org/web/pull/106"
+            }
+          ]
+        }
+      ],
+      "closed_tasks": [
+        {
+          "title": "Remove Legacy Report Toggle",
+          "summary": "Deletes the old report toggle after the replacement workflow became the default.",
+          "status": "Merged",
+          "status_type": "merged",
+          "opened_date": "Jul 31, 2026",
+          "prs": [
+            {
+              "label": "Core #309",
+              "url": "https://example.com/org/core/pull/309"
+            }
+          ],
+          "slack_thread": "https://example.com/slack/thread/legacy-toggle"
+        }
+      ]
+    }
+  ]
+}
