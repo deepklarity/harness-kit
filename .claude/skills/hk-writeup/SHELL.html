@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Writeup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* Colour tokens carried over from harness-kit mission control. Light is the
+     default, dark follows the OS, and data-theme beats both.
+     The f1-f5 ramp carries both scales. Severity runs 5 worst to 1 harmless,
+     readiness runs 1 worst to 5 ready. The numbers point opposite ways, so the
+     colour is what stays honest: red is bad on both, green is fine on both. */
+  :root {
+    --bg:#ffffff; --bg-2:#f7f8fa;
+    --line:#e4e6ea; --line-strong:#cfd3da;
+    --ink:#16181d; --ink-2:#4b5160; --ink-3:#9aa0ad; --mono-ink:#6d7484;
+    --accent:#1d4ed8; --accent-soft:#eff4ff;
+    --low:#b3392f; --low-soft:#fdf1f0;
+    --mid:#a36a1c; --mid-soft:#fdf6ea;
+    --high:#1f7a4d;
+    --f1:#b3392f; --f1-soft:#fdf1f0;
+    --f2:#c2612a; --f2-soft:#fdf0e8;
+    --f3:#a36a1c; --f3-soft:#fdf6ea;
+    --f4:#4a8a52; --f4-soft:#f0f7ee;
+    --f5:#1f7a4d; --f5-soft:#edf7f1;
+    --shadow:rgba(28,25,23,0.12);
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#14161b; --bg-2:#1b1e25;
+      --line:#2a2e37; --line-strong:#3a3f4b;
+      --ink:#e8e9ec; --ink-2:#aeb3bf; --ink-3:#666c79; --mono-ink:#868d9c;
+      --accent:#7da2ff; --accent-soft:#1c2536;
+      --low:#e07a6e; --low-soft:#2c1e1c;
+      --mid:#d9a441; --mid-soft:#2a2418;
+      --high:#6fbf8f;
+      --f1:#e07a6e; --f1-soft:#2c1e1c;
+      --f2:#dc8f5f; --f2-soft:#2e2119;
+      --f3:#d9a441; --f3-soft:#2a2418;
+      --f4:#8fc48f; --f4-soft:#1e2b1f;
+      --f5:#6fbf8f; --f5-soft:#1a2b22;
+      --shadow:rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#14161b; --bg-2:#1b1e25;
+    --line:#2a2e37; --line-strong:#3a3f4b;
+    --ink:#e8e9ec; --ink-2:#aeb3bf; --ink-3:#666c79; --mono-ink:#868d9c;
+    --accent:#7da2ff; --accent-soft:#1c2536;
+    --low:#e07a6e; --low-soft:#2c1e1c;
+    --mid:#d9a441; --mid-soft:#2a2418;
+    --high:#6fbf8f;
+    --f1:#e07a6e; --f1-soft:#2c1e1c;
+    --f2:#dc8f5f; --f2-soft:#2e2119;
+    --f3:#d9a441; --f3-soft:#2a2418;
+    --f4:#8fc48f; --f4-soft:#1e2b1f;
+    --f5:#6fbf8f; --f5-soft:#1a2b22;
+    --shadow:rgba(0,0,0,0.5);
+  }
+  :root[data-theme="light"] {
+    --bg:#ffffff; --bg-2:#f7f8fa;
+    --line:#e4e6ea; --line-strong:#cfd3da;
+    --ink:#16181d; --ink-2:#4b5160; --ink-3:#9aa0ad; --mono-ink:#6d7484;
+    --accent:#1d4ed8; --accent-soft:#eff4ff;
+    --low:#b3392f; --low-soft:#fdf1f0;
+    --mid:#a36a1c; --mid-soft:#fdf6ea;
+    --high:#1f7a4d;
+    --f1:#b3392f; --f1-soft:#fdf1f0;
+    --f2:#c2612a; --f2-soft:#fdf0e8;
+    --f3:#a36a1c; --f3-soft:#fdf6ea;
+    --f4:#4a8a52; --f4-soft:#f0f7ee;
+    --f5:#1f7a4d; --f5-soft:#edf7f1;
+    --shadow:rgba(28,25,23,0.12);
+  }
+
+  * { box-sizing: border-box; }
+  /* Ground and ink move together or a host shell leaves the page unreadable. */
+  html, body {
+    margin: 0;
+    background: var(--bg) !important;
+    color: var(--ink) !important;
+    font: 15px/1.55 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+
+  /* One column. The two sibling skills have a rail because you pick a flow from
+     it. Here there is nothing to pick, so a rail would only list the findings a
+     second time next to the list that already shows them. */
+  .page { max-width: 54rem; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* ---- ordinary writing ---- */
+  h1 {
+    margin: 0 0 10px; font-size: 30px; line-height: 1.2; letter-spacing: -0.02em;
+    font-weight: 650;
+  }
+  h3 { margin: 22px 0 8px; font-size: 15px; letter-spacing: -0.01em; }
+  section p, .dbody p { margin: 0 0 12px; color: var(--ink-2); }
+  section p:last-child, .dbody p:last-child { margin-bottom: 0; }
+  section ul, section ol { margin: 0 0 12px; padding-left: 20px; color: var(--ink-2); }
+  section li { margin-bottom: 5px; }
+  a { color: var(--accent); }
+  strong { color: var(--ink); font-weight: 620; }
+  /* Inline, for a name in a sentence. A whole line goes in a <pre> instead. */
+  code {
+    font-family: var(--mono); font-size: 0.88em; color: var(--ink-2);
+    background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere;
+  }
+  .kv code, .cmd code, pre code { background: none; border: none; padding: 0; }
+  .kvwrap { overflow-x: auto; }
+
+  /* ---- sections ---- */
+  section { margin-bottom: 44px; }
+  section > h2 {
+    margin: 0 0 14px; font-size: 12px; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink-3);
+    border-bottom: 1px solid var(--line); padding-bottom: 7px;
+  }
+  section > h2 .count { color: var(--ink-3); font-weight: 400; }
+  .lede { margin: 0 0 16px; color: var(--ink-2); }
+  .note-line {
+    margin-top: 14px; background: var(--mid-soft); border-left: 3px solid var(--mid);
+    border-radius: 0 5px 5px 0; padding: 10px 13px; font-size: 13.5px;
+  }
+  /* ---- how to test: down here, and folded ---- */
+  details { border-bottom: 1px solid var(--line); }
+  details:last-of-type { border-bottom: none; }
+  summary {
+    cursor: pointer; padding: 9px 0; font-size: 14px; list-style: none;
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before {
+    content: "+"; font-family: var(--mono); color: var(--ink-3); flex: 0 0 auto;
+  }
+  details[open] > summary::before { content: "−"; }
+  summary .sn {
+    flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .dbody { padding: 0 0 12px 20px; }
+  .cmd {
+    display: flex; gap: 8px; align-items: center; margin-bottom: 5px;
+  }
+  .cmd code {
+    flex: 1 1 auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 5px;
+    padding: 6px 9px; overflow-wrap: anywhere;
+  }
+  .btn {
+    background: var(--bg); border: 1px solid var(--line-strong);
+    border-radius: 5px; padding: 4px 9px; cursor: pointer; font-size: 11.5px;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn[disabled] { opacity: 0.45; cursor: default; }
+  .btn[disabled]:hover { border-color: var(--line-strong); color: inherit; }
+  pre {
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
+    padding: 8px 9px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0;
+  }
+  .kv { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .kv td { padding: 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .kv td:first-child {
+    color: var(--ink-3); width: 38%; padding-right: 10px;
+    font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; padding-top: 8px;
+  }
+  .kv td:last-child {
+    font-family: var(--mono); color: var(--ink-2); overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
+  /* ---- foot ---- */
+  .foot {
+    border-top: 1px solid var(--line); padding-top: 16px; margin-top: 44px;
+    display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap;
+    font-size: 11.5px; color: var(--ink-3); line-height: 1.5;
+  }
+  .foot .said { flex: 1 1 300px; min-width: 0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- CONTENT -->
+
+  <div class="foot">
+    <div class="said">HOW-THIS-WAS-MADE</div>
+    <button class="btn" id="theme">Theme</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  // The button beats the OS setting, and it starts by flipping whatever the OS
+  // is showing, so one click always changes something.
+  document.getElementById("theme").addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    var next = cur === "dark" ? "light" : cur === "light" ? "dark"
+      : (matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark");
+    document.documentElement.setAttribute("data-theme", next);
+  });
+
+  // One listener for every Copy button, so a new command row needs no script.
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest(".cmd .btn");
+    if (!b) return;
+    var code = b.parentElement.querySelector("code");
+    if (!code) return;
+    navigator.clipboard.writeText(code.textContent).then(function () {
+      var was = b.textContent;
+      b.textContent = "Copied";
+      setTimeout(function () { b.textContent = was; }, 1200);
+    });
+  });
+})();
+</script>
+</body>
+</html>
