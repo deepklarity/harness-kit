@@ -1,0 +1,181 @@
+/* Colour tokens carried over from harness-kit mission control. Light is the
+     default, dark follows the OS, and data-theme beats both. */
+  :root {
+    --bg:#ffffff; --bg-2:#f7f8fa;
+    --line:#e4e6ea; --line-strong:#cfd3da;
+    --ink:#16181d; --ink-2:#4b5160; --ink-3:#9aa0ad; --mono-ink:#6d7484;
+    --accent:#1d4ed8; --accent-soft:#eff4ff;
+    --mid:#a36a1c; --mid-soft:#fdf6ea;
+    --shadow:rgba(28,25,23,0.12);
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#14161b; --bg-2:#1b1e25;
+      --line:#2a2e37; --line-strong:#3a3f4b;
+      --ink:#e8e9ec; --ink-2:#aeb3bf; --ink-3:#666c79; --mono-ink:#868d9c;
+      --accent:#7da2ff; --accent-soft:#1c2536;
+      --mid:#d9a441; --mid-soft:#2a2418;
+      --shadow:rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#14161b; --bg-2:#1b1e25;
+    --line:#2a2e37; --line-strong:#3a3f4b;
+    --ink:#e8e9ec; --ink-2:#aeb3bf; --ink-3:#666c79; --mono-ink:#868d9c;
+    --accent:#7da2ff; --accent-soft:#1c2536;
+    --mid:#d9a441; --mid-soft:#2a2418;
+    --shadow:rgba(0,0,0,0.5);
+  }
+  :root[data-theme="light"] {
+    --bg:#ffffff; --bg-2:#f7f8fa;
+    --line:#e4e6ea; --line-strong:#cfd3da;
+    --ink:#16181d; --ink-2:#4b5160; --ink-3:#9aa0ad; --mono-ink:#6d7484;
+    --accent:#1d4ed8; --accent-soft:#eff4ff;
+    --mid:#a36a1c; --mid-soft:#fdf6ea;
+    --shadow:rgba(28,25,23,0.12);
+  }
+
+  * { box-sizing: border-box; }
+  /* Ground and ink move together or a host shell leaves the page unreadable. */
+  html, body {
+    margin: 0;
+    background: var(--bg) !important;
+    color: var(--ink) !important;
+    font: 15px/1.55 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+
+  /* One column. */
+  .page { max-width: 54rem; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* ---- ordinary writing ---- */
+  h1 {
+    margin: 0 0 10px; font-size: 30px; line-height: 1.2; letter-spacing: -0.02em;
+    font-weight: 650;
+  }
+  h3 { margin: 22px 0 8px; font-size: 15px; letter-spacing: -0.01em; }
+  section p, .dbody p { margin: 0 0 12px; color: var(--ink-2); }
+  section p:last-child, .dbody p:last-child { margin-bottom: 0; }
+  section ul, section ol { margin: 0 0 12px; padding-left: 20px; color: var(--ink-2); }
+  section li { margin-bottom: 5px; }
+  a { color: var(--accent); }
+  strong { color: var(--ink); font-weight: 620; }
+  /* Inline, for a name in a sentence. A whole line goes in a <pre> instead. */
+  code {
+    font-family: var(--mono); font-size: 0.88em; color: var(--ink-2);
+    background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere;
+  }
+  .kv code, .cmd code, pre code { background: none; border: none; padding: 0; }
+  .kvwrap { overflow-x: auto; }
+
+  /* ---- sections ---- */
+  section { margin-bottom: 44px; }
+  section > h2 {
+    margin: 0 0 14px; font-size: 12px; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink-3);
+    border-bottom: 1px solid var(--line); padding-bottom: 7px;
+  }
+  section > h2 .count { color: var(--ink-3); font-weight: 400; }
+  .lede { margin: 0 0 16px; color: var(--ink-2); }
+  .note-line {
+    margin-top: 14px; background: var(--mid-soft); border-left: 3px solid var(--mid);
+    border-radius: 0 5px 5px 0; padding: 10px 13px; font-size: 13.5px;
+  }
+  /* ---- folded rows ---- */
+  details { border-bottom: 1px solid var(--line); }
+  details:last-of-type { border-bottom: none; }
+  summary {
+    cursor: pointer; padding: 9px 0; font-size: 14px; list-style: none;
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before {
+    content: "+"; font-family: var(--mono); color: var(--ink-3); flex: 0 0 auto;
+  }
+  details[open] > summary::before { content: "−"; }
+  summary .sn {
+    flex: 0 0 auto; font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .dbody { padding: 0 0 12px 20px; }
+  .cmd {
+    display: flex; gap: 8px; align-items: center; margin-bottom: 5px;
+  }
+  .cmd code {
+    flex: 1 1 auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 5px;
+    padding: 6px 9px; overflow-wrap: anywhere;
+  }
+  .btn {
+    background: var(--bg); border: 1px solid var(--line-strong);
+    border-radius: 5px; padding: 4px 9px; cursor: pointer; font-size: 11.5px;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn[disabled] { opacity: 0.45; cursor: default; }
+  .btn[disabled]:hover { border-color: var(--line-strong); color: inherit; }
+  pre {
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
+    padding: 8px 9px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0;
+  }
+  .kv { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .kv td { padding: 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .kv td:first-child {
+    color: var(--ink-3); width: 38%; padding-right: 10px;
+    font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; padding-top: 8px;
+  }
+  .kv td:last-child {
+    font-family: var(--mono); color: var(--ink-2); overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
+  /* A finding row: the summary carries a name (severity in words, a file, a
+     step number) and a status (the title as a sentence). */
+  details.row > summary .row-name {
+    flex: 0 0 auto; min-width: 7.5rem; font-size: 11px; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+  details.row > summary .row-status { flex: 1 1 auto; color: var(--ink); }
+  details.row .dbody .mono { font-family: var(--mono); font-size: 11.5px; color: var(--mono-ink); }
+  /* Header chips: run number, file count, commit, model. Plain facts, not badges. */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-2);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px;
+  }
+  .kicker { font-size: 12px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 6px; }
+  /* Anchor nav under the title. */
+  .nav { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 32px; font-size: 13px; }
+  /* A plain table with a header row: lens tables, before/after, inventories. */
+  .tblwrap { overflow-x: auto; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl th { text-align: left; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line-strong); }
+  .tbl td { padding: 7px 8px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink-2); }
+  .tbl td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* ---- foot ---- */
+  .foot {
+    border-top: 1px solid var(--line); padding-top: 16px; margin-top: 44px;
+    display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap;
+    font-size: 11.5px; color: var(--ink-3); line-height: 1.5;
+  }
+  .foot .said { flex: 1 1 300px; min-width: 0; }
+.good{color:#1f7a4d;font-weight:600} .bad{color:#b3392f;font-weight:600} .mid{color:#a36a1c;font-weight:600} .same{color:var(--ink-3)}
+  .verdict{font-size:17px;line-height:1.5;margin:0 0 8px}
+  .big{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0 6px}
+  .stat{flex:1 1 150px;border:1px solid var(--line);border-radius:6px;padding:12px 14px;background:var(--bg-2)}
+  .stat .n{font-size:26px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+  .stat .l{font-size:12px;color:var(--ink-3);margin-top:4px}
+  .card{border:1px solid var(--line);border-radius:6px;padding:16px 18px;margin:14px 0;background:var(--bg)}
+  .card h3{margin:0 0 10px;font-size:16px;line-height:1.35}
+  .cmp{width:100%;border-collapse:collapse;font-size:13.5px}
+  .cmp th{text-align:left;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:4px 10px 4px 0;border-bottom:1px solid var(--line)}
+  .cmp td{padding:6px 10px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  .cmp td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .cmp{table-layout:fixed;font-size:13px} .card .cmp td{padding:5px 8px 5px 0} .cmp th:first-child,.cmp td.what{width:22%} .cmp th:nth-child(2),.cmp th:nth-child(3){width:32%} .cmp th:last-child{width:14%} .cmp td{word-break:normal;overflow-wrap:anywhere} .cmp td.what{color:var(--ink-2)} .sub{font-size:12px;color:var(--ink-3);font-family:var(--sans)} details.wc summary{cursor:pointer;list-style:none} details.wc summary::-webkit-details-marker{display:none} details.wc summary::after{content:' +';color:var(--accent)} details.wc[open] summary::after{content:' \2013'} details.wc ul{margin:8px 0 2px;padding:0;list-style:none;font-size:12.5px;line-height:1.45} details.wc li{margin:0 0 8px} .tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;margin-right:4px} .judge{font-size:13.5px;color:var(--ink-2);margin:10px 0 0}
+  .cmp tr.grp td{padding-top:12px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);border-bottom:none}
+  details.ans summary{cursor:pointer;font-size:13px;color:var(--accent);margin-top:8px}
+  details.ans pre{font-size:12px;white-space:pre-wrap;background:var(--bg-2);border:1px solid var(--line);padding:10px;border-radius:4px}
+  .said2{font-size:14px;line-height:1.55;color:var(--ink-2);padding:6px 0 4px} .said2 h4{margin:14px 0 4px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3)} .said2 p{margin:4px 0 8px} .said2 p.why{font-size:15px;color:var(--ink);margin:0 0 6px} .said2 p.why2{font-size:14px;color:var(--ink-2);margin:0 0 10px} .said2 em{font-style:normal;font-weight:600;color:var(--ink)} .said2 p.lbl{margin:8px 0 2px;font-size:12px;color:var(--ink-3)} .said2 ul{margin:2px 0 10px 18px;padding:0} .said2 li{margin:4px 0}

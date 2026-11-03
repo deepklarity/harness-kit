@@ -1,0 +1,3 @@
+id,kind,title,status,priority,depends_on,closes_when,notes
+T1,task,Real task,open,P0,,done,n
+X1,epic,Mystery row,open,P1,,c,n

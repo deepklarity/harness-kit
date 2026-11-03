@@ -1,0 +1,7 @@
+<section id="read"><h2>How to read this</h2><ul>
+<li><strong>Before</strong> is a git worktree at the commit the workspace was at before init wrote anything, so it has none of the harness: no entrypoint, docs, scripts or hooks. Whatever the repos owned, including their own <code>CLAUDE.md</code> files, is in it, so the bare agent is not starting from nothing. <strong>After</strong> is a worktree at the commit named on the card. <code>writeup/</code> is removed from both.</li>
+<li><strong>Both halves use the same model and effort</strong> (set in the profile), the same prompt, nothing else typed. Tokens, wall time and cost come from the session (the headless result event, or the transcripts for a herdr run), and the run record lists every file the run opened and every harness item it touched.</li>
+<li><strong>The judge</strong> is one session per scenario, blind on the text (shuffled A and B, mapping kept), every claim checked against the code, then both transcripts read for the process call. A doc-sourced answer that says so is a doc read, not cheating.</li>
+<li><strong>Opened nothing counts as a fail</strong> on its own row, whatever the judge says about the text: a correct-looking one-call answer, sourced entirely from injected context, is a stale answer waiting to happen.</li>
+<li><strong>A small sample.</strong> One run per half per scenario; read the folded reasoning, not one row. Model-per-scenario (each scenario at more than one model tier) is a separate experiment, not this page.</li>
+</ul></section>

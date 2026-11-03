@@ -22,7 +22,7 @@ Both sides already exist and cover the same procedure.
 | Preset | Skill | Notes |
 |---|---|---|
 | roadmap-audit | fable-audit | Preset is the audit-preset-contract instantiation of the skill. |
-| hygiene-audit | hk-slop-audit | Same 7-category scan, preset version is contract-wired. |
+| hygiene-audit | hk-code-quality-audit | Same category scan, preset version is contract-wired. |
 | agent-native-architecture-audit | hk-arch-audit | |
 | loop-audit | hk-autonomy-audit | |
 | root-cause-analysis | hk-rca | Preset is the one-shot brief; skill is the interactive gated protocol. |
@@ -76,7 +76,7 @@ scans, format converters). A slash-command twin would just be the same
 prompt with extra ceremony — nobody types `/hk-chart-validation` mid-session
 when they can paste the preset into a task.
 
-architecture-review, bug-report, ai-slop-detection, backend-slop-review,
+architecture-review, bug-report, ai-slop-detection (now hk-code-quality-audit), backend-slop-review,
 frontend-slop-review, performance-audit, ui-gaps-analysis,
 web-app-ui-validation, mobile-app-ui-validation, website-ux-audit,
 chart-validation, markdown-to-html-report, visual-explainer,

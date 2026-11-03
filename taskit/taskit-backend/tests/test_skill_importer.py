@@ -50,9 +50,9 @@ class SkillImporterTestCase(TestCase):
         self.assertFalse(ux_class["is_spec_preset"])
 
         prevent_slop = {
-            "name": "hk-ai-slop-detection",
-            "title": "AI Slop Detection",
-            "description": "Perform AI Slop Detection audit on directory.",
+            "name": "hk-code-quality-audit",
+            "title": "Code Quality Audit",
+            "description": "Audit the code quality of a directory and write up dead code and generated-looking code.",
             "frontmatter": {},
         }
         slop_class = skill_importer.classify_skill_relevance(prevent_slop)

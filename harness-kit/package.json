@@ -1,0 +1,64 @@
+{
+  "name": "@deepklarity/harnesskit",
+  "version": "0.1.0",
+  "description": "Build an agent harness for your repo, then prove it helps: the same tasks before and after, graded blind.",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "ai-agents",
+    "coding-agents",
+    "agent-harness",
+    "harness-engineering",
+    "context-engineering",
+    "claude-md",
+    "agents-md",
+    "progressive-disclosure",
+    "llm-evals",
+    "developer-tools"
+  ],
+  "homepage": "https://github.com/deepklarity/harness-kit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepklarity/harness-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/deepklarity/harness-kit/issues"
+  },
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "harnesskit": "bin/harnesskit.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "kit",
+    "!**/__pycache__",
+    "!dist/**/*.map",
+    "README.md",
+    "LICENSE",
+    "!dist/check-generic.js",
+    "!dist/check-generic.d.ts",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:generic": "npm run build && node dist/check-generic.js --strict",
+    "verify": "npm run typecheck && npm test",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run verify"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

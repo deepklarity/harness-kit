@@ -236,9 +236,8 @@ tmp/
 
 
 # odin-worktree-agent-configs
-/.claude
-!.claude/skills/
-!.claude/skills/**
+/.claude/*
+!/.claude/skills
 /.codex
 /.gemini
 /.gemini/settings.json
@@ -276,3 +275,15 @@ docs/fable_roadmap/bootstrap/create_smoke_tables.py
 docs/fable_roadmap/bootstrap/sample_vm_mem.py
 smoke_output/
 docs/fable_roadmap/audits/board5_cleared_2026-07-06.json
+
+# generated pages (writeup skill and audits)
+/writeup/
+/harness-kit*.zip
+
+# harness-kit package
+harness-kit/node_modules/
+harness-kit/dist/
+/init-scaffolding*.zip
+
+# Private names for harness-kit check-generic; never committed
+harness-kit/.generic-deny

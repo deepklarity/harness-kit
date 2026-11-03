@@ -5,7 +5,7 @@
 #   scripts/verify.sh                  # run every suite
 #   scripts/verify.sh odin snapshots   # run a subset
 #
-# Suites: odin, backend, frontend, snapshots
+# Suites: odin, backend, frontend, snapshots, generic
 #
 # Exit code is 0 only when every selected suite passes. A non-zero exit means
 # at least one suite is red — no skips, no masks, no xfails. Test counts are
@@ -158,7 +158,7 @@ run_suite() {
 # Parse args. No args => run everything.
 SELECTED=$*
 if [ -z "$SELECTED" ]; then
-    SELECTED="odin backend frontend snapshots"
+    SELECTED="odin backend frontend snapshots generic"
 fi
 
 # Suites. Each runs in its own working directory with the right env.
@@ -190,6 +190,11 @@ fi
 if echo " $SELECTED " | grep -q " snapshots "; then
     run_suite snapshots "$ROOT_DIR" "" \
         "$PY -m pytest tests/e2e_snapshots/ --tb=line -q"
+fi
+
+if echo " $SELECTED " | grep -q " generic "; then
+    run_suite generic "$ROOT_DIR/harness-kit" "" \
+        "npm run -s check:generic -- --strict"
 fi
 
 TOTAL_END=$("$PY" -c 'import time; print(time.time())')

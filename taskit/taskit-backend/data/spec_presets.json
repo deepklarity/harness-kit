@@ -37,7 +37,7 @@
       "description": "Directs agent to prevent AI slop, copy-paste duplication, and dead code during task execution.",
       "category": "code-quality",
       "icon": "scan",
-      "directive": "Use skill /hk-ai-slop-detection to prevent AI slop, copy-paste duplication, and dead code during task execution.",
+      "directive": "Use skill /hk-code-quality-audit to prevent AI slop, copy-paste duplication, and dead code during task execution.",
       "sort_order": 1
     },
     {
@@ -46,7 +46,7 @@
       "description": "Directs agent to avoid UI over-engineering, unnecessary wrappers, and prop-drilling.",
       "category": "code-quality",
       "icon": "monitor",
-      "directive": "Use skill /hk-frontend-slop-review to prevent UI over-engineering, unnecessary wrappers, and prop-drilling.",
+      "directive": "Use skill /hk-code-quality-audit frontend to prevent UI over-engineering, unnecessary wrappers, and prop-drilling.",
       "sort_order": 2
     },
     {
@@ -55,7 +55,7 @@
       "description": "Directs agent to avoid over-abstracted stores, unused endpoints, and redundant backend logic.",
       "category": "code-quality",
       "icon": "server",
-      "directive": "Use skill /hk-backend-slop-review to avoid over-abstracted stores, unused endpoints, and redundant logic.",
+      "directive": "Use skill /hk-code-quality-audit backend to avoid over-abstracted stores, unused endpoints, and redundant logic.",
       "sort_order": 3
     },
     {

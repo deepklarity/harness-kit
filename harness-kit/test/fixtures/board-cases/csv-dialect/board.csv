@@ -1,0 +1,5 @@
+id,kind,title,status,priority,depends_on,closes_when,notes
+T1,task,"Comma, and ""quote""",open,P1,,"closes, when
+second line","note with
+newline, comma and ""quotes"""
+T2,task,Plain,open,P0,,x,

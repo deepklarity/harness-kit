@@ -86,3 +86,24 @@ class TestExportOverwriteGuard:
         _, body = parse_skill_md(tmp_path / "hk-bug-report" / "SKILL.md")
         assert "v2" in body
         assert "v1" not in body
+
+
+def test_use_skill_preset_keeps_hand_written_description_and_body(tmp_path):
+    """A 'Use skill /hk-' preset's SKILL.md is the live copy: re-export keeps its description and body."""
+    from odin.export_skills import export_presets_to_skills, parse_skill_md
+
+    presets = tmp_path / "presets.json"
+    presets.write_text(
+        '{"presets": [{"id": "bug-report", "title": "Bug Report", '
+        '"description": "Use skill /hk-bug-report to perform Bug Report."}]}'
+    )
+    export_presets_to_skills(presets, tmp_path)
+    skill = tmp_path / "hk-bug-report" / "SKILL.md"
+    skill.write_text(
+        "---\nname: hk-bug-report\ndescription: Find the bug. Triggers on 'bug report'.\n"
+        "generated: true\ngenerated_from: presets.json#bug-report\n---\n\n# Bug Report\n\nReal steps here.\n"
+    )
+    export_presets_to_skills(presets, tmp_path)
+    fm, body = parse_skill_md(skill)
+    assert fm["description"].startswith("Find the bug.")
+    assert "Real steps here." in body

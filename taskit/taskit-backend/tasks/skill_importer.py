@@ -150,7 +150,7 @@ def parse_skill_md(file_path: Path) -> dict[str, Any]:
         raw_name = name.replace("hk-", "")
         title = raw_name.replace("-", " ").title()
 
-    return {
+    parsed = {
         "name": name,
         "title": title,
         "description": description,
@@ -158,6 +158,31 @@ def parse_skill_md(file_path: Path) -> dict[str, Any]:
         "frontmatter": frontmatter,
         "path": str(file_path),
     }
+    return _follow_stub(parsed, file_path)
+
+
+_STUB_RE = re.compile(r"This skill lives in `([^`]+)/`\. Read `[^`]+/SKILL\.md`")
+
+
+def _follow_stub(parsed: dict[str, Any], file_path: Path) -> dict[str, Any]:
+    """``.claude/skills/<name>/SKILL.md`` may be a stub pointing at ``docs/skills/<category>/<name>/``.
+
+    The stub keeps the frontmatter Claude Code needs; the real body lives at the target. Return
+    the target's body and title so scoring, categorisation and dependency detection see real content.
+    """
+    m = _STUB_RE.search(parsed.get("body", ""))
+    if not m:
+        return parsed
+    root = file_path.resolve().parents[3] if len(file_path.resolve().parents) > 3 else file_path.parent
+    target = root / m.group(1) / "SKILL.md"
+    if not target.is_file() or target.resolve() == file_path.resolve():
+        logger.warning("Skill stub %s points at missing %s", file_path, target)
+        return parsed
+    real = parse_skill_md(target)
+    parsed["body"] = real["body"]
+    parsed["title"] = real["title"]
+    parsed["skill_dir"] = str(target.parent)
+    return parsed
 
 
 def classify_skill_relevance(skill_data: dict[str, Any]) -> dict[str, Any]:
@@ -193,7 +218,7 @@ def classify_skill_relevance(skill_data: dict[str, Any]) -> dict[str, Any]:
 
         # Check for strict directory-level audit task
         is_directory_audit = any(kw in combined for kw in (
-            "ai-slop-detection", "slop-detection", "slop-review", "slop audit",
+            "ai-slop-detection", "slop-detection", "slop-review", "slop audit", "code-quality-audit",
             "architecture-review", "arch-audit", "security-audit", "performance-audit",
             "ui-gaps-analysis", "website-ux-audit", "web-app-ui-validation",
             "mobile-app-ui-validation", "test-case-audit", "hygiene-audit",
@@ -564,7 +589,7 @@ def list_installed_skills(skills_dir: Path | None = None, user_only: bool = Fals
         if not imported_from:
             imported_from = "https://github.com/mattpocock/skills"
 
-        deps_data = detect_skill_dependencies(item)
+        deps_data = detect_skill_dependencies(Path(skill_info.get("skill_dir", item)))
         python_deps = deps_data.get("python", [])
         missing_sys = deps_data.get("missing_system", [])
 

@@ -1,0 +1,13 @@
+id,kind,title,status,priority,depends_on,closes_when,notes
+D1,decision,Pick,open,P1,,yes,n
+D2,decision,Older,decided,P0,,,n
+T1,task,First,done,P0,,x,n
+T2,task,Second,open,P1,T1,x,n
+T3,task,Third,open,P0,T2,x,n
+B1,bug,Broken,open,P2,,x,n
+B2,bug,Fixed one,fixed,P1,,x,n
+S1,suggestion,One,noted,P1,,,f.py
+S2,suggestion,Two,taken,P1,,,g.py
+S3,suggestion,Three,noted,P1,,,h.py
+L1,learning,Learned,open,P1,,,k.md
+L2,learning,Folded,folded,P1,,,m.md

@@ -347,7 +347,8 @@ class TestPresetToTaskCreation(APITestCase):
         r = self.client.post("/tasks/", body, format="json")
         self.assertEqual(r.status_code, 201, r.data)
         desc = r.data["description"]
-        for required in ("test suite", "test coverage", "gaps", "test_case_audit_report.md"):
+        # The skill writes one HTML page into writeup/, not a markdown report at the root.
+        for required in ("test suite", "test coverage", "gaps", "writeup/"):
             self.assertIn(required, desc.lower())
 
     def test_instantiate_security_audit_creates_dispatchable_brief(self):

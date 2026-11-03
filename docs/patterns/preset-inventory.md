@@ -17,7 +17,7 @@ build) can declare their evidence + checks + report shape + finding→task
 mapping once and ride on shared infrastructure.
 
 Two audits already in the kit — `fable-audit` (roadmap progress) and
-`hk-slop-audit` (codebase hygiene) — are instantiated against the contract at
+`hk-code-quality-audit` (codebase hygiene) — are instantiated against the contract at
 the bottom of this doc.
 
 ---
@@ -88,13 +88,13 @@ it is, and whether it's already "preset-shaped" (data-driven, declarative) or
   `hk-arch-audit`, `hk-autonomy-audit`, `hk-breadcrumb-creator`, `hk-changelog`,
   `hk-compound`, `hk-follow-breadcrumb`, `hk-local-diagnose`, `hk-local-logs`,
   `hk-local-run-spec`, `hk-merge-resolve`, `hk-mock-first`, `hk-rca`, `hk-refine`,
-  `hk-scout-wiki`, `hk-shift-changelog`, `hk-skill-creator`, `hk-slop-audit`).
+  `hk-scout-wiki`, `hk-shift-changelog`, `hk-skill-creator`, `hk-code-quality-audit`).
 - **Schema (implicit)**: YAML frontmatter `{name, description, argument-hint,
   allowed-tools}` + freeform markdown body describing the procedure.
 - **Consumed by**: Claude Code skill trigger (matches on description keywords).
 - **Enhanceable**: as a writing convention (the frontmatter is structured), but
   not as data — the body is a procedure, not a config. Two skills
-  (`hk-slop-audit`, `fable-audit`) are the **exact** things the audit-preset
+  (`hk-code-quality-audit`, `fable-audit`) are the **exact** things the audit-preset
   contract should let us upgrade from procedure to data.
 - **Limitation**: skills don't share infrastructure — each re-derives the
   "what evidence to gather / what shape the output takes" decisions. The
@@ -286,7 +286,7 @@ spec:
 ### Semantics (what each field means)
 
 **`metadata.triggers`** is what maps the preset to invocation surfaces
-(`/hk-slop-audit`, `/fable-audit`, periodic, on-event). The runner subscribes
+(`/hk-code-quality-audit`, `/fable-audit`, periodic, on-event). The runner subscribes
 to all matching triggers; an explicit invocation always wins.
 
 **`spec.evidence`** is the *declarative* list of inputs. The runner executes
@@ -493,7 +493,7 @@ enforces the same report shape the existing audits follow (verdict →
 verified-done table → demotions → metrics → risks → ladder → next actions),
 and produces tasks with the WHY context the buckets demand.
 
-### Example B: `hk-slop-audit` (codebase hygiene)
+### Example B: `hk-code-quality-audit` (codebase hygiene)
 
 ```yaml
 apiVersion: audit.harness.kit/v1
@@ -682,7 +682,7 @@ spec:
       - ".proof/audit-{date}-slop/files_listing.txt"
 ```
 
-**What this replaces today**: the `hk-slop-audit/SKILL.md` skill (117 lines)
+**What this replaces today**: the `hk-code-quality-audit/SKILL.md` skill (117 lines)
 plus the implicit hand-curation of `slops/all_slops.md` and per-finding
 `slops/SLOP-NNN-*.md`. The 7 audit categories become typed checks; the P0-P4
 severity scale is the contract's `severity_scale`; the per-finding detail
@@ -704,7 +704,7 @@ task delivers:
 3. **`audit/triggers.py`** — wire `/<preset.id>` to the runner; subscribe to
    `on_event` hooks from the existing wave-close flow.
 4. **Migration of the two existing skills** — `fable-audit/SKILL.md` and
-   `hk-slop-audit/SKILL.md` become thin wrappers that load their YAML preset
+   `hk-code-quality-audit/SKILL.md` become thin wrappers that load their YAML preset
    and invoke the runner, preserving the trigger surface and argument hints.
 
 The audit reports under `docs/fable_roadmap/audits/` and `slops/` become
@@ -723,5 +723,5 @@ argument hint, and a one-line "this is data; see the preset YAML."
   (the `TASKS = [dict(...), ...]` shape).
 - Audit reports (current hand-curated outputs): `docs/fable_roadmap/audits/*.md`.
 - Skills being migrated: `.claude/skills/fable-audit/SKILL.md`,
-  `.claude/skills/hk-slop-audit/SKILL.md`.
+  `.claude/skills/hk-code-quality-audit/SKILL.md`.
 - Breadcrumb-first exploration: `docs/breadcrumb_analysis/_INDEX.md`.

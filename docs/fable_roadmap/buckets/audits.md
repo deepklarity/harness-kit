@@ -10,7 +10,7 @@ test honesty. An audit that runs the same way everywhere is an audit that
 can run unattended, and its findings become tasks without a human
 re-deriving the questions each time.
 
-**Where it stands.** `/fable-audit` and `/hk-slop-audit` exist as skills;
+**Where it stands.** `/fable-audit` and `/hk-code-quality-audit` exist as skills;
 `autonomy_metrics.py` and the diagnostic scripts produce numbers; presets
 exist in the system but are underused and mostly unenhanced. Nothing runs
 periodically on its own; nothing is project-agnostic.

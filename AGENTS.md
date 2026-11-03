@@ -7,7 +7,7 @@ You are a coding agent in the harness-kit repo. Start here.
 A toolkit for humans and AI building software together: an orchestration CLI
 (`odin/`), a task board (`taskit/` — Django API + React UI), a provider quota
 checker (`harness_usage_status/`), and portable engineering patterns
-(`.claude/skills/`, `docs/patterns/`).
+(`docs/skills/` with stubs in `.claude/skills/`, `docs/patterns/`).
 
 ## If you were sent here to adopt the patterns into another repo
 
@@ -37,4 +37,4 @@ scripts/verify.sh        # the one gate: all test suites, non-zero on any red
 - Never run `git stash` in the main checkout (parallel agents share it).
 - Never edit files inside `.odin/worktrees/`.
 - Tests pass ≠ done — verify the change live, then show the evidence.
-- Write like you talk: [`docs/fable_roadmap/TONE.md`](docs/fable_roadmap/TONE.md).
+- Write like you talk: [`docs/playbook/tone_and_taste.md`](docs/playbook/tone_and_taste.md).

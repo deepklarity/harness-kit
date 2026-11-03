@@ -9,6 +9,16 @@ This page is your instructions. Follow it top to bottom. Everything here
 works the same whatever agent you are — nothing depends on a specific model
 or CLI.
 
+## Two ways in
+
+This page audits a repo and proposes what to adopt; it changes nothing
+until a person says yes to each item. If the person wants the workspace set
+up, not just scored, the document is [`../initiate-scaffold.md`](../initiate-scaffold.md):
+it does this audit as its step 2, then copies the kit in, blends the
+entrypoint, asks the judgment questions once, and leaves a board of what is
+still missing. Both use the same twelve-area checklist and the same hard
+rules below.
+
 ## What harness-kit is
 
 A toolkit for humans and AI building software together. It has two parts:
@@ -78,7 +88,7 @@ not just the score.
 
 ### Step 1 — Audit the repo
 
-Work through [`adoption/CHECKLIST.md`](adoption/CHECKLIST.md) — eleven
+Work through [`adoption/CHECKLIST.md`](adoption/CHECKLIST.md) — twelve
 areas, each with an explanation of what it means and what to look for. Gather
 evidence by reading files and listing directories only (hard rule 1), and
 save what each score cites — file excerpts, listings — into `evidence/`.
@@ -97,7 +107,7 @@ Write `pattern-engineering-audit/report.md`. This is for the human, and it has o
 job: let them decide quickly. Rules:
 
 - **Lead with what's broken or missing.** Never open with what's fine.
-- **Score each of the eleven areas 0–10, honestly.** A 3 that's true beats
+- **Score each of the twelve areas 0–10, honestly.** A 3 that's true beats
   a 7 that flatters. Every score cites its evidence file. Per area, give
   three things that are good and three that most need improvement —
   concrete, with file names (fewer than three? say so, don't pad).
@@ -183,7 +193,7 @@ open('report.html','w').write(t[:m.start(1)]+m.group(1)+'\n'+b+'\n'+m.group(2)+t
    `{{TOKEN}}` is left and the fonts still render.
 
 In the body, replace every `{{TOKEN}}` with real content from `report.md`,
-mirror the template's worked-example classes for all eleven areas, and
+mirror the template's worked-example classes for all twelve areas, and
 keep the instruction comments out of the final file. `report.md` is the
 source of truth; the HTML is its curated presentation. The rules the
 template already embodies:
@@ -212,7 +222,10 @@ haven't seen scored.
 
 ### Step 3 — Adopt what the human picked
 
-Step 3 starts when the human says continue. Read their edited
+Step 3 starts when the human says continue. If the human wants the kit
+installed as a whole rather than item by item, switch to
+`initiate-scaffold.md` at this point; its step 3 copies the kit with a
+manifest and its step 4 blends the entrypoint from a template. Read their edited
 `action-items.md` first — checked boxes and their notes are the work
 order; their notes override your recommendations. Anything unchecked or
 marked "later"/"no" stays untouched. Record what you're acting on in
@@ -222,12 +235,12 @@ to take, in rough order of value-per-effort:
 | What | Where it lives | How to adapt |
 |---|---|---|
 | Agent entrypoint file | see `CLAUDE.md` here as a shape reference | Write the target repo's own — commands, structure, conventions. Mirror the same content into `AGENTS.md` so every agent CLI finds it. |
-| Portable skills | `.claude/skills/` — the portable ones: `hk-rca`, `hk-compound`, `hk-mock-first`, `hk-refine`, `hk-slop-audit`, `hk-autonomy-audit`, `hk-arch-audit`, `hk-skill-creator`, `hk-scout-wiki`, `hk-shift-changelog`, `hk-follow-breadcrumb` + `hk-breadcrumb-creator` (adapt paths) | Copy `SKILL.md`, replace this repo's paths with the target's. Skills are just markdown procedures — an agent without a skill system can follow them as docs. |
+| Portable skills | `docs/skills/` (stubs in `.claude/skills/`) — the portable ones: `hk-rca`, `hk-compound`, `hk-mock-first`, `hk-refine`, `hk-code-quality-audit`, `hk-autonomy-audit`, `hk-arch-audit`, `hk-skill-creator`, `hk-scout-wiki`, `hk-shift-changelog`, `hk-follow-breadcrumb` + `hk-breadcrumb-creator` (adapt paths) | Copy `SKILL.md`, replace this repo's paths with the target's. Skills are just markdown procedures — an agent without a skill system can follow them as docs. |
 | Task prompt presets | `taskit/taskit-backend/data/task_presets.json` — 27 prompts across code-review, ui-ux-audit, documentation, analysis, quality-process, development | They're plain prompt text. Take the ones that fit, drop them in the target's docs or preset system. |
 | Verify gate | `scripts/verify.sh` as the shape | One script, repo root, runs every suite, one summary table, non-zero on any red. Build the target's own. |
 | Testing philosophy | `docs/testing_process/testcase_process_and_philosophy.md` | The workflow (think → test → code → verify live) and the anti-patterns transfer as-is. |
 | Patterns habit | `docs/patterns/` here as the example | Create `docs/patterns/` in the target; the `hk-compound` skill maintains it. |
-| Tone rules | `docs/fable_roadmap/TONE.md` | Copy nearly as-is — it's about writing, not this repo. |
+| Tone rules | `docs/playbook/tone_and_taste.md` | Copy nearly as-is — it's about writing, not this repo. |
 
 Don't install everything. The audit said what's missing; the human said
 what matters. Skills like `hk-local-*` and `fable-audit` are wired to this

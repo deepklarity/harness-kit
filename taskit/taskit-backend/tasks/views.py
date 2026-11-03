@@ -570,7 +570,7 @@ def _record_audit_baseline(task):
 AUDIT_CATEGORY_MAPPINGS = [
     (["frontend slop", "frontend_slop", "hk-frontend-slop-review", "frontend"], ["FRONTEND_SLOP_AUDIT_REPORT.md", "frontend_slop_report.md"]),
     (["backend slop", "backend_slop", "hk-backend-slop-review", "backend"], ["BACKEND_SLOP_AUDIT_REPORT.md", "backend_slop_report.md"]),
-    (["ai slop", "ai_slop", "hk-ai-slop-review", "hk-slop-audit", "slop audit", "code slop"], ["AI_SLOP_AUDIT_REPORT.md", "AI_SLOP_AUDIT.md", "audit_slop_report.md", "slop_report.md", "ai-slop-report.md"]),
+    (["ai slop", "ai_slop", "hk-ai-slop-review", "hk-slop-audit", "hk-code-quality-audit", "slop audit", "code slop"], ["AI_SLOP_AUDIT_REPORT.md", "AI_SLOP_AUDIT.md", "audit_slop_report.md", "slop_report.md", "ai-slop-report.md"]),
     (["security", "hk-security-audit"], ["SECURITY_AUDIT_REPORT.md", "audit_security_report.md"]),
     (["performance", "hk-performance-audit"], ["PERFORMANCE_AUDIT_REPORT.md"]),
     (["test case", "test_case", "hk-test-case-audit", "test audit"], ["TEST_CASE_AUDIT_REPORT.md", "audit_test_report.md"]),

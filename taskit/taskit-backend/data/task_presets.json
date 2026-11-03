@@ -74,42 +74,22 @@
     },
     {
       "id": "ai-slop-detection",
-      "title": "AI Slop Detection",
-      "description": "Use skill /hk-ai-slop-detection to perform AI Slop Detection (Objective: forensic audit of codebase for AI-generated slop, cargo-cult code, template duplication, dead state variables; Report: outputs AI_SLOP_AUDIT_REPORT.md).",
+      "title": "Code Quality Audit",
+      "description": "Use skill /hk-code-quality-audit to audit code quality. Find what nobody would miss and what reads as generated, and write it up as one HTML page scored out of 10: dead code, pasted templates, wrappers with one caller, scratch files, hardcoded hosts, unused packages. Scoped to the whole repo, one layer or one directory. The skill body under docs/skills/audits/hk-code-quality-audit/SKILL.md is the live copy.",
       "category": "code-review",
       "icon": "scan",
       "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/codebase/review/ai_slop.md",
+      "source": "docs/skills/audits/hk-code-quality-audit/SKILL.md",
       "sort_order": 3
-    },
-    {
-      "id": "backend-slop-review",
-      "title": "Backend Slop Review",
-      "description": "Use skill /hk-backend-slop-review to perform Backend Slop Review (Objective: forensic review of backend routes, controllers, serializers, data layers for slop and dead paths; Report: outputs BACKEND_SLOP_AUDIT_REPORT.md).",
-      "category": "code-review",
-      "icon": "server",
-      "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/codebase/review/slop_review/backend_slop_review.md",
-      "sort_order": 4
-    },
-    {
-      "id": "frontend-slop-review",
-      "title": "Frontend Slop Review",
-      "description": "Use skill /hk-frontend-slop-review to perform Frontend Slop Review (Objective: forensic review of frontend components, hooks, re-renders, prop-drilling, and UI slop; Report: outputs FRONTEND_SLOP_AUDIT_REPORT.md).",
-      "category": "code-review",
-      "icon": "monitor",
-      "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/codebase/review/slop_review/frontend_slop_review.md",
-      "sort_order": 5
     },
     {
       "id": "test-case-audit",
       "title": "Test Case Audit",
-      "description": "Use skill /hk-test-case-audit to perform Test Case Audit (Objective: audit test suite and test coverage for gaps, mock setups, assertion quality; Report: outputs TEST_CASE_AUDIT_REPORT.md).",
+      "description": "Use skill /hk-test-case-audit to perform Test Case Audit. Write up the gaps in this repo's test suite and test coverage as one HTML page in writeup/ scored per suite: what has no test, which tests pass with the code broken, which bill a provider, what to write first. Reads a directory or PR; runs the four suites when asked to score them. The skill body under docs/skills/audits/hk-test-case-audit/SKILL.md is the live copy.",
       "category": "code-review",
       "icon": "shield-check",
       "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/codebase/review/test_case_audit.md",
+      "source": "docs/skills/audits/hk-test-case-audit/SKILL.md",
       "sort_order": 6
     },
     {
@@ -215,51 +195,41 @@
     {
       "id": "ui-gaps-analysis",
       "title": "UI Gaps Analysis",
-      "description": "Use skill /hk-ui-gaps-analysis to perform UI Gaps Analysis (Objective: catch missing UI states, interaction gaps, empty/loading states, error boundaries; Report: outputs UI_GAPS_AUDIT_REPORT.md).",
+      "description": "Use skill /hk-ui-gaps-analysis to perform UI Gaps Analysis. Read every frontend component that fetches or submits and write up the ones missing a loading, empty, error or pending state, or that leave the user at a dead end, as one HTML page with a score out of 10; the worst gaps are confirmed in Chrome. The skill body under docs/skills/audits/hk-ui-gaps-analysis/SKILL.md is the live copy.",
       "category": "code-review",
       "icon": "eye",
       "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/codebase/review/ui_gaps.md",
+      "source": "docs/skills/audits/hk-ui-gaps-analysis/SKILL.md",
       "sort_order": 8
     },
     {
       "id": "web-app-ui-validation",
       "title": "Web App UI Validation",
-      "description": "Use skill /hk-web-app-ui-validation to perform Web App UI Validation (Objective: score web app interfaces against layout polish, typography, visual hierarchy, viewport responsiveness; Report: outputs WEB_APP_UI_AUDIT_REPORT.md).",
+      "description": "Use skill /hk-web-app-ui-validation to perform Web App UI Validation. Walks a running web app in Chrome at three widths and writes up layout defects, navigation traps, broken links, forms and accessibility failures as one page scored out of 10. The skill body under docs/skills/audits/hk-web-app-ui-validation/SKILL.md is the live copy.",
       "category": "ui-ux-audit",
       "icon": "monitor",
       "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/web_app/ui/review/validation.md",
+      "source": "docs/skills/audits/hk-web-app-ui-validation/SKILL.md",
       "sort_order": 1
     },
     {
       "id": "mobile-app-ui-validation",
       "title": "Mobile App UI Validation",
-      "description": "Use skill /hk-mobile-app-ui-validation to perform Mobile App UI Validation (Objective: validate mobile touch targets >=44pt, mobile viewport density, responsive layout polish; Report: outputs MOBILE_APP_UI_AUDIT_REPORT.md).",
+      "description": "Use skill /hk-mobile-app-ui-validation to perform Mobile App UI Validation. Drive a native iOS or Android app on a device or simulator through the mobile MCP, screenshot every screen, measure touch targets, and write up mis-taps, clipped text and screens that trap the user as one HTML page with a score out of 10. The skill body under docs/skills/audits/hk-mobile-app-ui-validation/SKILL.md is the live copy.",
       "category": "ui-ux-audit",
       "icon": "smartphone",
       "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/mobile_app/ui/review/validation.md",
+      "source": "docs/skills/audits/hk-mobile-app-ui-validation/SKILL.md",
       "sort_order": 2
-    },
-    {
-      "id": "website-ux-audit",
-      "title": "Website UX Audit",
-      "description": "Use skill /hk-website-ux-audit to perform Website UX Audit (Objective: evaluate website UX, navigation flows, accessibility, responsiveness, form feedback; Report: outputs WEBSITE_UX_AUDIT_REPORT.md).",
-      "category": "ui-ux-audit",
-      "icon": "globe",
-      "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/codebase/review/website/ui_ux_audit.md",
-      "sort_order": 3
     },
     {
       "id": "chart-validation",
       "title": "Chart Validation",
-      "description": "Use skill /hk-chart-validation to perform Chart Validation (Objective: validate chart types, axis baselines, metric truthfulness, responsive containers; Report: outputs CHART_VALIDATION_AUDIT_REPORT.md).",
+      "description": "Use skill /hk-chart-validation to perform Chart Validation. Check that the charts in a codebase tell the truth: chart type, axis baselines, aggregation, units, labels, tooltips and how they render in Chrome at each width; writes the findings as one HTML page with a score out of 10. The skill body under docs/skills/audits/hk-chart-validation/SKILL.md is the live copy.",
       "category": "ui-ux-audit",
       "icon": "bar-chart",
       "suggested_priority": "MEDIUM",
-      "source": "prompt-library/domains/charts/review/validation.md",
+      "source": "docs/skills/audits/hk-chart-validation/SKILL.md",
       "sort_order": 4
     },
     {
@@ -636,11 +606,11 @@
     {
       "id": "hygiene-audit",
       "title": "Hygiene Audit",
-      "description": "Use skill /hk-hygiene-audit to perform Hygiene Audit.",
+      "description": "Use skill /hk-code-quality-audit to perform Hygiene Audit.",
       "category": "audit",
       "icon": "sparkles",
       "suggested_priority": "MEDIUM",
-      "source": "skill/hk-slop-audit",
+      "source": "skill/hk-code-quality-audit",
       "sort_order": 2,
       "audit": {
         "apiVersion": "audit.harness.kit/v1",
@@ -1091,11 +1061,11 @@
     {
       "id": "security-audit",
       "title": "Security Audit",
-      "description": "Use skill /hk-security-audit to perform Security Audit (Objective: evaluate code security Scope, Findings, credential mounts, token handling, sandbox egress posture, subprocess calls; Report: outputs SECURITY_AUDIT_REPORT.md).",
+      "description": "Use skill /hk-security-audit to perform Security Audit. Objective: run scripts/security_audit.py over the repo and verify each hit by reading the code. Scope: the repo or the path the user names. Findings: leaked secrets, endpoints without auth, credential mounts, token handling, sandbox egress posture, subprocess calls with shell=True. Report: one HTML page at writeup/security-audit-<scope>.html, up to ten findings. The skill body under docs/skills/audits/hk-security-audit/SKILL.md is the live copy.",
       "category": "audit",
       "icon": "lock",
       "suggested_priority": "HIGH",
-      "source": "task 245 + docs/wiki/security/endorlabs-gpt55-cursor-code-security.md",
+      "source": "docs/skills/audits/hk-security-audit/SKILL.md",
       "sort_order": 4,
       "audit": {
         "apiVersion": "audit.harness.kit/v1",

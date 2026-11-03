@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mission Control</title><style>
+:root{color-scheme:light}
+body{margin:0;background:#f4f5f7;color:#1c1f23;font:15px/1.55 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+main{max-width:940px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:26px;margin:0 0 6px}
+.verdict{font-size:18px;font-weight:600;margin:0 0 24px}
+section{background:#fff;border:1px solid #dcdfe4;border-radius:10px;padding:20px;margin-bottom:18px}
+.label{font:600 11px/1 'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;color:#4a5560;margin:0 0 12px}
+.label::before{content:'';display:inline-block;width:14px;border-top:2px solid #2f6feb;margin-right:8px;vertical-align:middle}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e8eaee;vertical-align:top}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#5b6570}
+.id{font-family:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;white-space:nowrap}
+.muted{color:#5b6570;font-size:13px}
+.unfilled{font-style:italic;color:#5b6570}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid}
+.pill.done,.pill.fixed{background:#e8f6ed;border-color:#b6e0c5;color:#1d6b3a}
+.pill.decided{background:#eef1f8;border-color:#c8d1e8;color:#324a86}
+.pill.owner,.pill.human-review{background:#fdf3e2;border-color:#f0d9a8;color:#8a5a09}
+.pill.open,.pill.doing{background:#fff;border-color:#dcdfe4;color:#3a434d}
+.pill.blocked{background:#fdeceb;border-color:#f3c3bf;color:#9c2a22}
+.pill.dropped{background:#f4f5f7;border-color:#dcdfe4;color:#5b6570}
+.filters{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.filters button{font:inherit;font-size:13px;padding:3px 10px;border:1px solid #dcdfe4;border-radius:999px;background:#fff;color:#3a434d;cursor:pointer}
+.filters button.on{background:#1c1f23;border-color:#1c1f23;color:#fff}
+.filter input{font:inherit;width:100%;max-width:24rem;padding:5px 9px;margin:0 0 10px;border:1px solid #dcdfe4;border-radius:6px}
+button.detail,button.copy{font:inherit;font-size:12px;padding:2px 9px;border:1px solid #dcdfe4;border-radius:6px;background:#fff;cursor:pointer;color:#3a434d}
+.dl{font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;color:#5b6570;margin:16px 0 4px}
+details summary{cursor:pointer;font-size:13px;color:#3a434d;margin-top:8px}
+a{color:#2f6feb}
+:focus-visible{outline:2px solid #2f6feb;outline-offset:2px}
+tbody.item>tr.main{cursor:pointer}tbody.item>tr.main:hover td{background:#f7f8fa}
+tbody.item>tr.more{display:none}tbody.item.open>tr.more{display:table-row}
+tbody.item.open .chev{transform:rotate(90deg)}.chev{color:#5b6570;width:16px}
+tr.more td{background:#fafbfc}tr.more p{margin:0 0 8px;font-size:14px;white-space:pre-line}
+tr.more ul{margin:4px 0 8px;padding-left:20px}
+.num-cell{font:600 13px/1 'JetBrains Mono',ui-monospace,monospace;color:#5b6570}
+.kind{font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;border:1px solid;white-space:nowrap}
+.kind.decide{background:#fdeceb;border-color:#f3c3bf;color:#9c2a22}
+.kind.review{background:#eaf1fe;border-color:#c3d6fb;color:#1f4fb0}
+.kind.click,.kind.run{background:#e8f6ed;border-color:#b6e0c5;color:#1d6b3a}
+.ask-title{font-weight:600}
+table.opts{margin:4px 0 10px;font-size:13px}table.opts td,table.opts th{padding:6px 8px}table.opts td:first-child{font-weight:600;width:28%}
+p.sub{font-weight:600;margin:12px 0 4px}ul.plain{margin:0 0 8px;padding-left:20px}ul.plain li{margin:3px 0}
+.file{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:#5b6570}
+.st{font-size:12px;color:#5b6570}
+@media (max-width:640px){main{padding:20px 16px 48px}th,td{padding:6px 6px}.c-kind,.c-time{display:none}}
+</style></head><body><main>
+<!-- Fill every {{token}} (an unfilled one renders as an italic "not written yet" span; replace the token or that span with the text), then run node docs/harnesskit/templates/mission-control/render-board.mjs writeup/<initiative>; the sections between the BOARD markers and the Rendered line are generated and the <head> is rewritten from the template on every render, so never hand-edit those. -->
+<h1>{{initiative}}</h1>
+<!-- Verdict: the takeaway in one line, what is true now including the bad part, and what happens next. -->
+<p class="verdict">{{verdict}}</p>
+<p class="muted" id="updated">Rendered by render-board.mjs from board.csv.</p>
+<section id="where"><p class="label">Where are we?</p>
+<!-- Written by the agent to the owner, in its own words, never generated from the board. Plain words, no task ids. Rewrite all four from scratch at the end of every session that changed state. -->
+<p><strong>Done:</strong> {{done}}</p>
+<p><strong>Waiting on you:</strong> {{waiting_on_you}}</p>
+<p><strong>Next for me:</strong> {{next_for_me}}</p>
+<p><strong>Broken:</strong> {{broken}}</p>
+  <!-- The scores live here and nowhere else; RESUME.md points at this table. Score is the before score, and once it moves "before → now" (2 → 5). -->
+  <details class="fold"><summary>Readiness: {{scores_summary}}</summary>
+  <table>
+    <tr><th>Area</th><th>Score</th><th>What closes the gap</th></tr>
+    <tr><td>{{area}}</td><td class="n">{{score}}</td><td>{{gap}}</td></tr>
+  </table>
+  <p class="muted">Out of 10: 0–2 nothing there, 3–5 only its author could use it, 6–8 present and documented, 9–10 an agent landing cold could use it today.</p>
+  </details>
+</section>
+<!-- BOARD:START -->
+<!-- BOARD:END -->
+<section id="refs"><p class="label">Instruments and references</p>
+<!-- One row per link: the board, RESUME, the log, the run reports, the guides. Live numbers live in the instruments, not here. -->
+<table><tbody>
+<tr><td>{{link}}</td><td class="muted">{{what_it_is}}</td></tr>
+</tbody></table></section>
+</main></body></html>

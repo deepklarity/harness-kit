@@ -1,0 +1,13 @@
+id,kind,title,status,priority,depends_on,closes_when,how_proven,notes,started_at,done_at,owner_kind,owner_action,owner_reply
+D1,decision,Pick the package name,open,P0,,owner answers,,"Proposed: @deepklarity/harnesskit. It matches the org scope.",,,,,
+D2,decision,Ship Python or node,decided,P1,,,,"Decided: node only, no Python in the package.",,,,,
+T1,task,Move the kit into harness-kit,done,P0,,tree moved and tests green,git log shows the move,Done with git mv.,2026-01-01 09:00,2026-01-01 11:30,,,
+T2,task,Port the guard hook,doing,P0,T1,guard test passes in node,npm test guard,"Needs <b>escaping</b> & quotes ""here"".",2026-01-02 08:00,,,,
+T3,task,Port render-board,open,P1,T2,golden html matches,,,,,,,
+T4,task,Read the proof page for the guard,human-review,P1,,page reads cold,Open proof/guard.html,,2026-01-02 08:30,2026-01-02 09:00,review,Open proof/guard.html and read the first screen.,"Reply ""T4 done"", or say what reads wrong."
+T5,task,Try the install on your laptop,owner,P2,,install works,,,,,run,Run npx @deepklarity/harnesskit init in a scratch repo.,"Reply ""T5 ok"" with the last line it printed."
+B1,bug,Stub freshness is unchecked,open,P1,,a test fails on stale stubs,,,,,,,
+S1,suggestion,Dedupe the playbook index,noted,P2,,,,kit/docs/_INDEX.md,,,,,
+S2,suggestion,Drop the zip step,taken,P2,,,,src/pack.py,,,,,
+L1,learning,A rename needs path constants first,open,P1,,,,kit/entry.md step 3,,,,,
+L2,learning,Goldens before ports,folded,P2,,,,test/fixtures,,,,,

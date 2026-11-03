@@ -1,0 +1,23 @@
+[
+  { "id": "SKILL-compile-script-missing", "sev": 5, "lens": "runnability", "confidence": "traced",
+    "title": "The last step runs a script that does not exist",
+    "file": "docs/skills/audits/<name>/SKILL.md", "line": 86,
+    "evidence": "If the user confirms (yes), execute `python compile_audit.py AUDIT_REPORT.md --yes`.",
+    "what": "No compile_audit.py exists under scripts/ or anywhere else in this repo.",
+    "why": "The agent reaches the end of the audit, asks a yes/no question, and fails on yes. [Assumption] The line came from a harness that shipped the script alongside the preset.",
+    "fix": "Delete the question and the command. Build the page in docs/skills/knowledge/hk-writeup/SHELL.html and write it to writeup/<skill>-<subject>.html, then say where it went." },
+  { "id": "SKILL-report-at-repo-root", "sev": 4, "lens": "output contract", "confidence": "traced",
+    "title": "The report lands as markdown at the repo root",
+    "file": "docs/skills/audits/<name>/SKILL.md", "line": 40,
+    "evidence": "Save the final report to `AUDIT_REPORT.md` at the root of the audited project directory.",
+    "what": "The repo's rule sends every page a skill makes to writeup/ at the root, which .gitignore ignores.",
+    "why": "A markdown file at the repo root shows up as an untracked file in the next PR, and the page skips the house shell and voice.",
+    "fix": "Replace with: build the page in hk-writeup's SHELL.html and write it to writeup/<skill>-<subject>.html at the repo root." },
+  { "id": "SKILL-role-play-opener", "sev": 2, "lens": "voice", "confidence": "traced",
+    "title": "The skill opens by casting the agent as an engineer",
+    "file": "docs/skills/audits/<name>/SKILL.md", "line": 15,
+    "evidence": "You are a senior software engineer performing a forensic audit of a codebase to evaluate its test suite and test coverage.",
+    "what": "The sentence names a role and a grading word and gives the agent no action.",
+    "why": "It spends the first line of the skill on nothing the agent will do differently, and 'forensic' is the kind of word the tone doc cuts.",
+    "fix": "Replace with one sentence saying what the skill makes: 'Reads the test suites in one repo and writes up where they are thin.'" }
+]

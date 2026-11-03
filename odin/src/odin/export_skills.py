@@ -40,12 +40,16 @@ def _first_sentence(text: str, limit: int = 160) -> str:
     return line
 
 
-def render_skill_markdown(preset: dict[str, Any], body_override: str | None = None) -> str:
+def render_skill_markdown(
+    preset: dict[str, Any],
+    body_override: str | None = None,
+    description_override: str | None = None,
+) -> str:
     """Render one preset as SKILL.md text. Pure function: same preset in, same bytes out."""
     pid = preset["id"]
     title = preset.get("title", pid)
     blurb = _first_sentence(preset.get("description", ""))
-    description = (
+    description = description_override or (
         f"{title}. {blurb} Generated from task preset '{pid}' "
         "— edit data/task_presets.json, not this file."
     )
@@ -89,6 +93,7 @@ def export_presets_to_skills(
         skill_dir = output_dir / _skill_name(pid)
         skill_path = skill_dir / "SKILL.md"
         body_override = None
+        description_override = None
         if skill_path.exists():
             text = skill_path.read_text()
             if GENERATED_MARKER not in text:
@@ -98,7 +103,10 @@ def export_presets_to_skills(
                 )
             if preset.get("description", "").strip().startswith("Use skill /hk-"):
                 try:
-                    _, body = parse_skill_md_text(text, label=str(skill_path))
+                    fm, body = parse_skill_md_text(text, label=str(skill_path))
+                    # The SKILL.md is the live copy of a "Use skill" preset: keep the
+                    # description a maintainer wrote there, not the preset blurb.
+                    description_override = fm.get("description") or None
                     body = body.lstrip()
                     title_prefix = f"# {preset.get('title', pid)}\n"
                     if body.startswith(title_prefix):
@@ -106,8 +114,13 @@ def export_presets_to_skills(
                     body_override = body.strip()
                 except Exception:
                     body_override = None
+                    description_override = None
         skill_dir.mkdir(parents=True, exist_ok=True)
-        skill_path.write_text(render_skill_markdown(preset, body_override=body_override))
+        skill_path.write_text(
+            render_skill_markdown(
+                preset, body_override=body_override, description_override=description_override
+            )
+        )
         written.append(skill_path)
     return written
 

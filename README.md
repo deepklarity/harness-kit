@@ -54,7 +54,7 @@ Then follow [`QUICKSTART.md`](QUICKSTART.md) — it checks your provider with `o
 | [`odin/`](odin/README.md) | CLI for multi-agent orchestration — plan, assign, execute, reflect |
 | [`taskit/`](taskit/README.md) | Task board UI + API — kanban, DAG view, timeline, cost analytics |
 | [`harness_usage_status/`](harness_usage_status/README.md) | CLI to check AI provider quotas |
-| [`.claude/skills/`](docs/_INDEX.md) | Portable skills: RCA, compounding, mock-first, audits — usable in any repo |
+| [`docs/skills/`](docs/skills/README.md) | Portable skills (`.claude/skills/` holds one-line stubs pointing here): RCA, compounding, mock-first, audits — usable in any repo |
 | [`docs/`](docs/_INDEX.md) | Patterns, testing process, flow traces, adoption checklist |
 
 ## How it works
@@ -80,7 +80,7 @@ Our methodology inside harness engineering: instead of one-off prompts, encode t
 | **Knowledge compounding** | Every solved problem becomes a searchable pattern doc; every debugging session can become a flow trace. Agents search these before re-exploring. |
 | **Loop and slop audits** | Can an agent debug this area alone? Is the codebase clean? Scheduled checks with scored reports. |
 
-These live as skills in `.claude/skills/` and transfer to any repo — that's what the [Pattern Engineering Quickstart](#pattern-engineering-quickstart) installs.
+These live as skills in `docs/skills/` (with stubs in `.claude/skills/`) and transfer to any repo — that's what the [Pattern Engineering Quickstart](#pattern-engineering-quickstart) installs.
 
 ## FAQ
 

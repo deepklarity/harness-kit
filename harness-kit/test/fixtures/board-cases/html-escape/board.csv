@@ -1,0 +1,3 @@
+id,kind,title,status,priority,depends_on,closes_when,notes
+T1,task,"<script>alert('x')</script> & ""q""",open,P0,,<b>bold</b>,"a & b < c > d"
+S1,suggestion,Tidy <i>this</i>,noted,P2,,,src/a&b.py
