@@ -10,9 +10,10 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const source = readFileSync(join(root, "harness-kit/README.md"), "utf8");
 
-// npm can't play GitHub videos, so the package README links the video; on GitHub a bare
-// user-attachments URL on its own line renders as a player.
-const withPlayer = source.replace(/^\[▶[^\]]*\]\((https:\/\/github\.com\/user-attachments\/assets\/[^)]+)\)$/m, "$1");
+// npm can't play GitHub videos, so the package README links to the repo page; on GitHub that line
+// becomes the bare user-attachments URL, which renders as a player.
+const VIDEO = "https://github.com/user-attachments/assets/242e34b7-6106-483b-952c-912e8c95669e";
+const withPlayer = source.replace(/^\[▶ Watch[^\]]*\]\(https:\/\/github\.com\/deepklarity\/harness-kit#readme\)$/m, VIDEO);
 const relinked = withPlayer.replace(/(\]\()([^)\s]+)\)/g, (whole, open, target) =>
   /^(https?:|#|mailto:)/.test(target) || target === "LICENSE" ? whole : `${open}harness-kit/${target})`,
 );

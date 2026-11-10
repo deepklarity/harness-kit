@@ -41,7 +41,7 @@ const PATTERNS = compile(DENYLIST);
 
 
 // The package scope, and the README's one credit line.
-const ALLOWED = /@deepklarity\/harnesskit|Made by \[DeepKlarity\]\(https:\/\/deepklarity\.com\)/gi;
+const ALLOWED = /@deepklarity\/harnesskit|github\.com\/deepklarity\/harness-kit|Made by \[DeepKlarity\]\(https:\/\/deepklarity\.com\)/gi;
 
 // Python str.splitlines() line boundaries.
 const LINE_BREAK = new RegExp("\\r\\n|[\\n\\r\\v\\f\\x1c-\\x1e\\x85\\u2028\\u2029]");

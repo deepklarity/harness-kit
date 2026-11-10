@@ -2,7 +2,7 @@
 
 harness-kit is an open-source CLI and setup guide for [harness engineering](https://www.martinfowler.com/articles/exploring-gen-ai/harness-engineering.html): your coding agent writes a `CLAUDE.md`, flow guides, inspect scripts and tests for your repo, and harness-kit checks with before-and-after runs whether they made the agent's work better.
 
-[▶ Watch the 4-minute walkthrough](https://github.com/user-attachments/assets/242e34b7-6106-483b-952c-912e8c95669e)
+[▶ Watch the 4-minute walkthrough](https://github.com/deepklarity/harness-kit#readme)
 
 ## Quick start
 
