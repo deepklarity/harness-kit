@@ -14,10 +14,25 @@ const repo = () => {
 };
 
 describe("runInit", () => {
-  it("refuses a target that is not a git repo and says so", () => {
+  it("works in a folder that is not a git repo, says measuring needs git, and records the baseline once there is a commit", () => {
     const d = mkdtempSync(join(tmpdir(), "hk-nogit-"));
-    expect(() => runInit({ target: d, check: false, kitDir })).toThrow(/git/);
-    expect(existsSync(join(d, "docs"))).toBe(false);
+    const first = runInit({ target: d, check: false, kitDir });
+    expect(first.code).toBe(0);
+    expect(existsSync(join(d, "docs/harnesskit/entry.md"))).toBe(true);
+    expect(existsSync(join(d, "writeup/agent-readiness/board.csv"))).toBe(true);
+    expect(existsSync(join(d, ".git"))).toBe(false);
+    expect(first.output).toMatch(/not a git repository/);
+    expect(first.output).toContain('claude "Set up this repo with harness-kit');
+    expect(readFileSync(join(d, "docs/harnesskit/manifest"), "utf8")).not.toMatch(/^baseline_commit [0-9a-f]/m);
+
+    execFileSync("git", ["init", "-q", d]);
+    execFileSync("git", ["-C", d, "add", "-A"]);
+    execFileSync("git", ["-C", d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "before"]);
+    const head = execFileSync("git", ["-C", d, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const second = runInit({ target: d, check: false, kitDir });
+    expect(second.output).not.toMatch(/not a git repository/);
+    expect(readFileSync(join(d, "docs/harnesskit/manifest"), "utf8")).toContain(`baseline_commit ${head}`);
+    expect(readFileSync(join(d, ".git/info/exclude"), "utf8")).toContain(".harnesskit/");
   });
 
   it("sets a workspace up, is idempotent, leaves edited kit files, and --check exits 1 on drift", () => {

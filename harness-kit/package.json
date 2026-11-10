@@ -1,6 +1,6 @@
 {
   "name": "@deepklarity/harnesskit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Coding agents like Claude Code get lost in real codebases. harness-kit has your agent build a map, tools and tests from your code, then measures the difference.",
   "keywords": [
     "claude-code",

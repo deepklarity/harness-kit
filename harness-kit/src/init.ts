@@ -63,9 +63,7 @@ export function runInit({
   kitDir?: string;
 }): InitResult {
   const dir = resolve(target);
-  if (!existsSync(join(dir, ".git"))) {
-    throw new Error(`${dir} is not a git repository (no .git found); run "git init" there or pass --target <repo>`);
-  }
+  const isGit = existsSync(join(dir, ".git"));
 
   const lines: string[] = [];
   let report: CopyReport;
@@ -82,7 +80,7 @@ export function runInit({
     const seeded = !existsSync(board);
     seedReadiness(kitDir, dir);
     if (seeded) wrote.push(...readdirSync(board, { recursive: true }).map((f) => `writeup/${f}`));
-    excludeHarnesskit(dir);
+    if (isGit) excludeHarnesskit(dir);
   }
 
   const verb = checkOnly ? "would be " : "";
@@ -105,6 +103,9 @@ export function runInit({
     lines.push(
       "",
       "Nothing else changed. Setup will show you each change to CLAUDE.md, AGENTS.md, .claude/ and .gitignore before making it.",
+      ...(isGit
+        ? []
+        : ["", "This folder is not a git repository. Setup works; to measure before and after later, run git init, commit, and run init again."]),
       "",
       "The journey (setup shows this list, updated, in every message):",
       ...journeyStages(kitDir).map((stage, i) => `  ${i === 0 ? "✓" : "○"} ${i + 1}. ${stage}`),

@@ -127,7 +127,8 @@ function run(kitDir: string, target: string, { version, installSpec }: CopyOptio
   // Recorded once, before anything is written: did the workspace bring its own CLAUDE.md?
   const claudeMdBefore = prev ? prev.claudeMdBefore ?? false : existsSync(join(target, "CLAUDE.md"));
   // Recorded once, before the first write; a re-run keeps the original.
-  const baselineCommit = prev ? prev.baselineCommit : headCommit(target);
+  // Recorded at the first init that finds a commit, then never moved.
+  const baselineCommit = prev?.baselineCommit ?? headCommit(target);
   // Each nested repo's HEAD the first time the manifest sees it; a re-run keeps the original.
   const nestedBaselines = new Map(prev?.nestedBaselines ?? []);
   for (const rel of nestedRepos(target)) if (!nestedBaselines.has(rel)) nestedBaselines.set(rel, headOf(join(target, rel))!);

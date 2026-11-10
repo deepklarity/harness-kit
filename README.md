@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/242e34b7-6106-483b-952c-912e8c95669e
 
 ## Quick start
 
-In any git repo, with [Claude Code](https://claude.com/claude-code) installed:
+In any project folder, with [Claude Code](https://claude.com/claude-code) installed:
 
 ```bash
 npx @deepklarity/harnesskit init

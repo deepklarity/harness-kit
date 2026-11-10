@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- The npm page links the walkthrough video instead of showing a bare link.
+- `init` works in a folder that is not a git repository; measuring before and after needs git, and running `init` again after the first commit records it.
+
 ## 0.1.0
 
 First release.
