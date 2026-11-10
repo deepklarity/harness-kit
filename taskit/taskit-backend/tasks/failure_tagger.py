@@ -10,8 +10,7 @@ Design rules (v1):
 - Extends the existing quota-check discipline (``QUOTA_KEYWORDS``) —
   ``views._is_quota_failure`` imports this list so the two stay in lockstep.
 
-Taxonomy (derived from the historical failure inventory in
-``docs/fable_roadmap/archive/FINDINGS.md``):
+Taxonomy (derived from the historical failure inventory):
 
     quota_exhaustion   — rate-limit / 429 / quota hit
     silent_hang        — zero output, terminated silently

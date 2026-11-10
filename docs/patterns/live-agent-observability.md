@@ -6,23 +6,18 @@ output until exit is a defect, even if the happy path works** — because the
 run you most need to inspect is the one that never exits cleanly.
 
 Everything downstream keys off that one file: `odin logs -f <id>` (extracted
-text via `task_<id>.out`), `watch_task.sh` (trace-size growth as the progress
-signal), post-run ingestion into TaskIt (trace comment → TraceViewer), and any
+text via `task_<id>.out`), the trace-size growth as the progress
+signal, post-run ingestion into TaskIt (trace comment → TraceViewer), and any
 human or AI operator who just wants `tail -f`. One file, many observers. The
 path to "what is the agent doing right now?" must be straightforward,
 inspectable, and identical for host and sandboxed runs.
 
 ## The standard process for watching a dispatched task
 
-1. Dispatch backgrounded: `odin exec <id>` (env-scrubbed per F9).
-2. Start the watcher backgrounded: `sh docs/fable_roadmap/bootstrap/watch_task.sh <id>`.
-   It heartbeats (status, trace bytes, VM CPU, worktree HEAD/dirt) with
-   exponential backoff and exits on the first meaningful change — terminal
-   status, first commit, VM death, stall (CPU **and** trace frozen ×3), or budget.
-   An agent session is woken by the exit; a human just reads the heartbeat log.
-3. Inspect anytime, without waiting: `tail -f .odin/logs/task_<id>.trace.jsonl`
+1. Dispatch backgrounded: `odin exec <id>`.
+2. Inspect anytime, without waiting: `tail -f .odin/logs/task_<id>.trace.jsonl`
    (raw) or `odin logs -f <id>` (extracted text). Works mid-run, sandboxed or not.
-4. Never wait out a timeout to learn what happened — if the watcher's trace
+3. Never wait out a timeout to learn what happened — if the trace
    signal is flat while CPU climbs, look at the trace tail *now*.
 
 ## Instances
@@ -63,7 +58,7 @@ The invariant applies to the *operator's own* commands too, not just harnesses.
 A blocking diagnostic bash call (task 102 trace + DB comments) hung for its full
 1800s cap with the user watching nothing happen — "*that's the problem to not
 see what agent is typing mid run… 30mins wasted*". The watcher
-(`watch_task.sh`) was built only *after* the waste. Rule: never start a
+was built only *after* the waste. Rule: never start a
 long-running process without a live signal already in place — heartbeat first,
 dispatch second. Waiting via `sleep N` chains is the same defect in operator
 form (see docs/patterns/second-friction-structural-fix.md).
@@ -73,5 +68,4 @@ form (see docs/patterns/second-friction-structural-fix.md).
 TaskIt UI cannot show the live trace yet — ingestion happens post-run (trace
 posted as a comment). A backend tail endpoint over the board's
 `.odin/logs/task_<id>.trace.jsonl` + a TraceViewer live mode would let humans
-and dashboard-watching AIs see running agents. Logged as a wave-2 candidate in
-`docs/fable_roadmap/OPERATIONS.md`.
+and dashboard-watching AIs see running agents.

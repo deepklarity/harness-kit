@@ -42,6 +42,7 @@ Never run `git stash` in the main checkout or any shared context: agents work in
 - **Same field in many files is a table.** A key that would land in more than a handful of files goes into one registry (a CSV or index) with a check script. Bookkeeping never goes into a file another tool parses. Before fanning out a change over more than five files, say in one sentence what it will look like on disk.
 - **Solve the actual problem.** No framework where a function will do; no config for a decision you can make; if the code feels awkward, question the data model first.
 - **harnesskit asks before it touches the daily workflow.** Adopting the kit is a journey the person walks, never a surprise. `init` writes only reference material (`docs/`, the board in `writeup/`); every change to a file that shapes day-to-day work (`CLAUDE.md`, `AGENTS.md`, anything under `.claude/`, `.gitignore`) is a step the person sees as a preview and approves first. No magic commands.
+- **harnesskit's public text exists to help the reader.** README, docs and package text say what it does and how to use it, plainly; no self-introduction, sales lines, borrowed hype or gimmicks. The studio's name appears once, as a credit at the end. Examples and transcripts are real or say they are illustrative.
 - **No slop.** Generated code meets the hand-written bar. A tenet violation is a code smell even when tests pass: name it and fix it.
 
 ## Methodical Problem-Solving

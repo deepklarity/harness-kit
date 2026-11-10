@@ -21,7 +21,7 @@
 | Task cancelled but still running | Check PID: `ps -p <pid>` | PID stored in `task.metadata["active_execution"]["pid"]` |
 | Odin updated status but DAG also tried | `taskit_detail.log` | `status already changed to` — this is normal, DAG defers |
 | Task goes EXECUTING→REVIEW instantly, reflection says "no implementation" | `spec_<spec_id>_task_<task_id>.log` | `Waiting — unmet deps` — odin's dep check disagreed with TaskIt's. Check both `COMPLETED_STATUSES` definitions match |
-| Dependency blocked but upstream looks done | Both `dependencies.py` files use `COMPLETED_STATUSES = {DONE, TESTING}` (fable task 214 — REVIEW excluded) | Check upstream task status — only a dep in TESTING/DONE unblocks dependents. A dep in REVIEW is *not* complete (branch pre-merge) |
+| Dependency blocked but upstream looks done | Both `dependencies.py` files use `COMPLETED_STATUSES = {DONE, TESTING}` (task 214 — REVIEW excluded) | Check upstream task status — only a dep in TESTING/DONE unblocks dependents. A dep in REVIEW is *not* complete (branch pre-merge) |
 
 ## Quick commands
 

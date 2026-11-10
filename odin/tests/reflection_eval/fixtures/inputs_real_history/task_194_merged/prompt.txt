@@ -30,13 +30,13 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task Failure-policy auto-requeue for transient classes (W4.10). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task Failure-policy auto-requeue for transient classes (W4.10). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 194: Failure-policy auto-requeue for transient classes (W4.10)
 
 Task-Id: 194
-Spec-Id: sp_fable_w4
+Spec-Id: sp_roadmap_w4
 
 
  .proof/task-194/backend_tests.txt                  | 1063 ++++++++++++++++++++
@@ -217,7 +217,7 @@ Acceptance coverage:
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=194 status=DONE
+spec=sp_roadmap_w4/w5 task_id=194 status=DONE
 
 
 ## YOUR REPORT

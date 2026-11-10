@@ -30,7 +30,7 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task Data-driven agent routing (W4.4). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task Data-driven agent routing (W4.4). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 188: Data-driven agent routing (W4.4)
@@ -210,7 +210,7 @@ fix closes the gap on real board data, not just on synthetic tests.
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=188 status=DONE
+spec=sp_roadmap_w4/w5 task_id=188 status=DONE
 
 
 ## YOUR REPORT

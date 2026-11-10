@@ -42,8 +42,7 @@ curl -X PATCH http://localhost:9100/api/boards/{board_id}/agents/{name}/ \
 curl -s http://localhost:9100/api/boards/{board_id}/agents/
 ```
 
-UI: board settings page uses the same endpoints. Making new-board defaults
-configurable from the UI is a fable-roadmap backlog item.
+UI: board settings page uses the same endpoints.
 
 ## Gotchas
 

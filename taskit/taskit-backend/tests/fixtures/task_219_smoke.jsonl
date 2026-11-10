@@ -2,8 +2,8 @@
 {"type":"loop","session.id":"s_w5-219","step":0}
 {"type":"stream","provider":"minimax-coding-plan","model":"MiniMax-M3"}
 {"type":"tool","tool":"read","callID":"c1","state":{"status":"completed","input":{"filePath":"/home/user/work/CLAUDE.md"},"output":"<4200-char body>"}}
-{"type":"tool","tool":"read","callID":"c2","state":{"status":"completed","input":{"filePath":"/home/user/work/docs/fable_roadmap/bootstrap/create_smoke_tables.py"},"output":"<2400-char body>"}}
-{"type":"tool","tool":"bash","callID":"c3","state":{"status":"completed","input":{"command":"ls /home/user/work/docs/fable_roadmap/bootstrap/"},"output":"create_smoke_tables.py  README.md  wave1"}}
+{"type":"tool","tool":"read","callID":"c2","state":{"status":"completed","input":{"filePath":"/home/user/work/docs/roadmap/bootstrap/create_smoke_tables.py"},"output":"<2400-char body>"}}
+{"type":"tool","tool":"bash","callID":"c3","state":{"status":"completed","input":{"command":"ls /home/user/work/docs/roadmap/bootstrap/"},"output":"create_smoke_tables.py  README.md  wave1"}}
 {"type":"tool","tool":"grep","callID":"c4","state":{"status":"completed","input":{"pattern":"smoke|table|Sandbox"},"output":"create_smoke_tables.py:10:create board #5 with sandbox mode"}}
 {"type":"tool","tool":"bash","callID":"c5","state":{"status":"completed","input":{"command":"python3 manage.py show_spec smoke-sandbox"},"output":"OK"}}
 {"type":"tool","tool":"bash","callID":"c6","state":{"status":"completed","input":{"command":"python3 manage.py show_task 219"},"output":"IN_PROGRESS"}}

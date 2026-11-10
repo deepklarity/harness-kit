@@ -95,7 +95,7 @@ dag_executor.py :: execute_single_task(task_id, run_token)  [Celery task]
 IMPORTANT: odin has its OWN dependency check (odin/src/odin/dependencies.py)
 separate from TaskIt's (taskit/taskit-backend/tasks/dependencies.py).
 Both must use the same COMPLETED_STATUSES = {DONE, TESTING} (REVIEW
-excluded as of fable task 214 — the merge gate).
+excluded as of task 214 — the merge gate).
 If they diverge, TaskIt dispatches the task but odin skips it — producing
 zero output and a false REVIEW → reflection FAIL cascade.
 

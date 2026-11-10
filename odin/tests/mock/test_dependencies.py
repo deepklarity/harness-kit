@@ -66,7 +66,7 @@ class TestCheckDeps:
     def test_review_does_not_count_as_completed(self):
         """REVIEW = agent finished, but code NOT merged → dependent stays WAITING.
 
-        Trust-bucket invariant (fable task 214): REVIEW must NOT satisfy a dep.
+        Trust-bucket invariant (task 214): REVIEW must NOT satisfy a dep.
         The dependent worktree forks from the spec branch; if the dep is still
         in REVIEW the dep code is on a feature branch that has not landed on
         the spec branch yet, so the dependent would build against missing

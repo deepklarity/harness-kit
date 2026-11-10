@@ -52,7 +52,7 @@ from tasks.models import (  # noqa: E402
 #
 # Tokens are realistic medians; one capture gap per agent at minimum
 # so median_tokens is never a lie.
-SEED_BOARD_NAME = "Fable Roadmap (wave-4 seed)"
+SEED_BOARD_NAME = "Roadmap (wave-4 seed)"
 
 # Per-agent recipe: (total, success_count, median_tokens, capture_gaps, cost_tier)
 RECIPE = {
@@ -69,7 +69,7 @@ def _seed() -> Board:
     """Reset and re-seed the demo board. Idempotent."""
     board, _ = Board.objects.get_or_create(
         name=SEED_BOARD_NAME,
-        defaults={"working_dir": "/tmp/fable-seed"},
+        defaults={"working_dir": "/tmp/roadmap-seed"},
     )
     # Wipe and reseed — proof wants deterministic shape.
     Task.objects.filter(board=board).delete()

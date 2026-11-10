@@ -1,7 +1,7 @@
 # Ruff configuration for the harness-kit monorepo.
 #
 # Scope: covers odin/, taskit/taskit-backend/, and harness_usage_status/.
-# This is the config-only slice (fable 01.2) of the parked lint initiative:
+# This is the config-only slice (01.2) of the parked lint initiative:
 #   - Establish a shared, minimal rule baseline.
 #   - Capture current violation counts as a baseline (no fixes applied here).
 #

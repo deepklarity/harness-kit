@@ -24,7 +24,7 @@
 | Huge/junk commit on a task branch | Auto-commit Layer 2/3 | Pollution blocklist + `_AUTO_COMMIT_MAX_NEW_FILES=200` bulk-add guard |
 | Merge conflict on task completion | Task comments | `merge-agent@odin` QUESTION comment with per-file hunks; branch preserved |
 | Merge never attempted | Task metadata | `merge_status` still `pending` — did reflection pass (REVIEW → TESTING)? |
-| Downstream task started before upstream merged | `COMPLETED_STATUSES` | REVIEW does NOT unblock downstream (fable task 214) — a dep in REVIEW means the branch is still pre-merge; only TESTING/DONE unblock dependents |
+| Downstream task started before upstream merged | `COMPLETED_STATUSES` | REVIEW does NOT unblock downstream (task 214) — a dep in REVIEW means the branch is still pre-merge; only TESTING/DONE unblock dependents |
 | Duplicate `odin exec` after worker restart | Stale recovery | `_recover_stale_executions` adopts the live pid; look for "adopt" in `taskit.log` |
 
 ## Quick Commands
@@ -66,5 +66,5 @@ tail -f taskit/taskit-backend/logs/taskit.log | grep -Ei 'worktree|merge|sandbox
 
 - **Root the WorktreeManager at `board.working_dir`, never at the task's resolved cwd.** The latter can be a worktree path; rooting there reads the worktree's *copied* `.odin/config.yaml` (the shadow) and creates nested worktrees. This is the single most common worktree pitfall.
 - **Per-run sandbox cleanup ≠ orphan sweep.** `_remove_sandbox` in the `_execute_sync` finally is the per-run path and only fires if the process reaches the finally. A hard crash orphans the VM; the startup sweep and `odin gc --prune` are the safety net.
-- **REVIEW does NOT count as a completed dependency.** `COMPLETED_STATUSES = {DONE, TESTING}` (fable task 214) — if a downstream task starts while its upstream is in REVIEW, that is a BUG, not by design. Dependents wait for TESTING (post-merge).
+- **REVIEW does NOT count as a completed dependency.** `COMPLETED_STATUSES = {DONE, TESTING}` (task 214) — if a downstream task starts while its upstream is in REVIEW, that is a BUG, not by design. Dependents wait for TESTING (post-merge).
 - **A worktree failure now FAILS the task by default.** The old "falls back to running in project root" behavior is gated behind `board.allow_project_root_execution`.

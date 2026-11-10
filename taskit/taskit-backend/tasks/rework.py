@@ -28,7 +28,7 @@ _WHY_RE = re.compile(
 )
 
 WORKING_PROTOCOL_FOOTER_TEMPLATE = (
-    "## Working protocol (applies to every fable task)\n"
+    "## Working protocol (applies to every task)\n"
     "- First principles: fix the CAUSE, not the symptom.\n"
     "- Follow test-first waves: failing tests before implementation.\n"
     "- Attach proof to `{proof_path}` in your worktree and post a summary comment.\n"

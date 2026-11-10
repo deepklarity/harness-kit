@@ -229,7 +229,6 @@ class TestLoadPresets(unittest.TestCase):
     def test_load_real_file_validates(self):
         data = load_presets()
         ids = {p["id"] for p in data["presets"]}
-        self.assertIn("roadmap-audit", ids)
         self.assertIn("hygiene-audit", ids)
         self.assertIn("static-autolint", ids)
         self.assertIn("security-audit", ids)
@@ -297,7 +296,6 @@ class TestPresetsAPI(APITestCase):
         cats = {c["slug"] for c in resp.data["categories"]}
         self.assertIn("audit", cats)
         ids = {p["id"] for p in resp.data["presets"]}
-        self.assertIn("roadmap-audit", ids)
         self.assertIn("hygiene-audit", ids)
         self.assertIn("static-autolint", ids)
         self.assertIn("security-audit", ids)
@@ -305,7 +303,7 @@ class TestPresetsAPI(APITestCase):
     def test_shipped_audit_presets_validate(self):
         resp = self.client.get("/api/presets/")
         by_id = {p["id"]: p for p in resp.data["presets"]}
-        for pid in ("roadmap-audit", "hygiene-audit", "static-autolint", "security-audit"):
+        for pid in ("hygiene-audit", "static-autolint", "security-audit"):
             self.assertIn("audit", by_id[pid], f"{pid} missing audit block")
             validate_audit_block(by_id[pid])
 

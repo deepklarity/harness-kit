@@ -41,7 +41,7 @@ from odin.models import AgentConfig, OdinConfig
 
 
 def _cfg(**overrides) -> OdinConfig:
-    """Minimal OdinConfig with the five fable agents present."""
+    """Minimal OdinConfig with the five supported agents present."""
     agents = {
         name: AgentConfig(cli_command=cli, enabled=True)
         for name, cli in (

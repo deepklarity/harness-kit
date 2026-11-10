@@ -70,12 +70,12 @@ class _MergeDispatchCase(APITestCase):
     def setUp(self):
         super().setUp()
         self.board = self.make_board()
-        self.spec = self.make_spec(self.board, odin_id="sp_fable_w3", metadata={"branch": "spec/sp_fable_w3"})
+        self.spec = self.make_spec(self.board, odin_id="sp_roadmap_w3", metadata={"branch": "spec/sp_roadmap_w3"})
         self.task = self.make_task(
             self.board,
             spec=self.spec,
             status=TaskStatus.REVIEW,
-            metadata={"branch": "task/sp_fable_w3/171"},
+            metadata={"branch": "task/sp_roadmap_w3/171"},
         )
 
     def _complete_with_pass(self, task, verdict="PASS"):

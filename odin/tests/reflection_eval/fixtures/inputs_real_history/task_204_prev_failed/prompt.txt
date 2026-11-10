@@ -48,7 +48,7 @@ No .proof/task-204/proof.md was written. No per-candidate table (parse%, agreeme
 Depends on task 191 (measurement harness).
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w5 task_id=204 status=REVIEW prev_attempt=true
+spec=sp_roadmap_w5 task_id=204 status=REVIEW prev_attempt=true
 
 
 ## YOUR REPORT

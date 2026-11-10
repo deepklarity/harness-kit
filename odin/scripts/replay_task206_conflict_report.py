@@ -4,14 +4,14 @@
 Scenario (real history in this repo, not synthetic):
 - Merge base ``9e36e7ca`` is the wave-4 kickoff commit both task branches
   fork from.
-- ``task/sp_fable_w4/188`` (data-driven agent routing) merges first —
+- ``task/sp_roadmap_w4/188`` (data-driven agent routing) merges first —
   this mirrors what actually happened: task 188 landed on the spec
   branch before task 192 attempted its own merge.
-- ``task/sp_fable_w4/192`` (CANCELED task status) is based on the same
+- ``task/sp_roadmap_w4/192`` (CANCELED task status) is based on the same
   merge base and rewrites the same ``.proof/proof.md`` path with its
   own, unrelated proof document.  Before the ``.proof/task-<id>/``
   convention existed, every task's proof collided at this one shared
-  path — the class of bug the fable BACKLOG records as "task 177
+  path — the class of bug the backlog records as "task 177
   deleted task 181's proof".  Merging 192 in after 188 reproduces that
   exact conflict on real content.
 
@@ -43,8 +43,8 @@ from odin.merge_agent import resolve_conflicts_in_worktree  # noqa: E402
 from odin.worktree import WorktreeManager  # noqa: E402
 
 MERGE_BASE = "9e36e7cad9f3c3c983dc085c53feeefe9ada405b"
-SPEC_SIDE_BRANCH = "task/sp_fable_w4/188"
-TASK_SIDE_BRANCH = "task/sp_fable_w4/192"
+SPEC_SIDE_BRANCH = "task/sp_roadmap_w4/188"
+TASK_SIDE_BRANCH = "task/sp_roadmap_w4/192"
 CONFLICT_PATH = ".proof/proof.md"
 
 

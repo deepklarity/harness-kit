@@ -149,7 +149,7 @@ def _audit_category_subfolder(task_or_data) -> str | None:
         return "UI Gaps"
     elif "ai" in t or "slop" in t:
         return "AI Slop"
-    elif "roadmap" in t or "fable" in t:
+    elif "roadmap" in t:
         return "Roadmap"
     elif "hygiene" in t:
         return "Hygiene"

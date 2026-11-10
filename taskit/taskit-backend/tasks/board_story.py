@@ -309,10 +309,9 @@ def render_html(story, bucket_rows=None, testing_shelf=None, decisions=None):
     No external assets — inline CSS only, both light and dark themes via
     CSS tokens. Composes, top to bottom: TLDR block (landed, hands-free,
     incidents, waiting-on-human), the chronological event timeline, the
-    bucket scoreboard (``bucket_rows``, e.g. from
-    testing_tools.board_story.parse_bucket_scoreboard), the TESTING shelf
+    bucket scoreboard (``bucket_rows``), the TESTING shelf
     (``testing_shelf``), and decisions waiting on the human
-    (``decisions``, e.g. from parse_backlog_decisions). Each of the three
+    (``decisions``). Each of the three
     optional sections renders an honest em-dash placeholder when empty —
     never omitted — so the page is always the same shape.
     """

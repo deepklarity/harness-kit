@@ -30,13 +30,13 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task Auto-promotion v1.5: RECOMMEND PROMOTE auto-advances TESTING->DONE (W4.2). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task Auto-promotion v1.5: RECOMMEND PROMOTE auto-advances TESTING->DONE (W4.2). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 186: Auto-promotion v1.5: RECOMMEND PROMOTE auto-advances TESTING→DONE (W4.2)
 
 Task-Id: 186
-Spec-Id: sp_fable_w4
+Spec-Id: sp_roadmap_w4
 
 
  .proof/task-186/backend_tests.txt                  | 950 +++++++++++++++++++++
@@ -46,7 +46,7 @@ Spec-Id: sp_fable_w4
  .proof/task-186/verify_sh.txt                      |  12 +
  .../DETAILS.md                                     |  28 +-
  .../task-state-machine-celery-automation/FLOW.md   |   4 +-
- docs/fable_roadmap/ORCHESTRATION.md                |   6 +-
+ docs/roadmap/ORCHESTRATION.md                |   6 +-
  taskit/taskit-backend/tasks/auto_promote.py        | 501 +++++++++++
  taskit/taskit-backend/tasks/dag_executor.py        |  42 +
  .../tasks/migrations/0049_board_metadata.py        |  29 +
@@ -91,7 +91,7 @@ taskit/taskit-backend/tasks/dag_executor.py                 (modified, +49 lines
 taskit/taskit-backend/tasks/models.py                       (modified, +13 lines — adds `Board.metadata` JSONField)
 docs/breadcrumb_analysis/task-state-machine-celery-automation/FLOW.md   (+4 lines)
 docs/breadcrumb_analysis/task-state-machine-celery-automation/DETAILS.md (+28 lines)
-docs/fable_roadmap/ORCHESTRATION.md                         (+6 lines — duty table)
+docs/roadmap/ORCHESTRATION.md                         (+6 lines — duty table)
 ```
 
 ## Design — what landed
@@ -191,7 +191,7 @@ trips.  The first live
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=186 status=DONE
+spec=sp_roadmap_w4/w5 task_id=186 status=DONE
 
 
 ## YOUR REPORT

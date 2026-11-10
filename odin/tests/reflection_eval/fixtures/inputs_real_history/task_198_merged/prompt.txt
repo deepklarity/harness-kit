@@ -30,13 +30,13 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task Promote gate: run verify.sh via sh, survive lost exec bits (W5.2). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task Promote gate: run verify.sh via sh, survive lost exec bits (W5.2). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 198: Promote gate: run verify.sh via sh, survive lost exec bits (W5.2)
 
 Task-Id: 198
-Spec-Id: sp_fable_w5
+Spec-Id: sp_roadmap_w5
 
 
  .proof/task-198/odin_full_suite.txt    | 116 +++++++++++++++++++++++++++++++++
@@ -139,7 +139,7 @@ The single failure (`tests/mock/test_microsandbox_harness.py::test_mcp_config_st
 is **pre-existing and unrelated** — verified by stashing my changes and
 re-running; it fails identically on a clean tree. It asserts `/tmp/` is not
 in a mount spec, but pytest's `tmp_path` lives under `/tmp/pytest-of-root/...`
-which is the host path being bind-mounted. Tracked separately as a fable chore.
+which is the host path being bind-mounted. Tracked separately as a chore.
 
 Full output in `odin_full_suite.txt`.
 
@@ -153,14 +153,14 @@ Full output in `odin_full_suite.txt`.
 ## Commit
 
 `_proof artifacts_` committed as a separate commit on top of the source change;
-worktree remains on branch `task/sp_fable_w5/198`. Source change is unstaged in
+worktree remains on branch `task/sp_roadmap_w5/198`. Source change is unstaged in
 the worktree at proof time — the merge gate commits it after reflection.
 
 ## [CTX:dependencies] Dependent Tasks
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=198 status=DONE
+spec=sp_roadmap_w4/w5 task_id=198 status=DONE
 
 
 ## YOUR REPORT

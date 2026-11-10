@@ -39,8 +39,9 @@ const compile = (terms: string[]): [string, RegExp][] => terms.map((t) => [
 ]);
 const PATTERNS = compile(DENYLIST);
 
-// The published package name is the one place the org name may appear.
-const ALLOWED = /@deepklarity\/harnesskit/gi;
+
+// The package scope, and the README's one credit line.
+const ALLOWED = /@deepklarity\/harnesskit|Made by \[DeepKlarity\]\(https:\/\/deepklarity\.com\)/gi;
 
 // Python str.splitlines() line boundaries.
 const LINE_BREAK = new RegExp("\\r\\n|[\\n\\r\\v\\f\\x1c-\\x1e\\x85\\u2028\\u2029]");

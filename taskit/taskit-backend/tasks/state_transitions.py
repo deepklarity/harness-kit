@@ -7,7 +7,7 @@ serializer / view consults on every PATCH.
 
 Why a separate module: the existing rules in ``docs/breadcrumb_analysis/
 task-state-machine-celery-automation/FLOW.md`` are prose. A growing status
-set (fable task 192 added ``CANCELED``) needs a machine-checkable shape so
+set (task 192 added ``CANCELED``) needs a machine-checkable shape so
 operators don't accidentally violate the matrix via the API, and so the
 test suite can pin every edge in one place.
 

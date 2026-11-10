@@ -54,17 +54,25 @@ class _SpecVerifyCase(APITestCase):
 
     def setUp(self):
         super().setUp()
+        # run_spec_verify_blocking creates a git worktree from the spec
+        # branch; that branch does not exist in a fresh clone, so fake it.
+        wt_patch = patch(
+            "tasks.spec_verify._make_temp_spec_worktree",
+            side_effect=lambda spec_id, head_sha: tempfile.mkdtemp(),
+        )
+        wt_patch.start()
+        self.addCleanup(wt_patch.stop)
         self.board = self.make_board()
         self.spec = self.make_spec(
             self.board,
-            odin_id="sp_fable_w5",
-            metadata={"branch": "spec/sp_fable_w5"},
+            odin_id="sp_roadmap_w5",
+            metadata={"branch": "spec/sp_roadmap_w5"},
         )
         self.task = self.make_task(
             self.board,
             spec=self.spec,
             status=TaskStatus.REVIEW,
-            metadata={"branch": "task/sp_fable_w5/210"},
+            metadata={"branch": "task/sp_roadmap_w5/210"},
         )
 
     def tearDown(self):
@@ -81,7 +89,7 @@ class _SpecVerifyCase(APITestCase):
 
         return VerifyReport(
             head_sha="abc1234",
-            spec_branch="spec/sp_fable_w5",
+            spec_branch="spec/sp_roadmap_w5",
             status=status,
             suites=suites or [],
             log_path=log_path,
@@ -101,13 +109,13 @@ class RedRunCommentsAndFlagsTests(_SpecVerifyCase):
 
         report = VerifyReport(
             head_sha="deadbeef",
-            spec_branch="spec/sp_fable_w5",
+            spec_branch="spec/sp_roadmap_w5",
             status="red",
             suites=[
                 {"name": "backend", "verdict": "FAIL", "tests": "1 failed, 38 passed"},
                 {"name": "snapshots", "verdict": "FAIL", "tests": "2 failed, 5 passed"},
             ],
-            log_path="/tmp/spec-verify-sp_fable_w5.log",
+            log_path="/tmp/spec-verify-sp_roadmap_w5.log",
             duration_s=42.7,
             run_at=time.time(),
         )
@@ -117,9 +125,9 @@ class RedRunCommentsAndFlagsTests(_SpecVerifyCase):
                 return_value=self.task.id,
             ):
                 run_spec_verify_blocking(
-                    spec_id="sp_fable_w5",
+                    spec_id="sp_roadmap_w5",
                     head_sha="deadbeef",
-                    merge_branch="task/sp_fable_w5/210",
+                    merge_branch="task/sp_roadmap_w5/210",
                 )
 
         spec_comments = list(SpecComment.objects.filter(spec=self.spec))
@@ -127,7 +135,7 @@ class RedRunCommentsAndFlagsTests(_SpecVerifyCase):
         body = spec_comments[0].content
 
         # Names the merge that turned the spec red.
-        self.assertIn("task/sp_fable_w5/210", body)
+        self.assertIn("task/sp_roadmap_w5/210", body)
         self.assertIn("210", body)
         self.assertIn("deadbeef", body)
         # Names every failing suite (so the operator sees the defect
@@ -136,7 +144,7 @@ class RedRunCommentsAndFlagsTests(_SpecVerifyCase):
         self.assertIn("snapshots", body)
         self.assertIn("FAIL", body)
         # Points at the run log for diagnosis.
-        self.assertIn("/tmp/spec-verify-sp_fable_w5.log", body)
+        self.assertIn("/tmp/spec-verify-sp_roadmap_w5.log", body)
         self.assertEqual(spec_comments[0].comment_type, CommentType.STATUS_UPDATE)
 
         # Spec metadata flags the red run — operator sees it on the board.
@@ -148,7 +156,7 @@ class RedRunCommentsAndFlagsTests(_SpecVerifyCase):
 
         # The merge is NOT auto-reverted.
         self.spec.refresh_from_db()
-        self.assertEqual(meta["branch"], "spec/sp_fable_w5")
+        self.assertEqual(meta["branch"], "spec/sp_roadmap_w5")
         self.assertFalse(meta.get("verify_reverted", False))
 
     def test_env_missing_is_treated_as_red(self):
@@ -159,7 +167,7 @@ class RedRunCommentsAndFlagsTests(_SpecVerifyCase):
 
         report = VerifyReport(
             head_sha="cafef00d",
-            spec_branch="spec/sp_fable_w5",
+            spec_branch="spec/sp_roadmap_w5",
             status="env_missing",
             suites=[
                 {"name": "frontend", "verdict": "ENV_MISSING",
@@ -172,8 +180,8 @@ class RedRunCommentsAndFlagsTests(_SpecVerifyCase):
         with patch("tasks.spec_verify._execute_verify", return_value=report), \
              patch("tasks.spec_verify._merge_task_id_for_sha", return_value=self.task.id):
             run_spec_verify_blocking(
-                spec_id="sp_fable_w5", head_sha="cafef00d",
-                merge_branch="task/sp_fable_w5/210",
+                spec_id="sp_roadmap_w5", head_sha="cafef00d",
+                merge_branch="task/sp_roadmap_w5/210",
             )
 
         spec_comments = list(SpecComment.objects.filter(spec=self.spec))
@@ -196,7 +204,7 @@ class GreenRunStaysQuietTests(_SpecVerifyCase):
 
         report = VerifyReport(
             head_sha="abc1234",
-            spec_branch="spec/sp_fable_w5",
+            spec_branch="spec/sp_roadmap_w5",
             status="green",
             suites=[
                 {"name": "odin", "verdict": "PASS", "tests": "38 passed"},
@@ -211,8 +219,8 @@ class GreenRunStaysQuietTests(_SpecVerifyCase):
         with patch("tasks.spec_verify._execute_verify", return_value=report), \
              patch("tasks.spec_verify._merge_task_id_for_sha", return_value=self.task.id):
             run_spec_verify_blocking(
-                spec_id="sp_fable_w5", head_sha="abc1234",
-                merge_branch="task/sp_fable_w5/210",
+                spec_id="sp_roadmap_w5", head_sha="abc1234",
+                merge_branch="task/sp_roadmap_w5/210",
             )
 
         self.assertFalse(
@@ -225,15 +233,15 @@ class GreenRunStaysQuietTests(_SpecVerifyCase):
         from tasks.spec_verify import VerifyReport, run_spec_verify_blocking
 
         report = VerifyReport(
-            head_sha="abc1234", spec_branch="spec/sp_fable_w5",
+            head_sha="abc1234", spec_branch="spec/sp_roadmap_w5",
             status="green", suites=[{"name": "odin", "verdict": "PASS"}],
             log_path="/tmp/log", duration_s=10.0, run_at=time.time(),
         )
         with patch("tasks.spec_verify._execute_verify", return_value=report), \
              patch("tasks.spec_verify._merge_task_id_for_sha", return_value=self.task.id):
             run_spec_verify_blocking(
-                spec_id="sp_fable_w5", head_sha="abc1234",
-                merge_branch="task/sp_fable_w5/210",
+                spec_id="sp_roadmap_w5", head_sha="abc1234",
+                merge_branch="task/sp_roadmap_w5/210",
             )
 
         self.spec.refresh_from_db()
@@ -271,9 +279,9 @@ class CoalescingTests(_SpecVerifyCase):
              patch("tasks.spec_verify._merge_task_id_for_sha", return_value=self.task.id):
             # First enqueue starts the runner.
             spec_verify.enqueue_spec_verify(
-                spec_id="sp_fable_w5",
+                spec_id="sp_roadmap_w5",
                 head_sha="sha-A",
-                merge_branch="task/sp_fable_w5/210",
+                merge_branch="task/sp_roadmap_w5/210",
             )
             # Wait until the runner is actually inside _execute_verify —
             # without this, the second enqueue could race ahead of the
@@ -281,16 +289,16 @@ class CoalescingTests(_SpecVerifyCase):
             start_event.wait(timeout=5)
             # Second enqueue lands while the first is mid-run.
             spec_verify.enqueue_spec_verify(
-                spec_id="sp_fable_w5",
+                spec_id="sp_roadmap_w5",
                 head_sha="sha-B",
-                merge_branch="task/sp_fable_w5/211",
+                merge_branch="task/sp_roadmap_w5/211",
             )
 
             # Let the first run complete and observe that the trailing
             # SHA triggers one more run, then idle.
             deadline = time.time() + 5
             while time.time() < deadline:
-                state = spec_verify._coordinator._state_for_tests("sp_fable_w5")
+                state = spec_verify._coordinator._state_for_tests("sp_roadmap_w5")
                 if not state["running"] and state["last_verified_head"] == "sha-B":
                     break
                 time.sleep(0.05)
@@ -326,27 +334,27 @@ class CoalescingTests(_SpecVerifyCase):
         with patch("tasks.spec_verify._execute_verify", side_effect=fake_execute), \
              patch("tasks.spec_verify._merge_task_id_for_sha", return_value=self.task.id):
             spec_verify.enqueue_spec_verify(
-                spec_id="sp_fable_w5",
+                spec_id="sp_roadmap_w5",
                 head_sha="sha-A",
-                merge_branch="task/sp_fable_w5/210",
+                merge_branch="task/sp_roadmap_w5/210",
             )
             start_event.wait(timeout=5)
 
             # Land two more merges while A is still running.
             spec_verify.enqueue_spec_verify(
-                spec_id="sp_fable_w5",
+                spec_id="sp_roadmap_w5",
                 head_sha="sha-B",
-                merge_branch="task/sp_fable_w5/211",
+                merge_branch="task/sp_roadmap_w5/211",
             )
             spec_verify.enqueue_spec_verify(
-                spec_id="sp_fable_w5",
+                spec_id="sp_roadmap_w5",
                 head_sha="sha-C",
-                merge_branch="task/sp_fable_w5/212",
+                merge_branch="task/sp_roadmap_w5/212",
             )
 
             deadline = time.time() + 5
             while time.time() < deadline:
-                state = spec_verify._coordinator._state_for_tests("sp_fable_w5")
+                state = spec_verify._coordinator._state_for_tests("sp_roadmap_w5")
                 if not state["running"] and state["last_verified_head"] == "sha-C":
                     break
                 time.sleep(0.05)
@@ -381,11 +389,11 @@ class HookFromMergeTaskOnReflectionTests(_SpecVerifyCase):
         # kwargs carries the names; positional args dict contains the spec id etc.
         params = dict(kwargs)
         # Identifier is the spec odin_id, not the DB pk.
-        self.assertEqual(params.get("spec_id"), "sp_fable_w5")
+        self.assertEqual(params.get("spec_id"), "sp_roadmap_w5")
         self.assertEqual(params.get("head_sha"), "newheaddd")
         # The branch that landed is recorded so a red-run report can
         # name the merging task by its branch path.
-        self.assertEqual(params.get("merge_branch"), "task/sp_fable_w5/210")
+        self.assertEqual(params.get("merge_branch"), "task/sp_roadmap_w5/210")
 
     def test_noop_merge_does_not_enqueue(self):
         """``noop`` merge (branch already up-to-date) → no verify enqueued."""
@@ -456,8 +464,8 @@ class HookFromMergeTaskOnReflectionTests(_SpecVerifyCase):
                  ):
                 from tasks.spec_verify import run_spec_verify_blocking
                 run_spec_verify_blocking(
-                    spec_id="sp_fable_w5", head_sha="abc1234",
-                    merge_branch="task/sp_fable_w5/210",
+                    spec_id="sp_roadmap_w5", head_sha="abc1234",
+                    merge_branch="task/sp_roadmap_w5/210",
                 )
         finally:
             shutil.rmtree(base_dir, ignore_errors=True)

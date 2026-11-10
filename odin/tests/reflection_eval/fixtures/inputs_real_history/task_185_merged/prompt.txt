@@ -30,13 +30,13 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task Per-task proof paths: .proof/task-<id>/ (W4.1). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task Per-task proof paths: .proof/task-<id>/ (W4.1). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 185: Per-task proof paths: .proof/task-<id>/ (W4.1)
 
 Task-Id: 185
-Spec-Id: sp_fable_w4
+Spec-Id: sp_roadmap_w4
 
 
  .proof/task-185/convention_grep.txt             |  26 ++++
@@ -153,7 +153,7 @@ in sync going forward).
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=185 status=DONE
+spec=sp_roadmap_w4/w5 task_id=185 status=DONE
 
 
 ## YOUR REPORT

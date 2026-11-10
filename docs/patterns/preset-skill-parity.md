@@ -15,13 +15,12 @@ through two different doors. This maps the 32 curated presets against the
 18 hand-authored skills: which already have a twin, which deserve one, and
 which are doorway-specific by nature (and why that's fine, not a gap).
 
-## Twinned today (11 pairs)
+## Twinned today (10 pairs)
 
 Both sides already exist and cover the same procedure.
 
 | Preset | Skill | Notes |
 |---|---|---|
-| roadmap-audit | fable-audit | Preset is the audit-preset-contract instantiation of the skill. |
 | hygiene-audit | hk-code-quality-audit | Same category scan, preset version is contract-wired. |
 | agent-native-architecture-audit | hk-arch-audit | |
 | loop-audit | hk-autonomy-audit | |

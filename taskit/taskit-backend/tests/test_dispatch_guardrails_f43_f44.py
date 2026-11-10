@@ -1,6 +1,6 @@
 """F43/F44 dispatch guardrail regression tests.
 
-Origin: docs/fable_roadmap/OPERATIONS.md — F43 (silent unknown-field drops) +
+Origin: F43 (silent unknown-field drops) +
 F44 (silent project-root execution). These tests pin the contract the
 operator's brief mandates; if any of them fails the regression that produced
 task #114 is back.

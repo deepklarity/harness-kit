@@ -300,7 +300,7 @@ class TestReplayTask234:
 
     @pytest.fixture
     def worktree_234(self, tmp_path: Path) -> Path:
-        """Stand-in for .odin/worktrees/sp_fable_w7/234 after the
+        """Stand-in for .odin/worktrees/sp_roadmap_w7/234 after the
         task #234 agent finished. main is the pre-task base; the
         task branch has 2 commits ahead representing the agent's
         shipped fix.
@@ -318,7 +318,7 @@ class TestReplayTask234:
         _git(wt, "add", "src.py")
         _git(wt, "commit", "-q", "-m", "initial scaffolding")
         # Branch with the agent's fix.
-        _git(wt, "checkout", "-q", "-b", "task/sp_fable_w7/234")
+        _git(wt, "checkout", "-q", "-b", "task/sp_roadmap_w7/234")
         (wt / "src.py").write_text("def real_fix(): return 42\n")
         _git(wt, "add", "src.py")
         _git(wt, "commit", "-q", "-m", "feat: implement real fix")

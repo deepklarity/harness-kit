@@ -73,7 +73,7 @@ describe("init, end to end through the CLI", () => {
     expect(first.code).toBe(0);
     expect(first.out.trimEnd().split("\n").length).toBeLessThan(24);
     expect(first.out).toMatch(/\d+ written/);
-    expect(first.out).toContain('claude "Set up this repo with harnesskit - follow docs/harnesskit/entry.md"');
+    expect(first.out).toContain('claude "Set up this repo with harness-kit - follow docs/harnesskit/entry.md"');
     expect(first.out).not.toMatch(/slot/);
 
     expect(readFileSync(join(d, "docs/harnesskit/manifest"), "utf8")).toContain(`baseline_commit ${head}`);

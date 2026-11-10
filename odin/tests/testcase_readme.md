@@ -884,7 +884,7 @@ These tests live in the taskit-backend, not in odin's test tree, but cover Odin-
 |---|---|
 | `DepsSatisfiedTests::test_no_deps_always_satisfied` | No deps → always satisfied |
 | `DepsSatisfiedTests::test_all_deps_done` | All DONE → satisfied |
-| `DepsSatisfiedTests::test_review_counts_as_satisfied` | REVIEW counts as satisfied (removed in fable task 214 — REVIEW does NOT satisfy; TESTING does) |
+| `DepsSatisfiedTests::test_review_counts_as_satisfied` | REVIEW counts as satisfied (removed in task 214 — REVIEW does NOT satisfy; TESTING does) |
 | `DepsSatisfiedTests::test_partial_deps_not_satisfied` | Mixed → not satisfied |
 | `DepsSatisfiedTests::test_deps_in_todo_not_satisfied` | TODO dep → not satisfied |
 | `DepsSatisfiedTests::test_deps_executing_not_satisfied` | EXECUTING dep → not satisfied |

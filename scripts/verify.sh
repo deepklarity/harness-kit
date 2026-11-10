@@ -194,7 +194,7 @@ fi
 
 if echo " $SELECTED " | grep -q " generic "; then
     run_suite generic "$ROOT_DIR/harness-kit" "" \
-        "npm run -s check:generic -- --strict"
+        "npm run -s check:generic -- --strict && node ../scripts/sync-readme.mjs --check"
 fi
 
 TOTAL_END=$("$PY" -c 'import time; print(time.time())')

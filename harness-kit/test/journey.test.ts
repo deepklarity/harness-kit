@@ -134,7 +134,7 @@ describe("6. init output", () => {
     expect(r.out).toMatch(/writeup\/?[^\n]*\d+|\d+[^\n]*writeup\//);
     const nothing = "Nothing else changed. Setup will show you each change to CLAUDE.md, AGENTS.md, .claude/ and .gitignore before making it.";
     const next = "Next, hand the repo to your agent:";
-    const prompt = 'claude "Set up this repo with harnesskit - follow docs/harnesskit/entry.md"';
+    const prompt = 'claude "Set up this repo with harness-kit - follow docs/harnesskit/entry.md"';
     expect(r.out).toContain(nothing);
     expect(r.out).toContain(next);
     expect(r.out).toContain(prompt);

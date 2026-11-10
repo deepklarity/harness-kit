@@ -5,7 +5,7 @@ reviewer. A codex-only or glm-only board should be able to trigger
 reflection without the default crashing against a non-existent claude CLI.
 
 Covers:
-- REFLECTION_ALLOWED_AGENTS includes all fable providers (not just claude/gemini/codex)
+- REFLECTION_ALLOWED_AGENTS includes all supported providers (not just claude/gemini/codex)
 - Manual reflect without specifying reviewer derives from available agents
 - Validation accepts glm/minimax as reviewer agents
 """
@@ -34,7 +34,7 @@ class TestReflectionAllowedAgents(APITestCase):
 
 
 class TestReflectAcceptsAllProviders(APITestCase):
-    """POST /tasks/:id/reflect/ accepts any fable provider as reviewer."""
+    """POST /tasks/:id/reflect/ accepts any supported provider as reviewer."""
 
     def setUp(self):
         super().setUp()

@@ -243,7 +243,7 @@ to take, in rough order of value-per-effort:
 | Tone rules | `docs/playbook/tone_and_taste.md` | Copy nearly as-is — it's about writing, not this repo. |
 
 Don't install everything. The audit said what's missing; the human said
-what matters. Skills like `hk-local-*` and `fable-audit` are wired to this
+what matters. Skills like `hk-local-*` are wired to this
 repo's services — leave them.
 
 ### Step 4 — Re-score and close

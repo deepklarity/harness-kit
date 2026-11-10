@@ -59,14 +59,14 @@ class _WatchdogFixture(APITestCase):
         super().setUp()
         self.board = self.make_board()
         self.spec = self.make_spec(
-            self.board, odin_id="sp_fable_w4",
-            metadata={"branch": "spec/sp_fable_w4"},
+            self.board, odin_id="sp_roadmap_w4",
+            metadata={"branch": "spec/sp_roadmap_w4"},
         )
         self.task = self.make_task(
             self.board,
             spec=self.spec,
             status=TaskStatus.REVIEW,
-            metadata={"branch": "task/sp_fable_w4/196"},
+            metadata={"branch": "task/sp_roadmap_w4/196"},
         )
 
     def _mark_dispatched(self, *, attempts=1, minutes_ago=0, merge_status="pending"):

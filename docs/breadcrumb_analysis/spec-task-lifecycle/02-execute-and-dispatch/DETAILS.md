@@ -51,7 +51,7 @@ There are TWO independent dependency checks. Both must use the same
 
 Key logic:
 - Always queries DB at runtime — never cached. This enables recovery: fix a FAILED upstream, dependent auto-unblocks on next poll
-- `COMPLETED_STATUSES = {DONE, TESTING}` (dependencies.py:36) — REVIEW is excluded (fable task 214). The dependent worktree forks from the spec branch, so the dep must already be merged (TESTING) before dependents can safely build against it
+- `COMPLETED_STATUSES = {DONE, TESTING}` (dependencies.py:36) — REVIEW is excluded (task 214). The dependent worktree forks from the spec branch, so the dep must already be merged (TESTING) before dependents can safely build against it
 - Algorithm: any FAILED → BLOCKED, all completed → READY, else → WAITING
 
 Data in: `task.depends_on` (list of task IDs)
@@ -66,7 +66,7 @@ Data out: `DepStatus.READY | WAITING | BLOCKED`
 
 Key logic:
 - Same algorithm as TaskIt's check but operates on odin's Pydantic Task model
-- `COMPLETED_STATUSES = {DONE, TESTING}` (dependencies.py:35) — must match TaskIt's definition; REVIEW is intentionally excluded (fable task 214)
+- `COMPLETED_STATUSES = {DONE, TESTING}` (dependencies.py:35) — must match TaskIt's definition; REVIEW is intentionally excluded (task 214)
 - If these diverge: TaskIt dispatches the task (EXECUTING) but odin skips it (exit 0, no output), DAG executor sets REVIEW, reflection sees no implementation → FAIL
 
 DIVERGENCE RISK: These two files define COMPLETED_STATUSES independently.

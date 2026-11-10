@@ -1,4 +1,4 @@
-"""Fable task #335 — "a board should be incapable of sitting stuck silently."
+"""Task #335 — "a board should be incapable of sitting stuck silently."
 
 When a task goes FAILED, the system must surface it loudly across four
 seams:

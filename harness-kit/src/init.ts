@@ -12,7 +12,7 @@ export function journeyStages(kitDir: string): string[] {
   return [...text.matchAll(/^\| (\d+) \| ([^|]+?) \|/gm)].map((m) => m[2]);
 }
 
-export const SETUP_PROMPT = 'claude "Set up this repo with harnesskit - follow docs/harnesskit/entry.md"';
+export const SETUP_PROMPT = 'claude "Set up this repo with harness-kit - follow docs/harnesskit/entry.md"';
 
 export const defaultKitDir = resolve(dirname(fileURLToPath(import.meta.url)), "../kit");
 

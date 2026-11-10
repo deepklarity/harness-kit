@@ -30,13 +30,13 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task Promote gate: resolve <id> placeholders in brief artifact paths (W5.1). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task Promote gate: resolve <id> placeholders in brief artifact paths (W5.1). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 197: Promote gate: resolve <id> placeholders in brief artifact paths (W5.1)
 
 Task-Id: 197
-Spec-Id: sp_fable_w5
+Spec-Id: sp_roadmap_w5
 
 
  .proof/task-197/backend_tests.txt      | 1054 ++++++++++++++++++++++++++++++++
@@ -151,7 +151,7 @@ files=2 verdict=clean`.
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=197 status=DONE
+spec=sp_roadmap_w4/w5 task_id=197 status=DONE
 
 
 ## YOUR REPORT

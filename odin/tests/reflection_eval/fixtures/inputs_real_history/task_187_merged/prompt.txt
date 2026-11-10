@@ -30,13 +30,13 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task Wave-planning automation: draft dispatchable briefs from BACKLOG (W4.3). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task Wave-planning automation: draft dispatchable briefs from BACKLOG (W4.3). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 187: Wave-planning automation: draft dispatchable briefs from BACKLOG (W4.3)
 
 Task-Id: 187
-Spec-Id: sp_fable_w4
+Spec-Id: sp_roadmap_w4
 
 
  .proof/task-187/draft_w5_generated.py              | 283 ++++++++++++
@@ -44,10 +44,10 @@ Spec-Id: sp_fable_w4
  .proof/task-187/self_audit_diff.txt                |   2 +
  .proof/task-187/verify_sh_odin_backend.txt         |  12 +
  .proof/task-187/wave_draft_tests.txt               |  38 ++
- docs/fable_roadmap/bootstrap/wave_draft.py         | 496 +++++++++++++++++++++
- tests/fable_roadmap/fixtures/BACKLOG_snapshot.md   | 310 +++++++++++++
+ docs/roadmap/bootstrap/wave_draft.py         | 496 +++++++++++++++++++++
+ tests/roadmap/fixtures/BACKLOG_snapshot.md   | 310 +++++++++++++
  .../fixtures/agent_models_snapshot.json            |   9 +
- tests/fable_roadmap/test_wave_draft.py             | 302 +++++++++++++
+ tests/roadmap/test_wave_draft.py             | 302 +++++++++++++
  9 files changed, 1670 insertions(+)
 
 
@@ -59,8 +59,8 @@ Proof of work (committed at .proof/task-187/proof.md):
 
 ## What was built
 
-A standalone script, `docs/fable_roadmap/bootstrap/wave_draft.py`, that
-deterministically parses `docs/fable_roadmap/BACKLOG.md`'s `## NOW` / `## READY`
+A standalone script, `docs/roadmap/bootstrap/wave_draft.py`, that
+deterministically parses `docs/roadmap/BACKLOG.md`'s `## NOW` / `## READY`
 `### N. Title — meta` entries and renders a `create_waveN.py`-style loader
 draft: `spec` + `TASKS` dicts with title, full brief (Context/Scope/Acceptance/
 Verify + the standard working-protocol footer), suggested agent + latest
@@ -70,7 +70,7 @@ hardcoded/guessed), and `depends` edges when one entry names another via
 
 It is a **standalone script**, not an `odin` subcommand — every existing wave
 loader (`create_wave1.py` … `create_wave4.py`) already lives in
-`docs/fable_roadmap/bootstrap/` as a standalone script, so this keeps the same
+`docs/roadmap/bootstrap/` as a standalone script, so this keeps the same
 shape rather than inventing a new CLI-registration path for something run
 once per wave (Default First / Simplicity is a feature).
 
@@ -80,14 +80,14 @@ operator reviews/edits it, then runs it exactly like any other
 
 ## Files changed
 
-- `docs/fable_roadmap/bootstrap/wave_draft.py` (new) — parser + selector +
+- `docs/roadmap/bootstrap/wave_draft.py` (new) — parser + selector +
   dependency-finder + renderer + CLI (`cli_main`).
-- `tests/fable_roadmap/test_wave_draft.py` (new) — 27 tests, TDD (written and
+- `tests/roadmap/test_wave_draft.py` (new) — 27 tests, TDD (written and
   confirmed red before `wave_draft.py` existed).
-- `tests/fable_roadmap/fixtures/BACKLOG_snapshot.md` (new) — frozen copy of
+- `tests/roadmap/fixtures/BACKLOG_snapshot.md` (new) — frozen copy of
   the current `BACKLOG.md`, used by the parser tests so future edits to the
   live backlog don't retroactively break this suite.
-- `tests/fable_roadmap/fixtures/agent_models_snapshot.json` (new) — frozen
+- `tests/roadmap/fixtures/agent_models_snapshot.json` (new) — frozen
   subset of `agent_models.json`'s `default_model` shape, for deterministic
   model-resolution tests independent of the live seed file.
 
@@ -139,15 +139,15 @@ operator reviews/edits it, then runs it exactly like any other
 ## Build / compile check
 
 ```
-$ python3 -m py_compile docs/fable_roadmap/bootstrap/wave_draft.py
+$ python3 -m py_compile docs/roadmap/bootstrap/wave_draft.py
 COMPILE OK
 ```
 
 ## Test-first (TDD) evidence
 
-1. Wrote `tests/fable_roadmap/test_wave_draft.py` (27 tests) against a
+1. Wrote `tests/roadmap/test_wave_draft.py` (27 tests) against a
    *not-yet-existing* `wave_draft.py`.
-2. Confirmed red: `python3 -m pytest tests/fable_roadmap/test_wave_draft.py -q`
+2. Confirmed red: `python3 -m pytest tests/roadmap/test_wave_draft.py -q`
    → 26 collection errors (`FileNotFoundError` — module not found).
 3. Implemented `wave_draft.py`.
 4. Green: full run below (also saved verbatim to `.proof/task-187/wave_draft_tests.txt`).
@@ -190,10 +190,10 @@ COMPILE OK
   test anti-pattern), every description carries the common working-protocol
   footer, and braces inside source prose survive intact (regression test for
   the f-string-injection bug caught and fixed during this task).
-- `next_wave_id`: increments past `create_wave1..4.py` → `sp_fable_w5`;
-  empty dir → `sp_fable_w1`.
+- `next_wave_id`: increments past `create_wave1..4.py` → `sp_roadmap_w5`;
+  empty dir → `sp_roadmap_w1`.
 - **Live smoke test** (not the frozen fixture): parses the actual current
-  `docs/fable_roadmap/BACKLOG.md`, selects top-5, resolves against the real
+  `docs/roadmap/BACKLOG.md`, selects top-5, resolves against the real
   `agent_models.json`, and compiles the result — proves the acceptance
   criterion end to end, not just against a frozen snapshot.
 
@@ -206,7 +206,7 @@ COMPILE OK
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=187 status=DONE
+spec=sp_roadmap_w4/w5 task_id=187 status=DONE
 
 
 ## YOUR REPORT

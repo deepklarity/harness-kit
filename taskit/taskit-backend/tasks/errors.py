@@ -604,8 +604,7 @@ def seed_from_ledger(path: Path) -> int:
 
 # ── Pending import (W6 retrospective entries) ──────────────────────
 # Three entries lived in docs/patterns/error_ledger.md's "Pending import"
-# section after the structured store's branch cut. Wave 6 closed 15/15
-# (audit at docs/fable_roadmap/audits/2026-07-08-wave6-close.md) and the
+# section after the structured store's branch cut. Wave 6 closed 15/15 and the
 # follow-up tasks for all three merged, so the import marks them fixed
 # with a note pointing at the resolving task / wave.  Idempotent on
 # ``source_id`` — re-running the import is a no-op (see

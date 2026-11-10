@@ -29,7 +29,7 @@ Other producers of IN_PROGRESS:
 - `consumers.py:307` `_auto_start_planned_tasks` — after planning completes, if `board.auto_start_planned_tasks` (`models.py:91`), every TODO task of the spec → IN_PROGRESS + strategy trigger (called from `consumers.py:413`).
 - Reflection retry: `views.py:3319` (REVIEW → IN_PROGRESS, changed_by=`system@taskit`).
 - Model escalation: `views.py:3011-3021` (would-be FAILED → IN_PROGRESS with upgraded model).
-- Wave scripts (`docs/fable_roadmap/bootstrap/create_wave1.py`) seed tasks via ORM; dispatch itself must still be a status flip that the poller sees (ORM status flip + TaskHistory row is the documented minimum — see §12).
+- Seed scripts create tasks via ORM; dispatch itself must still be a status flip that the poller sees (ORM status flip + TaskHistory row is the documented minimum — see §12).
 
 Strategy resolution: `tasks/execution/registry.py:18` `get_strategy()` reads `ODIN_EXECUTION_STRATEGY` — `local` → `LocalOdinStrategy`, `celery_dag` → `CeleryDAGStrategy` (no-op trigger, `celery_dag.py:24`), empty → None (nothing runs).
 
@@ -162,7 +162,7 @@ TESTING → DONE: three paths reach the terminal DONE state from TESTING, in ord
 
 ## 12. Rules of the system (operator/agent contract)
 
-Enforced in code or learned the hard way (findings F11/F14/F16/F18 in `docs/fable_roadmap/OPERATIONS.md`):
+Enforced in code or learned the hard way:
 
 1. **Never perform lifecycle transitions via raw ORM.** History rows, reflection dispatch, merge dispatch, kanban position, stop-guard clearing, and schedule finalization all hang off the API/celery paths. Raw `task.status = X; task.save()` skips all of them (F14: an ORM REVIEW→TESTING left `merge_status=pending` with no merge). ORM is for *seeding* only; the documented exception is the dispatch flip TODO/BACKLOG→IN_PROGRESS with a matching TaskHistory row (what the poller needs); everything downstream must be API/celery-driven. Never raw `curl` either — use `testing_tools/` scripts for reads (root `CLAUDE.md`).
 2. **Never mutate `.odin/worktrees/*` by hand.** The reflection reviewer audits evidence integrity and will fail the task (F16). Fix the task *description* and retry instead. On FAILED, the worktree/branch is deliberately preserved for inspection — read-only.

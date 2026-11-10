@@ -277,12 +277,12 @@ def enqueue_spec_verify(
 ) -> None:
     """Public entry point — called from `merge_task_on_reflection`.
 
-    ``spec_id`` is the spec's odin_id (e.g. ``"sp_fable_w5"``).
+    ``spec_id`` is the spec's odin_id (e.g. ``"sp_roadmap_w5"``).
     ``head_sha`` is the SHA the spec branch now points at after the
     merge — used to disambiguate coalesced runs and to name the SHA
     in a future red-run spec comment.
     ``merge_branch`` is the task branch that merged (e.g.
-    ``"task/sp_fable_w5/210"``) — used to name the merge in the
+    ``"task/sp_roadmap_w5/210"``) — used to name the merge in the
     same future comment.
 
     This function returns immediately; the verify runs on a daemon

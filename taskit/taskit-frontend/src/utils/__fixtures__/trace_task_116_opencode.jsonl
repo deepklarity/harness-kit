@@ -1,27 +1,27 @@
-timestamp=2026-07-05T18:00:17.892Z level=INFO run=ffbb671a message="creating instance" directory=/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116
-timestamp=2026-07-05T18:00:17.893Z level=INFO run=ffbb671a message=fromDirectory directory=/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116
-timestamp=2026-07-05T18:00:17.966Z level=INFO run=ffbb671a message=bootstrapping directory=/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116
+timestamp=2026-07-05T18:00:17.892Z level=INFO run=ffbb671a message="creating instance" directory=/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116
+timestamp=2026-07-05T18:00:17.893Z level=INFO run=ffbb671a message=fromDirectory directory=/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116
+timestamp=2026-07-05T18:00:17.966Z level=INFO run=ffbb671a message=bootstrapping directory=/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116
 timestamp=2026-07-05T18:00:17.979Z level=INFO run=ffbb671a message=loading path=/root/.config/opencode/config.json
 timestamp=2026-07-05T18:00:17.979Z level=INFO run=ffbb671a message=loading path=/root/.config/opencode/opencode.json
 timestamp=2026-07-05T18:00:17.979Z level=INFO run=ffbb671a message=loading path=/root/.config/opencode/opencode.jsonc
-timestamp=2026-07-05T18:00:17.982Z level=INFO run=ffbb671a message=loading path=/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116/opencode.json
+timestamp=2026-07-05T18:00:17.982Z level=INFO run=ffbb671a message=loading path=/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116/opencode.json
 timestamp=2026-07-05T18:00:18.073Z level=INFO run=ffbb671a message="all LSPs are disabled"
 timestamp=2026-07-05T18:00:18.081Z level=INFO run=ffbb671a message="all formatters are disabled"
 timestamp=2026-07-05T18:00:18.081Z level=INFO run=ffbb671a message=init
-timestamp=2026-07-05T18:00:18.314Z level=INFO run=ffbb671a message=created id=ses_0cc8fcf77ffeBEnkVfX30d17Vo slug=eager-island version=1.17.13 projectID=35b7cb9b42dacfc460ad92b6d6b46487e48ce30f directory=/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116 path="" workspaceID=undefined parentID=undefined title="New session - 2026-07-05T18:00:18.313Z" agent=undefined model=undefined metadata=undefined permission="[{\"permission\":\"question\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_enter\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_exit\",\"pattern\":\"*\",\"action\":\"deny\"}]" cost=0 tokens.input=0 tokens.output=0 tokens.reasoning=0 tokens.cache.read=0 tokens.cache.write=0 time.created=1783274418313 time.updated=1783274418313
+timestamp=2026-07-05T18:00:18.314Z level=INFO run=ffbb671a message=created id=ses_0cc8fcf77ffeBEnkVfX30d17Vo slug=eager-island version=1.17.13 projectID=35b7cb9b42dacfc460ad92b6d6b46487e48ce30f directory=/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116 path="" workspaceID=undefined parentID=undefined title="New session - 2026-07-05T18:00:18.313Z" agent=undefined model=undefined metadata=undefined permission="[{\"permission\":\"question\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_enter\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_exit\",\"pattern\":\"*\",\"action\":\"deny\"}]" cost=0 tokens.input=0 tokens.output=0 tokens.reasoning=0 tokens.cache.read=0 tokens.cache.write=0 time.created=1783274418313 time.updated=1783274418313
 timestamp=2026-07-05T18:00:18.340Z level=INFO run=ffbb671a message="event connected"
 timestamp=2026-07-05T18:00:18.642Z level=INFO run=ffbb671a message=loop session.id=ses_0cc8fcf77ffeBEnkVfX30d17Vo step=0
 timestamp=2026-07-05T18:00:18.671Z level=INFO run=ffbb671a message=stream providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_0cc8fcf77ffeBEnkVfX30d17Vo small=true agent=title mode=primary
 timestamp=2026-07-05T18:00:18.680Z level=INFO run=ffbb671a message="llm runtime selected" llm.runtime=ai-sdk llm.provider=minimax-coding-plan llm.model=MiniMax-M3
 timestamp=2026-07-05T18:00:18.721Z level=INFO run=ffbb671a message=initialized
 timestamp=2026-07-05T18:00:19.347Z level=INFO run=ffbb671a message="removing gitignored files from snapshot" count=25
-timestamp=2026-07-05T18:00:22.026Z level=INFO run=ffbb671a message=tracking hash=1be4f0657f2860a66f1087595e62d2e4c7a5c97d cwd=/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116 git=/root/.local/share/opencode/snapshot/35b7cb9b42dacfc460ad92b6d6b46487e48ce30f/cf3f6a20cbb2e232f209c1e3759339bec442a936
+timestamp=2026-07-05T18:00:22.026Z level=INFO run=ffbb671a message=tracking hash=1be4f0657f2860a66f1087595e62d2e4c7a5c97d cwd=/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116 git=/root/.local/share/opencode/snapshot/35b7cb9b42dacfc460ad92b6d6b46487e48ce30f/cf3f6a20cbb2e232f209c1e3759339bec442a936
 timestamp=2026-07-05T18:00:22.031Z level=INFO run=ffbb671a message="shell tool using shell" shell=/usr/bin/bash
 timestamp=2026-07-05T18:00:24.570Z level=INFO run=ffbb671a message=init count=17
-timestamp=2026-07-05T18:00:25.251Z level=INFO run=ffbb671a message="watcher backend" directory=/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116 platform=linux backend=inotify
+timestamp=2026-07-05T18:00:25.251Z level=INFO run=ffbb671a message="watcher backend" directory=/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116 platform=linux backend=inotify
 timestamp=2026-07-05T18:00:25.257Z level=INFO run=ffbb671a message="project copy refresh started" projectID=35b7cb9b42dacfc460ad92b6d6b46487e48ce30f
-timestamp=2026-07-05T18:00:26.362Z level=INFO run=ffbb671a message="project copy refresh done" projectID=35b7cb9b42dacfc460ad92b6d6b46487e48ce30f updated="[\"/home/user/harness-kit\",\"/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116\"]" removed=[]
-timestamp=2026-07-05T18:00:26.395Z level=INFO run=ffbb671a message="booting location services" directory=/home/user/harness-kit/.odin/worktrees/sp_fable_w1/116 workspaceID=undefined
+timestamp=2026-07-05T18:00:26.362Z level=INFO run=ffbb671a message="project copy refresh done" projectID=35b7cb9b42dacfc460ad92b6d6b46487e48ce30f updated="[\"/home/user/harness-kit\",\"/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116\"]" removed=[]
+timestamp=2026-07-05T18:00:26.395Z level=INFO run=ffbb671a message="booting location services" directory=/home/user/harness-kit/.odin/worktrees/sp_roadmap_w1/116 workspaceID=undefined
 timestamp=2026-07-05T18:00:26.460Z level=INFO run=ffbb671a message=process session.id=ses_0cc8fcf77ffeBEnkVfX30d17Vo messageID=msg_f337031d5001cp7o4P98lCJENZ
 timestamp=2026-07-05T18:00:26.463Z level=INFO run=ffbb671a message=stream providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_0cc8fcf77ffeBEnkVfX30d17Vo small=false agent=build mode=primary
 timestamp=2026-07-05T18:00:26.470Z level=INFO run=ffbb671a message="llm runtime selected" llm.runtime=ai-sdk llm.provider=minimax-coding-plan llm.model=MiniMax-M3

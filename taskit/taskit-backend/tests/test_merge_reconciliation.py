@@ -67,15 +67,15 @@ class _ReconciliationCase(APITestCase):
         super().setUp()
         self.board = self.make_board()
         self.spec = self.make_spec(
-            self.board, odin_id="sp_fable_w4",
-            metadata={"branch": "spec/sp_fable_w4"},
+            self.board, odin_id="sp_roadmap_w4",
+            metadata={"branch": "spec/sp_roadmap_w4"},
         )
         self.task = self.make_task(
             self.board,
             spec=self.spec,
             status=TaskStatus.REVIEW,
             metadata={
-                "branch": "task/sp_fable_w4/193",
+                "branch": "task/sp_roadmap_w4/193",
                 "merge_status": "needs_human",
                 "merge_error": "CONFLICT (content): Merge conflict in src/app.py",
                 "merge_ambiguous_files": ["src/app.py"],
@@ -204,7 +204,7 @@ class ReconcileNeedsHumanTests(_ReconciliationCase):
             status=TaskStatus.REVIEW,
             title="merged by hand",
             metadata={
-                "branch": "task/sp_fable_w4/200",
+                "branch": "task/sp_roadmap_w4/200",
                 "merge_status": "needs_human",
             },
         )
@@ -214,7 +214,7 @@ class ReconcileNeedsHumanTests(_ReconciliationCase):
 
         def fake_is_ancestor(branch, spec_branch):
             # Only merged_task's branch is an ancestor.
-            return branch == "task/sp_fable_w4/200"
+            return branch == "task/sp_roadmap_w4/200"
 
         fake_wt = type(
             "FakeWT", (), {"is_ancestor": lambda s, a, d: fake_is_ancestor(a, d)},

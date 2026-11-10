@@ -181,7 +181,7 @@ class AutonomyClassification(TestCase):
     """A task is agent-authored iff no disqualifying operator touch occurred."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_wave_classify",
@@ -298,7 +298,7 @@ class Wave1Reproduction(TestCase):
     """Build a wave-1-shaped fixture: 18 DONE, 17 agent-authored, 1 hand-completed."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_wave1",
@@ -396,7 +396,7 @@ class Wave2Reproduction(TestCase):
     """Build a wave-2-shaped fixture: 18 DONE, all agent-authored, ~8 unsticks."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_wave2",
@@ -476,7 +476,7 @@ class CostPerMergedChange(TestCase):
     """Average cost = total tokens / done count; gaps counted honestly."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_cost",
@@ -547,7 +547,7 @@ class TimeToVerifiedPercentiles(TestCase):
     """dispatch->DONE percentiles computed from real history timestamps."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_time",
@@ -602,7 +602,7 @@ class CLIOutputModes(TestCase):
     """--brief, --json, and standard modes all run and produce output."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_cli",
@@ -659,7 +659,7 @@ class LandedStatusesIncludeTesting(TestCase):
     """
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_shelf",
@@ -759,7 +759,7 @@ class Wave5ZeroUnstickSharpened(TestCase):
     """
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_zero_unstick",
@@ -887,7 +887,7 @@ class Wave5LadderSection(TestCase):
     """
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_ladder",
@@ -1054,7 +1054,7 @@ class Wave8SystemAuthorsNotIntervention(TestCase):
     rule that flagged them as operator intervention was the W8.1 bug."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_w8_machine_only",
@@ -1125,7 +1125,7 @@ class Wave8HumanAuthorIsIntervention(TestCase):
     the other side of the W8.1 denylist."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_w8_operator",
@@ -1242,7 +1242,7 @@ class Wave8LiveDataReplay(TestCase):
         cls.snapshot = json.loads(LIVE_SNAPSHOT_PATH.read_text())
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap (replay)", working_dir="/tmp/fable-replay")
+        self.board = Board.objects.create(name="Roadmap (replay)", working_dir="/tmp/roadmap-replay")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_w8_replay",
@@ -1356,7 +1356,7 @@ class MergeAgentNotIntervention(TestCase):
     number flatters us least (inflated human-touch count)."""
 
     def setUp(self):
-        self.board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+        self.board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
         self.spec = Spec.objects.create(
             board=self.board,
             odin_id="sp_merge_agent",

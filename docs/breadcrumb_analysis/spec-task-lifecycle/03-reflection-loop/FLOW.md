@@ -75,8 +75,8 @@ Two early exits merge directly without a reviewer: `skip_reflection` on task/boa
 ### Dependency gating
 
 ```
-taskit-backend/tasks/dependencies.py :: COMPLETED_STATUSES = {DONE, TESTING}   (line 36) — REVIEW excluded (fable task 214)
-odin/src/odin/dependencies.py        :: COMPLETED_STATUSES = {DONE, TESTING}   (line 35) — REVIEW excluded (fable task 214)
+taskit-backend/tasks/dependencies.py :: COMPLETED_STATUSES = {DONE, TESTING}   (line 36) — REVIEW excluded (task 214)
+odin/src/odin/dependencies.py        :: COMPLETED_STATUSES = {DONE, TESTING}   (line 35) — REVIEW excluded (task 214)
 ```
 
 Both files must agree. Only a dependency in TESTING or DONE unblocks dependents — TESTING is the post-merge gate. A dep in REVIEW is *not* complete (branch pre-merge), so a dependent that started then would build against missing upstream code.

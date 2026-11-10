@@ -2,7 +2,7 @@
 title: "Preset/template inventory + the audit-preset contract"
 date: 2026-07-07
 category: design-patterns
-tags: [preset, audit, contract, templates, fable-roadmap]
+tags: [preset, audit, contract, templates]
 severity: design
 status: documented
 ---
@@ -16,9 +16,8 @@ defines an **audit-preset contract** so future audits (and the next task: the
 build) can declare their evidence + checks + report shape + finding→task
 mapping once and ride on shared infrastructure.
 
-Two audits already in the kit — `fable-audit` (roadmap progress) and
-`hk-code-quality-audit` (codebase hygiene) — are instantiated against the contract at
-the bottom of this doc.
+The kit audit `hk-code-quality-audit` (codebase hygiene) is instantiated against the
+contract at the bottom of this doc.
 
 ---
 
@@ -62,30 +61,9 @@ it is, and whether it's already "preset-shaped" (data-driven, declarative) or
   mental model: a preset is **typed context + typed gate + typed prompt**.
   Audits are the same shape: typed evidence + typed check + typed report.
 
-### 3. Wave/spec loaders — preset-shaped, hand-per-wave
+### 3. Skill packs — procedural, not preset-shaped
 
-- **Files**: `docs/fable_roadmap/bootstrap/create_wave{1..5}.py`,
-  `create_wave4_refill{,2,3,4}.py`, `create_smoke_tables.py`.
-- **Schema** (each): `TASKS = [dict(key, title, agent, model?, depends,
-  description), ...]` plus a `COMMON_FOOTER` and a `PRE-DISPATCH CHECKLIST`
-  docstring.
-- **Loader body** (every file, identical shape): idempotent on `spec.odin_id`,
-  creates one `Board` + one `Spec` + N `Task`s, wires `depends_on`, substitutes
-  `<id>` into the description so the promote-gate's artifact parser sees real
-  paths (the W5.1 fix lives here).
-- **Why it's a preset**: each file is **data + a 30-line loader loop**. The
-  data could move out of Python into JSON/YAML; the loader would be one shared
-  function. Today every wave copy-pastes the loader.
-- **Enhanceable**: yes. The natural next step is a single
-  `load_spec_from_manifest(odin_id, path, tasks_json)` and per-wave files that
-  contain only `TASKS = [...]`.
-- **Limitation**: hand-written; no schema validation; description text is freeform
-  prose (no fielded WHY/Scope/Acceptance/Verify enforced).
-
-### 4. Skill packs — procedural, not preset-shaped
-
-- **Files**: `.claude/skills/*/SKILL.md` (18 skills: `fable-audit`,
-  `hk-arch-audit`, `hk-autonomy-audit`, `hk-breadcrumb-creator`, `hk-changelog`,
+- **Files**: `.claude/skills/*/SKILL.md` (18 skills: `hk-arch-audit`, `hk-autonomy-audit`, `hk-breadcrumb-creator`, `hk-changelog`,
   `hk-compound`, `hk-follow-breadcrumb`, `hk-local-diagnose`, `hk-local-logs`,
   `hk-local-run-spec`, `hk-merge-resolve`, `hk-mock-first`, `hk-rca`, `hk-refine`,
   `hk-scout-wiki`, `hk-shift-changelog`, `hk-skill-creator`, `hk-code-quality-audit`).
@@ -93,14 +71,14 @@ it is, and whether it's already "preset-shaped" (data-driven, declarative) or
   allowed-tools}` + freeform markdown body describing the procedure.
 - **Consumed by**: Claude Code skill trigger (matches on description keywords).
 - **Enhanceable**: as a writing convention (the frontmatter is structured), but
-  not as data — the body is a procedure, not a config. Two skills
-  (`hk-code-quality-audit`, `fable-audit`) are the **exact** things the audit-preset
+  not as data — the body is a procedure, not a config. One skill
+  (`hk-code-quality-audit`) is the **exact** thing the audit-preset
   contract should let us upgrade from procedure to data.
 - **Limitation**: skills don't share infrastructure — each re-derives the
   "what evidence to gather / what shape the output takes" decisions. The
   contract below is the missing glue.
 
-### 5. Claude Code agents — procedural, not preset-shaped
+### 4. Claude Code agents — procedural, not preset-shaped
 
 - **Files**: `.claude/agents/hk-senior-fullstack-engineer.md`,
   `.claude/agents/hk-test-writer.md`.
@@ -111,7 +89,7 @@ it is, and whether it's already "preset-shaped" (data-driven, declarative) or
   worth noting as the *third* "authored prose" preset family alongside skills
   and wave task descriptions.
 
-### 6. odin plan prompt — hardcoded, not file-based
+### 5. odin plan prompt — hardcoded, not file-based
 
 - **Location**: `odin/src/odin/orchestrator.py::_build_plan_prompt` (line 947).
 - **Schema (implicit)**: large f-string with embedded `PLANNING PHILOSOPHY`,
@@ -125,7 +103,7 @@ it is, and whether it's already "preset-shaped" (data-driven, declarative) or
   project or per call site. Mentioned here for completeness; out of scope for
   the audit-preset contract.
 
-### 7. odin sample specs — sample inputs, not presets
+### 6. odin sample specs — sample inputs, not presets
 
 - **Location**: `odin/sample_specs/**/*.md` (smoke/mcp/apps variants).
 - **Purpose**: deterministic inputs for `odin plan` testing/demos.
@@ -133,29 +111,7 @@ it is, and whether it's already "preset-shaped" (data-driven, declarative) or
   because a future audit might want to invoke `odin plan` on each as a
   regression check (today: out of scope).
 
-### 8. Wave briefs (Markdown) — informal templates
-
-- **Files**: `docs/fable_roadmap/bootstrap/wave{1..5}_*.md` (referenced from
-  `create_wave*.py`; the file paths live in the loader's `Spec.source`). Today
-  the loader reads these for `Spec.content` but the actual task descriptions
-  are inlined in `TASKS = [...]`.
-- **Not a preset yet**: the briefs are prose, not data. A future "wave"
-  preset could collapse wave_brief.md + create_waveN.py + TASKS list into one
-  manifest.
-
-### 9. Audit reports — typed artifacts, hand-curated
-
-- **Location**: `docs/fable_roadmap/audits/YYYY-MM-DD*.md`
-  (5 historical: `2026-07-06.md`, `2026-07-06-wave2.md`,
-  `2026-07-07-vm-memory-provisioning.md`, `2026-07-07-wave3-close.md`,
-  `2026-07-08-wave4-close.md`).
-- **Shape (informal)**: verdict → verified-done table → downgrades → metrics →
-  risks → ladder → next actions. Reads in 30 seconds from the top.
-- **Not a preset**: written by hand by `fable-audit`. The slop audit uses a
-  *different* shape (`slops/all_slops.md` + per-finding `slops/SLOP-NNN.md`).
-  This is the duplication the contract collapses.
-
-### 10. Static JSON single-source-of-truth files
+### 7. Static JSON single-source-of-truth files
 
 - `taskit/taskit-backend/data/agent_models.json` — agent/model lineup.
 - `taskit/taskit-backend/data/task_presets.json` — already counted (entry 1).
@@ -172,23 +128,18 @@ it is, and whether it's already "preset-shaped" (data-driven, declarative) or
 |---|---|---|---|---|
 | 1 | Task prompt presets | Data (JSON) | Live | Indirectly (cross-reference) |
 | 2 | TDD task presets | Data (proposed) | Proposed | Indirectly (model) |
-| 3 | Wave/spec loaders | Data + thin loader | Live, hand-per-wave | No (but parallel pattern) |
-| 4 | Skill packs | Procedure (markdown) | Live | **Yes — these ARE the audits** |
-| 5 | Claude Code agents | Procedure (markdown) | Live | No |
-| 6 | odin plan prompt | Hardcoded | Live | No |
-| 7 | odin sample specs | Sample inputs | Live | No |
-| 8 | Wave briefs (Markdown) | Prose | Live, informal | No |
-| 9 | Audit reports | Typed artifacts | Live, hand-curated | **Yes — these ARE the outputs** |
-| 10 | Static config JSON | Data | Live | No |
+| 3 | Skill packs | Procedure (markdown) | Live | **Yes — these ARE the audits** |
+| 4 | Claude Code agents | Procedure (markdown) | Live | No |
+| 5 | odin plan prompt | Hardcoded | Live | No |
+| 6 | odin sample specs | Sample inputs | Live | No |
+| 7 | Static config JSON | Data | Live | No |
 
-**The two families that matter for the audit contract: #4 (skills) and #9
-(reports).** A successful audit-preset contract turns both into data: the
-skill becomes a YAML/JSON declaration; the report becomes its rendered
-output.
+**The family that matters for the audit contract: #3 (skills).** A
+successful audit-preset contract turns it into data: the skill becomes a
+YAML/JSON declaration; the report becomes its rendered output.
 
 The TDD task preset (#2) is the closest existing precedent for the mental
-model. The wave loaders (#3) are the closest existing precedent for the
-physical shape.
+model.
 
 ---
 
@@ -204,7 +155,7 @@ task (next up) provides a runner that consumes them.
 apiVersion: audit.harness.kit/v1     # bumps when fields change
 kind: Audit
 metadata:
-  id: <kebab-id>                      # unique; matches an hk-*-audit or fable-audit
+  id: <kebab-id>                      # unique; matches an hk-*-audit
   name: <human title>
   description: <one line>
   triggers:                           # when this runs (all match → run)
@@ -286,7 +237,7 @@ spec:
 ### Semantics (what each field means)
 
 **`metadata.triggers`** is what maps the preset to invocation surfaces
-(`/hk-code-quality-audit`, `/fable-audit`, periodic, on-event). The runner subscribes
+(`/hk-code-quality-audit`, periodic, on-event). The runner subscribes
 to all matching triggers; an explicit invocation always wins.
 
 **`spec.evidence`** is the *declarative* list of inputs. The runner executes
@@ -346,152 +297,6 @@ audit):
 ---
 
 ## Part 3 — Worked examples
-
-### Example A: `fable-audit` (roadmap progress)
-
-```yaml
-apiVersion: audit.harness.kit/v1
-kind: Audit
-metadata:
-  id: fable-audit
-  name: Fable roadmap auditor
-  description: "Verify claimed progress with proof; update RESUME/BACKLOG."
-  triggers:
-    - keyword: "fable audit"
-    - keyword: "roadmap audit"
-    - keyword: "audit progress"
-    - on_event: wave_close
-    - manual: true
-spec:
-  evidence:
-    scripts:
-      - name: board overview
-        command: "python testing_tools/board_overview.py 5 --json"
-        cwd: taskit/taskit-backend
-        parse: json
-      - name: spec trace (per active spec)
-        command: "python testing_tools/spec_trace.py <spec_id> --json --sections tasks,problems"
-        cwd: taskit/taskit-backend
-        parse: json
-      - name: task inspect (per DONE task since last audit)
-        command: "python testing_tools/task_inspect.py <task_id> --brief"
-        cwd: taskit/taskit-backend
-        parse: stdout
-      - name: reflection inspect (per task with reflection)
-        command: "python testing_tools/reflection_inspect.py <report_id> --sections verdict,diagnosis"
-        cwd: taskit/taskit-backend
-        parse: stdout
-      - name: autonomy metrics
-        command: "python testing_tools/autonomy_metrics.py --json"
-        cwd: taskit/taskit-backend
-        parse: json
-      - name: verify gate (snapshot)
-        command: "sh scripts/verify.sh"
-        cwd: <repo-root>
-        parse: stdout
-    files:
-      - path: docs/fable_roadmap/RESUME.md
-        check: "Where things stand section matches board reality"
-      - path: docs/fable_roadmap/BACKLOG.md
-        check: "Top 3 items match wave-close audit recommendations"
-      - path: docs/fable_roadmap/fable_roadmap.md
-        check: "Bucket scores only move at audits, with evidence"
-  checks:
-    - id: done-since-last-audit
-      description: "Every task DONE since last audit has verifiable proof on disk."
-      source: spec trace + task inspect
-      expects: "all(matches proof_path on disk)"
-      severity_on_fail: P1
-      finding_template: roadmap-claim-unverified
-    - id: doc-vs-board-divergence
-      description: "RESUME 'Where things stand' matches board_overview.py."
-      source: board overview + RESUME.md
-      expects: "no contradiction"
-      severity_on_fail: P2
-      finding_template: doc-vs-board
-    - id: bucket-score-without-evidence
-      description: "Bucket score moves only with audit-attached before/after."
-      source: fable_roadmap.md + this report
-      expects: "every score movement cites a metric"
-      severity_on_fail: P1
-      finding_template: bucket-score-evidence
-    - id: ladder-ratchet
-      description: "Ladder level changes follow ratchet rules in fable_roadmap.md."
-      source: autonomy metrics + this report
-      expects: "no level moved without meeting exit criteria"
-      severity_on_fail: P2
-      finding_template: ladder-rule-violation
-    - id: hand-fixes-file-themselves
-      description: "Every operator hand-fix since last audit has a filed task."
-      source: board history (DONE/REVIEW transitions by operator email)
-      expects: "each non-agent transition has a task with same root cause"
-      severity_on_fail: P2
-      finding_template: hand-fix-unfiled
-    - id: learned-twice
-      description: "No pattern recurs without a docs/patterns/ entry."
-      source: git log (last N waves) + docs/patterns/
-      expects: "every repeated mistake has a doc"
-      severity_on_fail: P2
-      finding_template: learned-twice
-  report:
-    path: docs/fable_roadmap/audits/{date}-{slug}.md
-    shape:
-      - id: verdict
-        kind: line
-        format: "**Verdict:** <ON TRACK|DRIFTING|BLOCKED> — <one-line why>"
-      - id: verified_done_table
-        kind: table
-        columns: [task, claim, proof, result]
-      - id: downgrades
-        kind: list
-      - id: metrics_snapshot
-        kind: table
-        columns: [metric, value, source]
-      - id: top_3_risks
-        kind: list
-        max_items: 3
-      - id: ladder_call
-        kind: line
-        format: "**Ladder:** <level>, <one-line why>"
-      - id: next_actions
-        kind: list
-        max_items: 5
-        assignable: true
-    max_lines: 80
-    prose_first: true
-  findings:
-    severity_scale: [P0, P1, P2, P3, P4]
-    default_bucket_why: "the bucket the work belongs to (Trust / Memory / etc.)"
-    task_template:
-      title_prefix: "AUDIT-{date}-"
-      description_template: |
-        ## What is wrong today
-        <bucket WHY snippet — plain sentence, no score>
-
-        Finding: <summary>
-        Evidence: <file/script/output pointer>
-        Acceptance: <one concrete check>
-        Verify: <one command or one proof artifact path>
-
-        ## Working protocol
-        - First principles: fix the CAUSE, not the symptom.
-        - Failing test before fix.
-        - Attach proof to .proof/task-<id>/proof.md and post a summary comment.
-        - Do not create or switch branches; edit files in your worktree.
-      default_agent: claude            # default; user can reassign
-      proof_path: ".proof/task-<id>/"
-    artifact_paths:
-      - ".proof/audit-{date}-fable/board_overview.txt"
-      - ".proof/audit-{date}-fable/verify_sh.txt"
-```
-
-**What this replaces today**: the `fable-audit/SKILL.md` procedural skill
-(34 lines) plus the hand-written audit reports under `docs/fable_roadmap/audits/`.
-The preset names the same evidence the skill names informally ("the board is
-truth — `board_overview.py` / `spec_trace.py` / `task_inspect.py --brief`"),
-enforces the same report shape the existing audits follow (verdict →
-verified-done table → demotions → metrics → risks → ladder → next actions),
-and produces tasks with the WHY context the buckets demand.
 
 ### Example B: `hk-code-quality-audit` (codebase hygiene)
 
@@ -687,8 +492,7 @@ plus the implicit hand-curation of `slops/all_slops.md` and per-finding
 `slops/SLOP-NNN-*.md`. The 7 audit categories become typed checks; the P0-P4
 severity scale is the contract's `severity_scale`; the per-finding detail
 file convention becomes `artifact_paths`; the bucket WHY context (`Trust,
-7/10`) is injected into every task description the way the fable wave
-loaders do today.
+7/10`) is injected into every task description .
 
 ---
 
@@ -700,14 +504,13 @@ task delivers:
 1. **`audit/preset.py`** — load + validate a preset against `apiVersion`.
 2. **`audit/runner.py`** — execute `evidence` in parallel, evaluate `checks`,
    render `report`, file `findings` as board tasks via `taskit_mcp.add_comment`
-   (with the same operator email convention the wave loaders use).
+  .
 3. **`audit/triggers.py`** — wire `/<preset.id>` to the runner; subscribe to
    `on_event` hooks from the existing wave-close flow.
-4. **Migration of the two existing skills** — `fable-audit/SKILL.md` and
-   `hk-code-quality-audit/SKILL.md` become thin wrappers that load their YAML preset
-   and invoke the runner, preserving the trigger surface and argument hints.
+4. **Migration of the existing skill** — `hk-code-quality-audit/SKILL.md` becomes a thin wrapper that loads its YAML preset
+   and invokes the runner, preserving the trigger surface and argument hints.
 
-The audit reports under `docs/fable_roadmap/audits/` and `slops/` become
+The audit reports under `slops/` become
 *outputs* of the runner rather than hand-written artifacts. The skill bodies
 lose ~80% of their prose — what's left is the trigger description, the
 argument hint, and a one-line "this is data; see the preset YAML."
@@ -719,9 +522,5 @@ argument hint, and a one-line "this is data; see the preset YAML."
 - Existing prompt presets: `taskit/taskit-backend/data/task_presets.json` +
   `docs/breadcrumb_analysis/prompt-presets/FLOW.md`.
 - TDD task preset proposal (closest mental model): `docs/breadcrumb_analysis/task-preset-tdd-enforcement/FLOW.md`.
-- Wave loader precedent (data + thin loader): `docs/fable_roadmap/bootstrap/create_wave5.py:63-279`
-  (the `TASKS = [dict(...), ...]` shape).
-- Audit reports (current hand-curated outputs): `docs/fable_roadmap/audits/*.md`.
-- Skills being migrated: `.claude/skills/fable-audit/SKILL.md`,
-  `.claude/skills/hk-code-quality-audit/SKILL.md`.
+- Skill being migrated: `.claude/skills/hk-code-quality-audit/SKILL.md`.
 - Breadcrumb-first exploration: `docs/breadcrumb_analysis/_INDEX.md`.

@@ -1,7 +1,7 @@
 # How to write a task brief
 
 Every task on the board follows this shape, whether a human, the operator
-session, or `odin plan` writes it. Read `docs/fable_roadmap/TONE.md` first.
+session, or `odin plan` writes it. Read `docs/playbook/tone_and_taste.md` first.
 The test: a person who has never seen the code reads the title out loud,
 wants to know more, reads the brief once, and knows what to build, why,
 and how they'll prove it. If any sentence sounds like a contract, a log
@@ -84,7 +84,7 @@ still in plain words.
 ## Why this exists
 
 Nine waves of briefs drifted into insider shorthand ("Working protocol
-(applies to every fable task)", bucket scores in parentheses, acceptance
+(applies to every task)", bucket scores in parentheses, acceptance
 written like legal text). The user read task 259 and called it gibberish.
 He was right. A brief is a conversation with the person doing the work.
 

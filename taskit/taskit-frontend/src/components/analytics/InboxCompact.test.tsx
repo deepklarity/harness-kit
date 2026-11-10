@@ -64,7 +64,7 @@ function makeInbox(
     return inbox;
 }
 
-describe('InboxCompact — failed_tasks visibility (fable task 335)', () => {
+describe('InboxCompact — failed_tasks visibility (task 335)', () => {
     it('renders failed tasks first, before parked merges and shelves', () => {
         const inbox = makeInbox({
             failed: [makeFailedTask({ task_title: 'Login flow broken' })],

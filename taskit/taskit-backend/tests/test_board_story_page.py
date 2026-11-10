@@ -1,16 +1,11 @@
 """Tests for the composed board-story handover page (task #251).
 
-testing_tools/board_story.py --html grows from a bare TLDR+timeline page
-into the full two-minute handover: a bucket scoreboard parsed from
-docs/fable_roadmap/fable_roadmap.md (the table is the source of truth,
-never duplicated), the TESTING shelf (tasks merged and waiting on the
-human's optional DONE flip), and the decisions only the human can make
-(parsed from BACKLOG.md's "User decisions still open" section).
+testing_tools/board_story.py --html is the two-minute handover: TLDR,
+timeline, the TESTING shelf (tasks merged and waiting on the human's
+optional DONE flip), plus optional scoreboard and decisions sections.
 
-Covers: the two markdown parsers against fixture text (not the real
-docs, so these stay fast and don't drift with roadmap edits), the
-TESTING-shelf query, and tasks.board_story.render_html composing all of
-it — including the case where a section has nothing to show (must render
+Covers: the TESTING-shelf query and tasks.board_story.render_html
+composing all of it — including the case where a section has nothing to show (must render
 an honest em-dash placeholder, never disappear) and the CSS theme tokens
 both themes rely on.
 """
@@ -30,85 +25,6 @@ if str(TESTING_TOOLS_DIR) not in sys.path:
 
 from .base import APITestCase
 from tasks.models import TaskStatus
-
-
-ROADMAP_FIXTURE = """# Fable roadmap
-
-Some prose before the table.
-
-| Bucket | Score | One line |
-|---|---|---|
-| [Trust](buckets/trust.md) | 8/10 | The kit must not lie or panic |
-| [Memory](buckets/memory.md) | 5/10 | It records everything and uses nothing |
-
-Prose after the table.
-"""
-
-BACKLOG_FIXTURE = """# BACKLOG
-
-## Now
-
-Some wave text.
-
-## User decisions still open
-
-1. **A dedicated always-on Linux box.** Long wrapped
-   text that spans
-   multiple lines.
-2. **Second decision.** Shorter one.
-
-Resolved by the user, encoded: something already answered — not waiting.
-"""
-
-BACKLOG_NO_DECISIONS_FIXTURE = """# BACKLOG
-
-## Now
-
-Nothing here.
-"""
-
-
-class BucketScoreboardParsingTests(APITestCase):
-    def test_parses_rows_in_table_order(self):
-        from board_story import parse_bucket_scoreboard
-
-        rows = parse_bucket_scoreboard(ROADMAP_FIXTURE)
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]["name"], "Trust")
-        self.assertEqual(rows[0]["link"], "buckets/trust.md")
-        self.assertEqual(rows[0]["score"], "8/10")
-        self.assertIn("lie or panic", rows[0]["one_line"])
-        self.assertEqual(rows[1]["name"], "Memory")
-        self.assertEqual(rows[1]["score"], "5/10")
-
-    def test_empty_when_no_table(self):
-        from board_story import parse_bucket_scoreboard
-
-        self.assertEqual(parse_bucket_scoreboard("# Nothing here"), [])
-
-
-class BacklogDecisionsParsingTests(APITestCase):
-    def test_parses_numbered_items_joins_wrapped_lines(self):
-        from board_story import parse_backlog_decisions
-
-        decisions = parse_backlog_decisions(BACKLOG_FIXTURE)
-        self.assertEqual(len(decisions), 2)
-        self.assertIn("Linux box", decisions[0])
-        self.assertIn("multiple lines", decisions[0])
-        self.assertNotIn("\n", decisions[0])
-        self.assertIn("Second decision", decisions[1])
-
-    def test_excludes_resolved_paragraph(self):
-        from board_story import parse_backlog_decisions
-
-        decisions = parse_backlog_decisions(BACKLOG_FIXTURE)
-        joined = " ".join(decisions)
-        self.assertNotIn("already answered", joined)
-
-    def test_empty_when_no_section(self):
-        from board_story import parse_backlog_decisions
-
-        self.assertEqual(parse_backlog_decisions(BACKLOG_NO_DECISIONS_FIXTURE), [])
 
 
 class TestingShelfTests(APITestCase):

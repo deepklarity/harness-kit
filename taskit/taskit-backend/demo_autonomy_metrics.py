@@ -185,7 +185,7 @@ def run_script(spec_id, mode):
 
 
 def main():
-    board = Board.objects.create(name="Fable Roadmap", working_dir="/tmp/fable")
+    board = Board.objects.create(name="Roadmap", working_dir="/tmp/roadmap")
     claude = make_agent("claude")
 
     wave1_spec = Spec.objects.create(

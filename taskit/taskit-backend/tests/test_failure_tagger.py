@@ -266,8 +266,7 @@ class ClassifyFailureTaxonomy(SimpleTestCase):
 class HistoricalInventoryReplay(SimpleTestCase):
     """Acceptance: replay the historical failure inventory.
 
-    Each F-number is a documented production failure from
-    docs/fable_roadmap/archive/FINDINGS.md.
+    Each F-number is a documented production failure.
     """
 
     def test_f10_silent_hang(self):

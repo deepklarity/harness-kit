@@ -30,7 +30,7 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task needs_human merge reconciliation (W4.9). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task needs_human merge reconciliation (W4.9). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 193: needs_human merge reconciliation (W4.9)
@@ -135,8 +135,8 @@ before any implementation existed:
 `.proof/replay_177_183.py` reproduces the 177/183 pattern against a **real**
 git repository using the actual `WorktreeManager.is_ancestor` (no mocks):
 
-- `task/sp_fable_w4/177` (merged by hand) → `is_ancestor=True` → **RECONCILE**
-- `task/sp_fable_w4/183` (divergent, never merged) → `is_ancestor=False` → **SKIP**
+- `task/sp_roadmap_w4/177` (merged by hand) → `is_ancestor=True` → **RECONCILE**
+- `task/sp_roadmap_w4/183` (divergent, never merged) → `is_ancestor=False` → **SKIP**
 
 Output: `.proof/replay_177_183.txt`
 
@@ -164,7 +164,7 @@ cd taskit/taskit-backend && \
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=193 status=DONE
+spec=sp_roadmap_w4/w5 task_id=193 status=DONE
 
 
 ## YOUR REPORT

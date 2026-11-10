@@ -62,7 +62,7 @@ export function getStatusColor(status: string): string {
         case 'testing': return 'var(--chart-5)';
         case 'done': return 'var(--chart-4)';
         case 'failed': return 'var(--destructive)';
-        // CANCELED is terminal-neutral (fable task 192): the operator
+        // CANCELED is terminal-neutral (task 192): the operator
         // parked this work item. Use a muted slate tone so it reads as
         // "off the board" — distinct from FAILED's red, distinct from
         // DONE's green. Counts in no active-work metric.
@@ -170,7 +170,7 @@ export function getStatusIcon(status: string): LucideIcon {
             return Wrench;
         case 'done': return CheckCircle2;
         case 'testing': return FlaskConical;
-        // CANCELED is terminal-neutral (fable task 192): a parked work
+        // CANCELED is terminal-neutral (task 192): a parked work
         // item. The default Pin icon still reads "off the board" without
         // borrowing FAILED's red semantics.
         case 'canceled': return Pin;

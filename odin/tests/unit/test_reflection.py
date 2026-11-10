@@ -857,10 +857,10 @@ TASK_159_HAIKU_NOISE = (
     "Ignoring 124 permissions.allow entries from .claude/settings.local.json: "
     "this workspace has not been trusted. Run Claude Code interactively here "
     'once and accept the trust dialog, or set projects["/home/operator/work/tmp/'
-    'harness-kit-stable/.odin/worktrees/sp_fable_w3/159"].hasTrustDialogAccepted: '
+    'harness-kit-stable/.odin/worktrees/sp_roadmap_w3/159"].hasTrustDialogAccepted: '
     'true in /root/.claude.json.\n'
     '{"type":"system","subtype":"init","cwd":"/home/operator/work/tmp/harness-kit-'
-    'stable/.odin/worktrees/sp_fable_w3/159","session_id":"abc","model":'
+    'stable/.odin/worktrees/sp_roadmap_w3/159","session_id":"abc","model":'
     '"claude-haiku-4-5","permissionMode":"bypassPermissions"}\n'
     '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed",'
     '"resetsAt":1783369200,"rateLimitType":"five_hour"}}\n'

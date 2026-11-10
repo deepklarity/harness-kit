@@ -1,4 +1,4 @@
-"""Fable task #360 — system-comment repeat suppression + double-post fix.
+"""Task #360 — system-comment repeat suppression + double-post fix.
 
 The task page's comment stream gets buried under byte-identical system
 messages on retried tasks: the "Memory — closest finished twins" card

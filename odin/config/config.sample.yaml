@@ -106,6 +106,6 @@ chrome_devtools:
   # microsandbox agents can't launch a browser in-guest (the aarch64 microVM
   # SIGTRAPs), so the in-guest MCP connects to a host-side browser over CDP.
   # Default: http://127.0.0.1:9222 (127.0.0.1 -> host LAN IP when staged in-guest).
-  # Start the host browser with docs/fable_roadmap/bootstrap/sandbox_image/run_host_browser.sh
+  # Start a host-side Chrome with --remote-debugging-port=9222 first.
   # Uncomment to point elsewhere:
   # browser_url: http://127.0.0.1:9222

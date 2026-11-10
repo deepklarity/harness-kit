@@ -30,13 +30,13 @@ Agent: claude ((historical))
 Duration: N/Ams | Tokens: N/A
 
 ## [CTX:description] Task Description
-Fable roadmap task Frontend deps in task worktrees: honest verify gate (W4.11). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
+Roadmap task Frontend deps in task worktrees: honest verify gate (W4.11). This task was executed on an isolated worktree branch and merged after its reflection verdict passed; the reviewer's job is to judge whether the committed work and proof justify a PASS.
 
 ## [CTX:execution_result] Execution Output
 Merge task 195: Frontend deps in task worktrees: honest verify gate (W4.11)
 
 Task-Id: 195
-Spec-Id: sp_fable_w4
+Spec-Id: sp_roadmap_w4
 
 
  .proof/task-195/odin_tests.txt                     |  33 +++
@@ -256,7 +256,7 @@ installed; provision and retry)". The old `suite frontend FAILED:
 No blocking dependencies.
 
 ## [CTX:metadata] Task Metadata
-spec=sp_fable_w4/w5 task_id=195 status=DONE
+spec=sp_roadmap_w4/w5 task_id=195 status=DONE
 
 
 ## YOUR REPORT

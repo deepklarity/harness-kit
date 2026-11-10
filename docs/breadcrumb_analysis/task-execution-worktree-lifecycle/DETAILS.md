@@ -19,7 +19,7 @@ Builds `cmd = [cli_path, "exec", str(task.id)]` (~492) and runs it via `_run_sub
 The real per-task entrypoint inside the subprocess. Calls `_maybe_sweep_orphaned_sandboxes()` (~1360) at start.
 
 **Dependency completion set** (merge-gate policy — REVIEW does NOT unblock):
-`taskit/taskit-backend/tasks/dependencies.py:36` and `odin/src/odin/dependencies.py:35` — `COMPLETED_STATUSES = {DONE, TESTING}` (REVIEW excluded as of fable task 214). TESTING is the post-merge gate; only after the dep branch is folded into the spec branch can a dependent safely fork from it. `check_deps` lives at `dependencies.py:47` (backend) / `:38` (odin).
+`taskit/taskit-backend/tasks/dependencies.py:36` and `odin/src/odin/dependencies.py:35` — `COMPLETED_STATUSES = {DONE, TESTING}` (REVIEW excluded as of task 214). TESTING is the post-merge gate; only after the dep branch is folded into the spec branch can a dependent safely fork from it. `check_deps` lives at `dependencies.py:47` (backend) / `:38` (odin).
 
 ## 2. Worktree create
 

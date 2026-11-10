@@ -2,7 +2,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    """Add CANCELED as a terminal-neutral Task status (fable task 192).
+    """Add CANCELED as a terminal-neutral Task status (task 192).
 
     Allowed transitions to CANCELED come from BACKLOG/TODO/IN_PROGRESS/FAILED/
     REVIEW/TESTING via the API; from EXECUTING only via the stop_execution

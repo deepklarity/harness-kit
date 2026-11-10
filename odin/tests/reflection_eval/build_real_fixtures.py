@@ -3,7 +3,7 @@
 
 Task 191 could only transcribe one real capture (N=1) because its sandbox had
 no TaskIt DB and no model access. This builder closes the "where do N>=5 real
-inputs come from" gap without a DB: it treats each *merged* fable task as a
+inputs come from" gap without a DB: it treats each *merged* roadmap task as a
 real, ground-truthed reflection input.
 
 Why merged tasks are legitimate ground truth: a task only lands on the spec
@@ -37,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PROOF_DIR = REPO_ROOT / ".proof"
 OUT_DIR = Path(__file__).resolve().parent / "fixtures" / "inputs_real_history"
 
-# Merged fable tasks (title from the merge commit) → operator-asserted PASS.
+# Merged roadmap tasks (title from the merge commit) → operator-asserted PASS.
 # Chosen for size diversity (proof.md ranges ~4 KB … ~14 KB) so the candidate
 # models are exercised across small and large review contexts.
 MERGED_TASKS = [
@@ -85,7 +85,7 @@ def build_one(task_id: str, title: str) -> bool:
         "agent": "claude",
         "model": "(historical)",
         "description": (
-            f"Fable roadmap task {title}. This task was executed on an isolated "
+            f"Roadmap task {title}. This task was executed on an isolated "
             f"worktree branch and merged after its reflection verdict passed; the "
             f"reviewer's job is to judge whether the committed work and proof "
             f"justify a PASS."
@@ -97,7 +97,7 @@ def build_one(task_id: str, title: str) -> bool:
             f"{proof_text}"
         ),
         "dependencies": "No blocking dependencies.",
-        "metadata_summary": f"spec=sp_fable_w4/w5 task_id={task_id} status=DONE",
+        "metadata_summary": f"spec=sp_roadmap_w4/w5 task_id={task_id} status=DONE",
     }
     prompt = build_reflection_prompt(task_context)
     out = OUT_DIR / f"task_{task_id}_merged"

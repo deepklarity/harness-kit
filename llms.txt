@@ -1,24 +1,15 @@
-# Harness Kit
+# harness-kit
 
-> Open-source harness-engineering toolkit for building software with AI coding
-> agents: multi-agent orchestration CLI (odin), task board with proof-of-work
-> (taskit), and Pattern Engineering — reusable engineering patterns (TDD-first
-> execution, structured RCA, knowledge compounding, cost-aware delegation)
-> that adopt into any repo.
+> harness-kit is an open-source CLI and setup guide for harness engineering. In an existing repo, `npx @deepklarity/harnesskit init` adds a setup guide; a coding agent such as Claude Code then reads the code and writes a routing CLAUDE.md, a guide per flow citing file and line, inspect and log scripts per component, and tests with one check command. harness-kit then runs the same tasks with and without that harness and has a blind judge compare them.
 
 ## Start here
 
-- [README](README.md): what the kit is, quickstarts, FAQ
-- [Pattern Engineering Quickstart](docs/Quickstart.md): agent-first adoption
-  flow — audit a repo, score it, adopt approved practices
-- [Run the kit](QUICKSTART.md): fresh clone to a merged sample task
-- [AGENTS.md](AGENTS.md): entrypoint for coding agents working in this repo
+- [README](README.md): what it does, quick start, results, safety, FAQ
+- [Setup guide](harness-kit/kit/entry.md): the procedure the agent follows after init
+- [Proof procedure](harness-kit/kit/docs/proof.md): how before-and-after runs are set up and judged
+- [Skills](harness-kit/kit/skills/README.md): the optional skills it can install
+- [Changelog](harness-kit/CHANGELOG.md)
 
-## Core docs
+## Also in this repository
 
-- [Philosophy — 20 tenets](odin/docs/philosophy.md)
-- [Adoption checklist — 11 scored areas](docs/adoption/CHECKLIST.md)
-- [Testing process](docs/testing_process/testcase_process_and_philosophy.md)
-- [Doc index](docs/_INDEX.md)
-- [odin CLI](odin/README.md)
-- [taskit board](taskit/README.md)
+- [odin and taskit](docs/odin-and-taskit/README.md): a multi-agent orchestration CLI and a task board

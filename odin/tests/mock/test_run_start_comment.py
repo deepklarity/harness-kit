@@ -1,4 +1,4 @@
-"""Fable task #360 — run-start one-liner + effective-input dedup (odin side).
+"""Task #360 — run-start one-liner + effective-input dedup (odin side).
 
 The "Effective input" comment was an 8KB inline dump posted once per
 attempt — five copies on a task retried five times. It becomes:

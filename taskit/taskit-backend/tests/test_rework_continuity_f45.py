@@ -1,6 +1,6 @@
 """F45 rework-continuity regression tests.
 
-Origin: docs/fable_roadmap/OPERATIONS.md F45 (`rework keeps agent+model by default` mandate).
+Origin: F45 (`rework keeps agent+model by default` mandate).
 
 Pins three behaviors the F45 mandate demands and the existing test suite does
 not cover:

@@ -1,4 +1,4 @@
-"""Tests for the CANCELED Task status (fable task 192).
+"""Tests for the CANCELED Task status (task 192).
 
 The Task lifecycle is governed by *which code path* writes the status
 (see docs/breadcrumb_analysis/task-state-machine-celery-automation/FLOW.md).

@@ -133,7 +133,7 @@ Status: `[ ]` = not covered, `[x]` = covered, `[~]` = partial
 
 - [x] _deps_satisfied — no deps always satisfied `[simple]` — `taskit-backend/tests/test_dag_executor.py`
 - [x] _deps_satisfied — all deps DONE `[simple]`
-- [x] _deps_satisfied — REVIEW does NOT count as satisfied (merge-gate policy, fable task 214) `[simple]`
+- [x] _deps_satisfied — REVIEW does NOT count as satisfied (merge-gate policy, task 214) `[simple]`
 - [x] _deps_satisfied — TESTING counts as satisfied (post-merge gate) `[simple]`
 - [x] _deps_satisfied — dep REVIEW → TESTING flips dependent from WAITING → READY `[simple]`
 - [x] _deps_satisfied — partial deps not satisfied `[simple]`

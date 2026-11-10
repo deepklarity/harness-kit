@@ -21,7 +21,7 @@ from odin.orchestrator import Orchestrator
 
 
 def _agents(**overrides) -> dict[str, AgentConfig]:
-    """Five fable agents with realistic CLI defaults."""
+    """Five supported agents with realistic CLI defaults."""
     base = {
         "claude": AgentConfig(cli_command="claude", cost_tier=CostTier.HIGH, enabled=True),
         "codex": AgentConfig(cli_command="codex", cost_tier=CostTier.MEDIUM, enabled=True),

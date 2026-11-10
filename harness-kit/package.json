@@ -1,7 +1,7 @@
 {
   "name": "@deepklarity/harnesskit",
   "version": "0.1.0",
-  "description": "Build an agent harness for your repo, then prove it helps: the same tasks before and after, graded blind.",
+  "description": "Coding agents like Claude Code get lost in real codebases. harness-kit has your agent build a map, tools and tests from your code, then measures the difference.",
   "keywords": [
     "claude-code",
     "claude",
@@ -14,12 +14,15 @@
     "agents-md",
     "progressive-disclosure",
     "llm-evals",
-    "developer-tools"
+    "developer-tools",
+    "agent-ready",
+    "codebase-documentation"
   ],
   "homepage": "https://github.com/deepklarity/harness-kit#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/deepklarity/harness-kit.git"
+    "url": "git+https://github.com/deepklarity/harness-kit.git",
+    "directory": "harness-kit"
   },
   "bugs": {
     "url": "https://github.com/deepklarity/harness-kit/issues"
@@ -27,7 +30,8 @@
   "type": "module",
   "license": "MIT",
   "bin": {
-    "harnesskit": "bin/harnesskit.js"
+    "harnesskit": "bin/harnesskit.js",
+    "harness-kit": "bin/harnesskit.js"
   },
   "files": [
     "bin",

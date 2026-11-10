@@ -1,4 +1,4 @@
-"""Fable task #359 — task page readability.
+"""Task #359 — task page readability.
 
 The failure banner on a FAILED task must always describe the failure that
 actually parked it. Today:

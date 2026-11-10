@@ -40,7 +40,7 @@ STATUS_SYMBOLS = {
     TaskStatus.FAILED: "x",
     TaskStatus.TODO: ".",
     TaskStatus.BACKLOG: ".",
-    # CANCELED is terminal-neutral (fable task 192): the work item was
+    # CANCELED is terminal-neutral (task 192): the work item was
     # parked by an operator, not by the agent. Surface it with its own
     # glyph so the trace stays legible — distinct from FAILED's 'x'
     # and DONE/REVIEW/TESTING's '+'.

@@ -35,7 +35,7 @@ WARN = "WARN"
 FAIL = "FAIL"
 SKIP = "SKIP"
 
-# The five fable providers. ``cli`` is the default binary; config may override
+# The five supported providers. ``cli`` is the default binary; config may override
 # via ``agents[name].cli_command``. ``auth`` is the cheap credential probe.
 _PROVIDERS: tuple[tuple[str, str], ...] = (
     ("claude", "claude"),
@@ -801,11 +801,11 @@ def run_doctor(
     # --- services ---
     report.checks.append(_check_service_port(
         "services", "backend", backend_port,
-        "sh docs/fable_roadmap/bootstrap/start_services.sh start",
+        "./dev.sh",
     ))
     report.checks.append(_check_service_port(
         "services", "frontend", frontend_port,
-        "sh docs/fable_roadmap/bootstrap/start_services.sh start",
+        "./dev.sh",
     ))
     report.checks.append(_check_celery_default())
     if merge_queue_name:

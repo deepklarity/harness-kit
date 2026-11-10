@@ -18,7 +18,7 @@ Design rules (task #359)
 
 * **One sentence each.** No key:value noise, no log-style brackets, no
   system fingerprint tokens. Every line passes the read-it-aloud test
-  from ``docs/fable_roadmap/TONE.md``.
+  from ``docs/playbook/tone_and_taste.md``.
 * **Honest next step.** A review failure suggests reading the reviewer's
   finding; a quota failure suggests reassignment; a crash suggests
   investigation. We never lie — "Requeue to re-dispatch" was the wrong

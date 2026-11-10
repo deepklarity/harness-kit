@@ -10,7 +10,7 @@ This breadcrumb is the **end-to-end spine**: dispatch → worktree create → sa
 ```
 dag_executor.poll_and_execute()          [Celery-Beat, every DAG_EXECUTOR_POLL_INTERVAL]
   → concurrency gate (EXECUTING count < DAG_EXECUTOR_MAX_CONCURRENCY, default 10)
-  → check_deps(task)  — READY when every dep is in COMPLETED_STATUSES {DONE, TESTING} (REVIEW excluded — fable task 214)
+  → check_deps(task)  — READY when every dep is in COMPLETED_STATUSES {DONE, TESTING} (REVIEW excluded — task 214)
   → atomic IN_PROGRESS → EXECUTING transition (row-locked)
   → _create_task_worktree(task)          [worktree BEFORE dispatch]
   → execute_single_task.delay(task.id, run_token)

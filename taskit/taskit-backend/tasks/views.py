@@ -4170,7 +4170,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             if "status" not in d and d["kanban_target_status"] != task.status:
                 raise ValidationError({"kanban_target_status": "Cannot differ from current status without status update."})
 
-        # CANCELED transition gate (fable task 192). The transition matrix
+        # CANCELED transition gate (task 192). The transition matrix
         # in tasks.state_transitions forbids DONE → CANCELED and direct
         # EXECUTING → CANCELED via PATCH; only the stop_execution endpoint
         # can land an EXECUTING task in CANCELED. EXECUTING is also caught

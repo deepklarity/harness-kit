@@ -53,14 +53,14 @@ class AdvanceToTestingTests(APITestCase):
         super().setUp()
         self.board = self.make_board()
         self.spec = self.make_spec(
-            self.board, odin_id="sp_fable_w5",
-            metadata={"branch": "spec/sp_fable_w5"},
+            self.board, odin_id="sp_roadmap_w5",
+            metadata={"branch": "spec/sp_roadmap_w5"},
         )
 
     def _review_task(self):
         return self.make_task(
             self.board, spec=self.spec, status=TaskStatus.REVIEW,
-            metadata={"branch": "task/sp_fable_w5/205"},
+            metadata={"branch": "task/sp_roadmap_w5/205"},
         )
 
     def test_advance_moves_review_to_testing(self):
@@ -87,7 +87,7 @@ class AdvanceToTestingTests(APITestCase):
 
         task = self.make_task(
             self.board, spec=self.spec, status=TaskStatus.IN_PROGRESS,
-            metadata={"branch": "task/sp_fable_w5/205"},
+            metadata={"branch": "task/sp_roadmap_w5/205"},
         )
 
         _advance_task_to_testing(task)

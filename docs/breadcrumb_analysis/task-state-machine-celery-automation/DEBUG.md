@@ -62,31 +62,13 @@ Decision table after the six checks:
 | Finding | Meaning | Action |
 |---|---|---|
 | `--brief` shows FAILED + `last_failure_reason` | Normal failure path worked | Fix cause, redispatch (IN_PROGRESS via API/UI) |
-| IN_PROGRESS forever, poll log silent | celery beat/worker not running | `./dev.sh` / `sh docs/fable_roadmap/bootstrap/start_services.sh` |
+| IN_PROGRESS forever, poll log silent | celery beat/worker not running | `./dev.sh` |
 | IN_PROGRESS forever, poll running | no assignee, deps not DONE/TESTING, or slots full | `task_inspect.py --sections basic,deps`; assign or fix upstream |
-| EXECUTING, trace growing | it's just working | background `watch_task.sh`, do something else |
+| EXECUTING, trace growing | it's just working | `odin logs -f <id>`, do something else |
 | EXECUTING, no PID/VM, trace frozen | run died silently | wait ≤120s for stale recovery → FAILED with reason |
 | REVIEW, no reflection comment | reflection PENDING/RUNNING/FAILED | `reflection_inspect.py <report_id>`; reflect log in [4]; re-drive via `POST /tasks/:id/reflect/` |
 | REVIEW, `merge_status=conflict\|error` | merge gate parked it (by design) | resolve in spec branch, then reflect again to re-drive merge |
 | Status flipped with no comment/history | someone did a raw ORM write | that's the bug — re-drive via API (DETAILS.md §12) |
-
-## watch_task.sh — the slow watcher (use AFTER fast checks)
-
-`docs/fable_roadmap/bootstrap/watch_task.sh <task_id> [max_wait_secs]` (default budget 2400s). Run it BACKGROUNDED from repo root after the fast checks say "still working" — it is a wake-me-on-change monitor, not a first-response tool.
-
-Samples with exponential backoff (5s → 10s → 20s → … → 120s cap; fast early samples catch config/boot deaths in the first ~30s), one heartbeat line per sample (`status/vm/cpu/trace-bytes/head/dirty`), and exits the moment anything meaningful changes. Signals sampled: task status (`task_inspect.py --json --sections basic`), trace size (`.odin/logs/task_<id>.trace.jsonl`), worktree HEAD+dirt, microVM liveness (`pgrep "microsandbox sandbox"`), microVM CPU time.
-
-Exit reasons (last stdout line, machine-scannable):
-
-| Exit line | Meaning | Your next move |
-|---|---|---|
-| `WATCH_EXIT: terminal-status <S>` | left EXECUTING/IN_PROGRESS | run fast check [0] on the new status |
-| `WATCH_EXIT: new-commit <sha>` | agent committed in its worktree | progress — inspect commit, keep watching if mid-task |
-| `WATCH_EXIT: vm-gone` | no microVM process left | fast checks [0]+[3]: done, or crashed (stale recovery will land) |
-| `WATCH_EXIT: stalled` | CPU AND trace frozen 3 samples | run is dead-hung: fast check [6], then stop_execution |
-| `WATCH_EXIT: max-wait <secs>` | budget exhausted, still running | raise budget or investigate via [3]/[6] |
-
-When to use which: fast checks = anything already failed/stuck/suspicious (answer in <60s). watch_task.sh = a healthy long-running dispatch you want to be woken up about. Never foreground-sleep instead of either.
 
 ## Log locations
 

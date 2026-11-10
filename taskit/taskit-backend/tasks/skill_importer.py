@@ -222,7 +222,7 @@ def classify_skill_relevance(skill_data: dict[str, Any]) -> dict[str, Any]:
             "architecture-review", "arch-audit", "security-audit", "performance-audit",
             "ui-gaps-analysis", "website-ux-audit", "web-app-ui-validation",
             "mobile-app-ui-validation", "test-case-audit", "hygiene-audit",
-            "prompt-quality-audit", "prompt-comparison-audit", "roadmap-audit",
+            "prompt-quality-audit", "prompt-comparison-audit",
             "autolint", "forensic audit"
         ))
 
